@@ -1,0 +1,30 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Runtime data directory (stacks/builds/client), created at the repo root.
+# Leading slash anchors it to the repo root so it never matches source folders such as
+# backend/AzerothPlatform.Infrastructure/Data/ or frontend-armory/src/armory/data/ (a bare
+# "data/" is matched case-insensitively on macOS, silently dropping tracked source files).
+/data/
+
+# Planning and analysis documents
+plan/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# .NET build artifacts
+**/bin/
+**/obj/
+**/publish/

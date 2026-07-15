@@ -1,0 +1,6 @@
+{
+  "serverUrl": "https://play.myrealm.example",
+  "stackId": "",
+  "brandingTitle": "My Realm Launcher",
+  "defaultInstallSubfolder": "MyRealm-WoW"
+}

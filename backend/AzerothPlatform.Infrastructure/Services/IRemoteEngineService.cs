@@ -1,0 +1,147 @@
+using AzerothPlatform.Core.Contracts;
+using AzerothPlatform.Infrastructure.Data.Entities;
+
+namespace AzerothPlatform.Infrastructure.Services;
+
+/// <summary>
+/// Manages Docker "engine" access for stacks. For external (remote) stacks this is an SSH connection
+/// layer (on-disk private key, ssh config Host alias, docker context over SSH); for local stacks the
+/// engine is the manager's own daemon. The volume/tool helpers work against both: they resolve an
+/// empty context for local and <c>--context {name}</c> for external, so callers use one code path
+/// regardless of deployment target.
+/// </summary>
+public interface IRemoteEngineService
+{
+    /// <summary>
+    /// Resolves the docker <c>--context</c> argument for a stack's engine: an empty string for local
+    /// stacks (the manager's own daemon) or <c>"--context {name} "</c> (trailing space included) for
+    /// external stacks, ensuring the context exists first.
+    /// </summary>
+    Task<string> ContextArgAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a named volume on the stack's engine (best-effort).</summary>
+    Task RemoveVolumeAsync(ManagedStackEntity stack, string volumeName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs a one-shot tool container on the stack's engine with a single work volume mounted at
+    /// <c>/work</c>: seeds the work volume from <paramref name="localWorkDir"/>, runs the image with
+    /// <paramref name="toolArgs"/> passed to its entrypoint, then fetches the (possibly mutated) work
+    /// volume back into <paramref name="localWorkDir"/>. The throwaway volume is removed afterwards. This
+    /// is the engine-agnostic replacement for <c>docker run -v {hostWorkDir}:/work {image} {toolArgs}</c>.
+    /// </summary>
+    Task<(int ExitCode, string StdOut, string StdErr)> RunToolWithWorkVolumeAsync(
+        ManagedStackEntity stack,
+        string localWorkDir,
+        string image,
+        string toolArgs,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetches only a subdirectory of a named volume (<c>/{subdir}</c>) back into a local directory by
+    /// streaming a tar. Works for both local and external engines. Used to pull a targeted slice (e.g.
+    /// the live <c>dbc/</c> set) without transferring the whole volume.
+    /// </summary>
+    Task FetchVolumeSubdirAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string subdir,
+        string localDestinationDir,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>The docker context name used for a given stack (e.g. <c>acore-ext-{id}</c>).</summary>
+    string GetContextName(string stackId);
+
+    /// <summary>
+    /// Ensures the SSH key, ssh config alias, and docker context exist and are current for an external
+    /// stack. Returns the docker context name so callers can pass <c>--context</c> to docker commands.
+    /// </summary>
+    Task<string> EnsureContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes the docker context, ssh alias, and key material for a stack (best-effort).</summary>
+    Task RemoveContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default);
+
+    /// <summary>Probes the remote Docker engine using the supplied connection details (pre-create test).</summary>
+    Task<RemoteConnectionTestResultDto> TestConnectionAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Streams a local image (by tag) to the stack's remote engine via <c>docker save | docker load</c>.</summary>
+    Task ShipImageAsync(ManagedStackEntity stack, string imageTag, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates the named volume on the stack's engine (if missing) and populates it with the contents of
+    /// a local directory. External stacks stream a tar over SSH; local stacks prefer a fast daemon-side
+    /// volume-to-volume copy when the source lives inside the manager's data volume, otherwise a local
+    /// tar stream. Existing content in the volume is left in place (files are overwritten, not purged).
+    /// </summary>
+    Task SeedVolumeAsync(ManagedStackEntity stack, string volumeName, string localSourceDir, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes specific relative paths from within a named volume on the stack's engine (best-effort).
+    /// Needed because <see cref="SeedVolumeAsync"/> is additive (it overwrites but never purges), so a
+    /// file removed from the local source is not removed from the volume by a re-seed alone. Paths are
+    /// relative to the volume root (e.g. <c>Data/patch-G.MPQ</c>); traversal/absolute paths are ignored.
+    /// </summary>
+    Task DeleteVolumePathsAsync(ManagedStackEntity stack, string volumeName, IEnumerable<string> relativePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Seeds a named volume on the LOCAL daemon (no stack/context) from a local directory. Used for
+    /// shared, stack-independent volumes such as the base WoW client. Existing content is overwritten,
+    /// not purged.
+    /// </summary>
+    Task SeedLocalVolumeAsync(string volumeName, string localSourceDir, CancellationToken cancellationToken = default);
+
+    /// <summary>Fetches a named volume on the LOCAL daemon (no stack/context) back into a local directory.</summary>
+    Task FetchLocalVolumeAsync(string volumeName, string localDestinationDir, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a named volume on the LOCAL daemon (no stack/context); best-effort.</summary>
+    Task RemoveLocalVolumeAsync(string volumeName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Extracts the contents of a directory inside a built image into a local directory using
+    /// <c>docker create</c> + <c>docker cp</c> on the LOCAL daemon (stack images are built locally before
+    /// being shipped to any remote engine, so they are always present locally at build time). Returns
+    /// false when the image or path is unavailable; best-effort and does not throw.
+    /// </summary>
+    Task<bool> ExtractImageDirAsync(string image, string imagePath, string localDestinationDir, CancellationToken cancellationToken = default);
+
+    /// <summary>True when the named volume already exists on the stack's engine (local or remote).</summary>
+    Task<bool> VolumeExistsAsync(ManagedStackEntity stack, string volumeName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recursively sets ownership of a named volume's contents to <paramref name="uid"/>:<paramref name="gid"/>
+    /// on the stack's engine (best-effort). Docker creates named volumes root-owned, but the AzerothCore
+    /// services run as a non-root uid and must be able to write their config/logs into the etc/logs
+    /// volumes, so those are chowned to the service uid before the stack starts.
+    /// </summary>
+    Task SetVolumeOwnershipAsync(ManagedStackEntity stack, string volumeName, int uid, int gid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recursively makes a named volume's contents world-readable (<c>chmod -R a+rX</c>) on the stack's
+    /// engine (best-effort). Read-only served volumes (e.g. the armory assets served by nginx as a
+    /// non-root user) must be readable regardless of the serving container's uid; seeded trees can carry
+    /// restrictive source permissions (e.g. 0700 dirs from macOS), which would otherwise 403/deny reads.
+    /// </summary>
+    Task SetVolumeWorldReadableAsync(ManagedStackEntity stack, string volumeName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copies the contents of a named volume back to a local directory by streaming a tar (the inverse
+    /// of <see cref="SeedVolumeAsync"/>). Works for both local and external engines. Used to retrieve
+    /// build artifacts (e.g. the launcher exe) or a live baseline (e.g. server DBCs) from a volume.
+    /// </summary>
+    Task FetchVolumeAsync(ManagedStackEntity stack, string volumeName, string localDestinationDir, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copies a host-visible file into a path inside a running container (best-effort; no-op when the
+    /// container is not running or the source file is missing).
+    /// </summary>
+    Task CopyFileToContainerAsync(
+        ManagedStackEntity stack,
+        string containerName,
+        string localSourcePath,
+        string containerDestinationPath,
+        CancellationToken cancellationToken = default);
+}

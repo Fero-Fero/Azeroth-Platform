@@ -1,0 +1,191 @@
+/* Account page — guild window (classic WotLK-inspired sub-tabs). */
+
+.account-guild-window {
+	margin-top: 0.5rem;
+}
+
+.account-guild-header-block {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem 1.5rem;
+	align-items: center;
+	margin-bottom: 1rem;
+	padding-bottom: 1rem;
+	border-bottom: 1px solid var(--armory-border);
+}
+
+.account-guild-header-block .emblem-container {
+	flex-shrink: 0;
+}
+
+.account-guild-header-block .info {
+	flex: 1;
+	min-width: 12rem;
+}
+
+.account-guild-header-block .char-name {
+	color: var(--armory-heading);
+	margin-bottom: 0.35rem;
+}
+
+.account-guild-header-block .faction {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	margin-top: 0.35rem;
+	color: var(--armory-text-muted);
+}
+
+.account-guild-header-block .faction .logo {
+	height: 28px;
+}
+
+.account-guild-subtabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	margin-bottom: 1rem;
+	padding: 0.35rem;
+	background: color-mix(in srgb, var(--armory-panel) 80%, var(--armory-secondary));
+	border: 1px solid var(--armory-border);
+	border-radius: 4px;
+}
+
+.account-guild-subtab {
+	color: var(--armory-text-muted);
+	text-decoration: none;
+	padding: 0.4rem 0.85rem;
+	border-radius: 3px;
+	font-weight: bold;
+	font-size: 0.85rem;
+	border: 1px solid transparent;
+}
+
+.account-guild-subtab:hover {
+	color: var(--armory-link);
+}
+
+.account-guild-subtab.is-active {
+	color: var(--armory-heading);
+	background: var(--armory-panel);
+	border-color: var(--armory-border-bright);
+}
+
+.account-guild-subtab.is-disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+	pointer-events: none;
+}
+
+.account-guild-roster {
+	margin-top: 0.5rem;
+}
+
+.account-guild-roster #account-guild-members_processing {
+	min-height: 4rem;
+}
+
+.account-guild-bank-placeholder {
+	padding: 1.5rem 1rem;
+	text-align: center;
+	color: var(--armory-text-muted);
+	border: 1px dashed var(--armory-border);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--armory-panel) 70%, transparent);
+}
+
+.account-guild-footer {
+	margin-top: 1rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem 1rem;
+	align-items: center;
+}
+.account-bank-money {
+	margin-top: 0.35rem;
+	color: var(--armory-heading);
+	font-weight: bold;
+}
+.account-bank-money .coin {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	margin: 0 0.15rem 0 0.1rem;
+	vertical-align: -2px;
+	background-size: contain;
+	background-repeat: no-repeat;
+}
+.account-bank-money .coin.gold {
+	background-image: url("../img/money/gold.gif");
+}
+.account-bank-money .coin.silver {
+	background-image: url("../img/money/silver.gif");
+}
+.account-bank-money .coin.copper {
+	background-image: url("../img/money/copper.gif");
+}
+.account-bank-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-bottom: 0.75rem;
+}
+.account-bank-tab {
+	display: inline-flex;
+	padding: 0.2rem;
+	border: 1px solid var(--armory-border);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--armory-panel) 80%, var(--armory-secondary));
+}
+.account-bank-tab.is-active {
+	border-color: var(--armory-accent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--armory-accent) 50%, transparent);
+}
+.account-bank-tab img {
+	width: 28px;
+	height: 28px;
+	display: block;
+	border-radius: 2px;
+}
+.account-bank-grid {
+	display: grid;
+	grid-template-columns: repeat(14, 44px);
+	gap: 4px;
+	margin-bottom: 0.75rem;
+}
+.account-bank-slot {
+	width: 44px;
+	height: 44px;
+}
+.account-bank-slot--empty {
+	border: 1px solid color-mix(in srgb, var(--armory-border) 50%, transparent);
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--armory-input) 80%, transparent);
+}
+.account-bank-tab-text {
+	margin: 0;
+	color: var(--armory-text-muted);
+	font-size: 0.85rem;
+}
+.account-guild-info {
+	display: grid;
+	gap: 1rem;
+	margin-top: 0.5rem;
+}
+.account-guild-info-block {
+	padding: 0.85rem 1rem;
+	border: 1px solid var(--armory-border);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--armory-panel) 75%, transparent);
+}
+.account-guild-info-title {
+	margin: 0 0 0.5rem;
+	color: var(--armory-heading);
+	font-size: 0.95rem;
+}
+.account-guild-info-text {
+	margin: 0;
+	white-space: pre-wrap;
+	line-height: 1.5;
+	color: var(--armory-text);
+}

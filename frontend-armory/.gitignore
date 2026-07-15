@@ -1,0 +1,55 @@
+# Dependency directories
+node_modules/
+
+# Downloaded armory assets: static web assets plus the heavy model-viewer data
+# (mo3/meta/bone/textures) and DBC datasets. Provided via the release page and baked into the armory
+# image at build time, never committed. Anchored to this folder's root so it does not match source
+# directories like src/armory/data/.
+# Exception: the small, curated progression dataset (static/data/progression) may be committed here as a
+# dev/default fallback; per-stack uploads via armory.data.zip (progression/ folder) take precedence at runtime.
+/static/*
+!/static/index.hbs
+!/static/layout.hbs
+!/static/map.hbs
+!/static/login.hbs
+!/static/register.hbs
+!/static/verify-email-pending.hbs
+!/static/verify-email.hbs
+!/static/choose-username.hbs
+!/static/account.hbs
+!/static/partials/
+/static/partials/*
+!/static/partials/widget-*.hbs
+!/static/partials/layout-grid.hbs
+!/static/partials/armory-navbar.hbs
+!/static/partials/datatables.hbs
+!/static/partials/emblems.hbs
+!/static/partials/character-header.hbs
+!/static/partials/character-subnav.hbs
+!/static/partials/character-overview-cards.hbs
+!/static/partials/stat-panel.hbs
+!/static/partials/icons.hbs
+!/static/css/
+/static/css/*
+!/static/css/theme.css
+!/static/css/account.css
+!/static/css/guild.css
+!/static/css/emblems.css
+!/static/css/icons.css
+!/static/css/azp-responsive.css
+!/static/data/
+/static/data/*
+!/static/data/progression/
+
+# Build directory
+build/
+
+# Configuration
+config.json
+.env
+
+# Log files
+*.log
+
+# IDEs
+.vscode/

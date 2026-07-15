@@ -1,0 +1,22 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AzerothPlatform.Launcher.App"
+             RequestedThemeVariant="Dark">
+
+  <Application.Resources>
+    <!-- Warm gold default accent (armory-style). A server style template can still override these
+         at runtime via ApplyAccentColor, but the launcher chrome stays brown/gold by default. -->
+    <Color x:Key="SystemAccentColor">#F0C869</Color>
+    <Color x:Key="SystemAccentColorLight1">#F5D488</Color>
+    <Color x:Key="SystemAccentColorLight2">#F9E0A6</Color>
+    <Color x:Key="SystemAccentColorLight3">#FCEBC4</Color>
+    <Color x:Key="SystemAccentColorDark1">#C8A24B</Color>
+    <Color x:Key="SystemAccentColorDark2">#A07E35</Color>
+    <Color x:Key="SystemAccentColorDark3">#785B22</Color>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+
+</Application>

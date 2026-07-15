@@ -1,0 +1,249 @@
+import { useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { Upload, Trash2, Pencil, Loader2, X } from 'lucide-react'
+import type { PatchFileDto } from '@/types/patch.types'
+
+interface PatchFileCategoryProps {
+  title: string
+  category: string
+  accept?: string
+  files: PatchFileDto[]
+  disabled?: boolean
+  uploading?: boolean
+  notice?: ReactNode
+  /**
+   * When true, the user is prompted for a per-file description after selecting files, before the
+   * upload proceeds. Each entry in the descriptions array matches the file at the same index.
+   */
+  requireDescription?: boolean
+  /** Inline error shown right by the upload field (e.g. a failed upload). */
+  error?: string | null
+  onUpload: (category: string, files: File[], descriptions?: string[]) => void | Promise<void>
+  onDelete: (category: string, fileName: string) => void
+  onEdit?: (fileName: string) => void
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`
+}
+
+export default function PatchFileCategory({
+  title,
+  category,
+  accept,
+  files,
+  disabled,
+  uploading,
+  notice,
+  requireDescription,
+  error,
+  onUpload,
+  onDelete,
+  onEdit,
+}: PatchFileCategoryProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragOver, setDragOver] = useState(false)
+  // Files awaiting a per-file description before upload (when requireDescription is set).
+  const [pending, setPending] = useState<{ file: File; description: string }[] | null>(null)
+
+  const uploadBlocked = disabled || uploading
+
+  const startUpload = (fileList: FileList | File[]) => {
+    const arr = Array.from(fileList)
+    if (arr.length === 0) return
+    if (requireDescription) {
+      // Prompt for each file's description before uploading anything.
+      setPending(arr.map((file) => ({ file, description: '' })))
+      return
+    }
+    onUpload(category, arr)
+  }
+
+  const confirmPending = () => {
+    if (!pending) return
+    const files = pending.map((p) => p.file)
+    const descriptions = pending.map((p) => p.description.trim())
+    setPending(null)
+    onUpload(category, files, descriptions)
+  }
+
+  const pendingReady = !!pending && pending.every((p) => p.description.trim().length > 0)
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (uploadBlocked) return
+    if (e.dataTransfer.files?.length) {
+      startUpload(e.dataTransfer.files)
+    }
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+          {title} <span className="text-gray-400 font-normal">({files.length})</span>
+          {uploading && (
+            <span className="inline-flex items-center gap-1 text-xs font-normal text-blue-600">
+              <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
+            </span>
+          )}
+        </h4>
+      </div>
+
+      {notice && (
+        <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {notice}
+        </div>
+      )}
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (!uploadBlocked) setDragOver(true)
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => !uploadBlocked && inputRef.current?.click()}
+        className={`flex items-center justify-center gap-2 py-3 rounded-md border-2 border-dashed text-sm transition-colors ${
+          uploadBlocked
+            ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+            : dragOver
+            ? 'border-blue-400 bg-blue-50 text-blue-600 cursor-pointer'
+            : 'border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-500 cursor-pointer'
+        }`}
+      >
+        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        <span>
+          {uploading
+            ? 'Uploading, please wait...'
+            : `Drop files or click to upload${accept ? ` (${accept})` : ''} — up to 8 GB`}
+        </span>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={accept}
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) startUpload(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <ul className="mt-3 divide-y divide-gray-100">
+          {files.map((file) => (
+            <li key={file.name} className="flex items-start justify-between py-1.5 text-sm">
+              <div className="min-w-0 mr-2">
+                <span className="font-mono truncate block">{file.name}</span>
+                {file.description && (
+                  <span className="text-xs text-gray-500 block whitespace-pre-wrap">{file.description}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="text-xs text-gray-400">{formatBytes(file.size)}</span>
+                {onEdit && (
+                  <button
+                    onClick={() => onEdit(file.name)}
+                    className="text-gray-400 hover:text-blue-600"
+                    title="Edit"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => onDelete(category, file.name)}
+                  disabled={disabled}
+                  className="text-gray-400 hover:text-red-600 disabled:opacity-30"
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {pending && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <h3 className="font-semibold text-gray-800">
+                Describe {pending.length === 1 ? 'the file' : `${pending.length} files`} before uploading
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className="text-gray-400 hover:text-gray-600"
+                title="Cancel"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[60vh] overflow-y-auto px-4 py-3 space-y-4">
+              <p className="text-xs text-gray-500">
+                A description is required for each file. It's stored alongside the file and shown in
+                this list.
+              </p>
+              {pending.map((p, i) => (
+                <div key={`${p.file.name}-${i}`}>
+                  <label className="mb-1 flex items-center justify-between text-sm font-medium text-gray-700">
+                    <span className="font-mono truncate mr-2">{p.file.name}</span>
+                    <span className="shrink-0 text-xs font-normal text-gray-400">{formatBytes(p.file.size)}</span>
+                  </label>
+                  <textarea
+                    value={p.description}
+                    autoFocus={i === 0}
+                    onChange={(e) =>
+                      setPending((cur) =>
+                        cur ? cur.map((x, idx) => (idx === i ? { ...x, description: e.target.value } : x)) : cur
+                      )
+                    }
+                    rows={2}
+                    placeholder="Describe what this file contains (required), e.g. custom loading screens + interface art."
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!pendingReady}
+                onClick={confirmPending}
+                className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                Upload {pending.length > 1 ? `${pending.length} files` : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

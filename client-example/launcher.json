@@ -1,0 +1,8 @@
+{
+  "brandingTitle": "My AzerothCore Realm",
+  "clientVersion": "3.3.5a (12340)",
+  "gameExecutable": "Wow.exe",
+  "launchArguments": "",
+  "realmlistHost": "127.0.0.1",
+  "realmlistPort": 3724
+}

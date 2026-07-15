@@ -1,0 +1,27 @@
+<div class="armory-panel">
+	<div class="panel-title">Get the Launcher</div>
+	<div class="panel-body">
+		<div class="connect-hero">
+			<p>Download the launcher to install the game client, keep it up to date, and jump straight into {{realmName}}.</p>
+		</div>
+		<div class="connect-actions">
+			{{#if downloadAvailable}}
+			<a class="btn-download" href="{{downloadUrl}}">Download Launcher</a>
+			{{else}}
+			<span class="btn-download is-disabled" title="The launcher has not been built yet">Launcher not available yet</span>
+			{{/if}}
+		</div>
+	</div>
+</div>
+
+<div class="armory-panel">
+	<div class="panel-title">How to Connect</div>
+	<div class="panel-body">
+		<ol class="connect-steps">
+			<li>Download and run the launcher above.</li>
+			<li>Choose your install location and let it download the game client.</li>
+			<li>Pick the <strong>{{realmName}}</strong> profile in the launcher.</li>
+			<li>Press <strong>Play</strong> and create your account in-game if needed.</li>
+		</ol>
+	</div>
+</div>

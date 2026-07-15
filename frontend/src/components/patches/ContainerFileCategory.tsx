@@ -1,0 +1,387 @@
+import { useEffect, useRef, useState } from 'react'
+import { Upload, Trash2, Pencil, Loader2, FolderPlus, Folder, FileText } from 'lucide-react'
+import type { PatchFileDto } from '@/types/patch.types'
+
+interface ContainerFileCategoryProps {
+  title: string
+  /** Accept filter for file inputs (e.g. ".sql", ".txt,.csv"); omit for any file (maps). */
+  accept?: string
+  files: PatchFileDto[]
+  disabled?: boolean
+  uploading?: boolean
+  /** Inline error shown right by the upload field (e.g. a failed upload). */
+  error?: string | null
+  /** Upload files, each with a relative path (optionally one container sub-folder). */
+  onUploadItems: (items: { file: File; path: string }[]) => void | Promise<void>
+  /** Delete by relative name (e.g. "gems/Item.csv" or "Spell.csv"). */
+  onDelete: (fileName: string) => void
+  /** Optional inline editor (DBC only). */
+  onEdit?: (fileName: string) => void
+}
+
+type UploadItem = { file: File; path: string }
+
+/** Reads all entries from a directory reader (readEntries returns them in batches). */
+function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => {
+    const all: FileSystemEntry[] = []
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (batch.length === 0) {
+          resolve(all)
+        } else {
+          all.push(...batch)
+          readBatch()
+        }
+      }, reject)
+    }
+    readBatch()
+  })
+}
+
+/** Recursively walks a dropped file/directory entry, building relative paths (e.g. "gems/Item.csv"). */
+async function walkEntry(entry: FileSystemEntry, prefix: string, out: UploadItem[]): Promise<void> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) =>
+      (entry as FileSystemFileEntry).file(resolve, reject)
+    )
+    out.push({ file, path: prefix + entry.name })
+  } else if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader()
+    const children = await readAllEntries(reader)
+    for (const child of children) {
+      await walkEntry(child, `${prefix}${entry.name}/`, out)
+    }
+  }
+}
+
+/**
+ * Collects dropped items, preserving folder structure via the entries API (dropped folders are not
+ * present in dataTransfer.files). Entry handles must be captured synchronously during the drop.
+ */
+async function collectDropItems(dataTransfer: DataTransfer): Promise<UploadItem[]> {
+  const list = dataTransfer.items
+  const supportsEntries = list && list.length > 0 && typeof list[0].webkitGetAsEntry === 'function'
+
+  if (supportsEntries) {
+    const entries: FileSystemEntry[] = []
+    for (let i = 0; i < list.length; i++) {
+      const entry = list[i].webkitGetAsEntry()
+      if (entry) entries.push(entry)
+    }
+    const out: UploadItem[] = []
+    for (const entry of entries) {
+      await walkEntry(entry, '', out)
+    }
+    return out
+  }
+
+  return Array.from(dataTransfer.files).map((f) => ({ file: f, path: f.name }))
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`
+}
+
+/** Only text DBC sources (CSV/.txt) can be edited inline; a binary .dbc upload cannot. */
+function isTextEditable(fileName: string): boolean {
+  const lower = fileName.toLowerCase()
+  return lower.endsWith('.csv') || lower.endsWith('.txt')
+}
+
+function matchesAccept(fileName: string, accept?: string): boolean {
+  if (!accept) return true
+  const exts = accept.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  const lower = fileName.toLowerCase()
+  return exts.some((ext) => lower.endsWith(ext))
+}
+
+export default function ContainerFileCategory({
+  title,
+  accept,
+  files,
+  disabled,
+  uploading,
+  error,
+  onUploadItems,
+  onDelete,
+  onEdit,
+}: ContainerFileCategoryProps) {
+  const rootInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const containerInputRef = useRef<HTMLInputElement>(null)
+  const [containerTarget, setContainerTarget] = useState<string | null>(null)
+  const [dragRoot, setDragRoot] = useState(false)
+  const [dragContainer, setDragContainer] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (folderInputRef.current) {
+      folderInputRef.current.setAttribute('webkitdirectory', '')
+      folderInputRef.current.setAttribute('directory', '')
+    }
+  }, [])
+
+  // Group into root-level files and one-level containers.
+  const rootFiles: PatchFileDto[] = []
+  const containers = new Map<string, PatchFileDto[]>()
+  for (const file of files) {
+    const slash = file.name.indexOf('/')
+    if (slash === -1) {
+      rootFiles.push(file)
+    } else {
+      const sub = file.name.slice(0, slash)
+      ;(containers.get(sub) ?? containers.set(sub, []).get(sub)!).push(file)
+    }
+  }
+  const existing = new Set(files.map((f) => f.name))
+
+  const submit = async (items: UploadItem[]) => {
+    if (items.length === 0) {
+      window.alert(`No ${accept ? accept + ' ' : ''}files were found in the selection.`)
+      return
+    }
+
+    const tooDeep = items.filter((i) => i.path.split('/').filter(Boolean).length > 2)
+    if (tooDeep.length > 0) {
+      window.alert(
+        'Only one level of folders is allowed. These are nested too deep:\n\n' +
+          tooDeep.map((i) => i.path).join('\n') +
+          '\n\nFlatten so each file sits directly inside a single container folder.'
+      )
+      return
+    }
+
+    const clashes = items.filter((i) => existing.has(i.path))
+    if (clashes.length > 0) {
+      const ok = window.confirm(
+        'The following file(s) already exist and will be overwritten:\n\n' +
+          clashes.map((i) => i.path).join('\n') +
+          '\n\nContinue?'
+      )
+      if (!ok) return
+    }
+
+    await onUploadItems(items)
+  }
+
+  const toItems = (list: FileList | File[], pathFor: (f: File) => string) =>
+    Array.from(list)
+      .filter((f) => matchesAccept(f.name, accept))
+      .map((f) => ({ file: f, path: pathFor(f) }))
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-gray-800">
+          {title} <span className="text-gray-400 font-normal">({files.length})</span>
+        </h4>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => folderInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 disabled:opacity-40"
+        >
+          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderPlus className="w-4 h-4" />}
+          Upload folder
+        </button>
+      </div>
+
+      <p className="text-xs text-gray-500 mb-3">
+        Files can sit at the root or inside a single container folder. Upload a folder (or drop
+        folders) to create containers; nested sub-folders aren't allowed.
+      </p>
+
+      {/* Root drop zone */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (!disabled) setDragRoot(true)
+        }}
+        onDragLeave={() => setDragRoot(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragRoot(false)
+          if (disabled) return
+          collectDropItems(e.dataTransfer).then((items) =>
+            submit(items.filter((i) => matchesAccept(i.file.name, accept)))
+          )
+        }}
+        onClick={() => !disabled && rootInputRef.current?.click()}
+        className={`flex items-center justify-center gap-2 py-3 rounded-md border-2 border-dashed cursor-pointer text-sm transition-colors ${
+          disabled
+            ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+            : dragRoot
+            ? 'border-blue-400 bg-blue-50 text-blue-600'
+            : 'border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-500'
+        }`}
+      >
+        <Upload className="w-4 h-4" />
+        <span>Drop files or folders here{accept ? ` (${accept})` : ''}</span>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* Hidden inputs */}
+      <input
+        ref={rootInputRef}
+        type="file"
+        multiple
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) submit(toItems(e.target.files, (f) => f.name))
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) {
+            submit(toItems(e.target.files, (f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name))
+          }
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={containerInputRef}
+        type="file"
+        multiple
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const target = containerTarget
+          if (target && e.target.files?.length) {
+            submit(toItems(e.target.files, (f) => `${target}/${f.name}`))
+          }
+          e.target.value = ''
+          setContainerTarget(null)
+        }}
+      />
+
+      {/* Root files */}
+      {rootFiles.length > 0 && (
+        <ul className="mt-3 divide-y divide-gray-100">
+          {rootFiles.map((file) => (
+            <FileRow key={file.name} file={file} label={file.name} disabled={disabled} onDelete={onDelete} onEdit={onEdit} />
+          ))}
+        </ul>
+      )}
+
+      {/* Containers */}
+      {[...containers.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([sub, subFiles]) => (
+          <div
+            key={sub}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (!disabled) setDragContainer(sub)
+            }}
+            onDragLeave={() => setDragContainer((cur) => (cur === sub ? null : cur))}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragContainer(null)
+              if (disabled) return
+              // Drop into a container: prefix the container name; a dropped folder becomes too deep
+              // (container/sub/file) and is rejected by the guard.
+              collectDropItems(e.dataTransfer).then((items) =>
+                submit(
+                  items
+                    .filter((i) => matchesAccept(i.file.name, accept))
+                    .map((i) => ({ file: i.file, path: `${sub}/${i.path}` }))
+                )
+              )
+            }}
+            className={`mt-3 rounded-md border bg-gray-50 transition-colors ${
+              dragContainer === sub ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
+            }`}
+          >
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <Folder className="w-4 h-4 text-amber-500" />
+                {sub}
+                <span className="text-gray-400 font-normal">({subFiles.length})</span>
+              </span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  setContainerTarget(sub)
+                  containerInputRef.current?.click()
+                }}
+                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-40"
+              >
+                <Upload className="w-3.5 h-3.5" /> Add files
+              </button>
+            </div>
+            <ul className="divide-y divide-gray-100 px-3">
+              {subFiles.map((file) => (
+                <FileRow
+                  key={file.name}
+                  file={file}
+                  label={file.name.slice(sub.length + 1)}
+                  disabled={disabled}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                />
+              ))}
+            </ul>
+            <p className="px-3 py-1.5 text-[11px] text-gray-400">Drop files here to add to this container.</p>
+          </div>
+        ))}
+    </div>
+  )
+}
+
+function FileRow({
+  file,
+  label,
+  disabled,
+  onDelete,
+  onEdit,
+}: {
+  file: PatchFileDto
+  label: string
+  disabled?: boolean
+  onDelete: (fileName: string) => void
+  onEdit?: (fileName: string) => void
+}) {
+  return (
+    <li className="flex items-center justify-between py-1.5 text-sm">
+      <span className="inline-flex items-center gap-1.5 font-mono truncate mr-2">
+        <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+        {label}
+      </span>
+      <div className="flex items-center gap-3 shrink-0">
+        <span className="text-xs text-gray-400">{formatBytes(file.size)}</span>
+        {onEdit && isTextEditable(file.name) && (
+          <button onClick={() => onEdit(file.name)} className="text-gray-400 hover:text-blue-600" title="Edit">
+            <Pencil className="w-4 h-4" />
+          </button>
+        )}
+        <button
+          onClick={() => onDelete(file.name)}
+          disabled={disabled}
+          className="text-gray-400 hover:text-red-600 disabled:opacity-30"
+          title="Delete"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </li>
+  )
+}

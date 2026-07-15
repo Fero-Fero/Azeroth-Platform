@@ -1,0 +1,19 @@
+<nav class="char-subnav">
+	<a class="char-subnav-tab {{#if (eq page "overview")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}">Overview</a>
+	<a class="char-subnav-tab {{#if (eq page "talents")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/talents">Talents</a>
+	{{#if trackingEnabled}}
+	<a class="char-subnav-tab {{#if (or (eq page "progression") (eq page "records"))}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/{{trackingDefaultPage}}">Tracking</a>
+	{{/if}}
+	<a class="char-subnav-tab {{#if (eq page "pvp")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/pvp">PvP</a>
+	<a class="char-subnav-tab {{#if (eq page "reputation")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/reputation">Reputation</a>
+	<a class="char-subnav-tab {{#if (eq page "quests")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/quests">Quests</a>
+	<a class="char-subnav-tab {{#if (eq page "achievements")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/achievements">Achievements</a>
+	<a class="char-subnav-tab {{#if (eq page "skills")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/skills">Skills</a>
+	<a class="char-subnav-tab {{#if (eq page "mounts")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/mounts">Mounts</a>
+	{{#if (gt companionCount 0)}}
+	<a class="char-subnav-tab {{#if (eq page "companions")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/companions">Companions</a>
+	{{/if}}
+	{{#if (and (eq classId 3) hasPets)}}
+	<a class="char-subnav-tab {{#if (eq page "pets")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/pets">Pets</a>
+	{{/if}}
+</nav>

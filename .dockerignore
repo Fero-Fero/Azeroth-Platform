@@ -1,0 +1,70 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build outputs
+**/bin/
+**/obj/
+**/dist/
+**/node_modules/
+**/build/
+
+# Test outputs
+**/TestResults/
+**/*.trx
+
+# Frontend
+frontend/.next/
+frontend/.nuxt/
+frontend/coverage/
+frontend/.env.local
+frontend/.env.*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Backend
+backend/**/*.db
+backend/**/*.db-shm
+backend/**/*.db-wal
+backend/**/data/
+
+# Docker
+docker-compose.override.yml
+
+# Folders not needed by the manager image.
+# data/ holds stacks + the manager DB.
+# launcher/ IS needed: its source is baked into the image (COPY launcher/ ./launcher-src/) so the
+# launcher-build sidecar can cross-publish the desktop launcher. Its bin/obj are still ignored above.
+# wdbx/ + mpqtool/ ARE needed: their sources are baked in (COPY wdbx/ ./wdbx-src/, COPY mpqtool/
+# ./mpqtool-src/) so the backend can build the DBC/MPQ sidecar images on demand. bin/obj ignored above.
+# client-example/ IS needed: its settings templates are baked in (COPY client-example/ ./client-example/)
+# so each stack's client/settings/ can be seeded with realmlist.wtf.tmpl / Config.wtf.tmpl.
+data/
+
+# frontend-armory/ IS needed (COPY frontend-armory/ ./armory-src/) so the backend can build the
+# per-stack armory image. Keep its source + DBC CSV data (now under static/data), but drop the
+# multi-GB 3D model-viewer assets and logs (the armory works without them; its own .dockerignore
+# drops them too).
+frontend-armory/static/data/mo3/
+frontend-armory/static/data/meta/
+frontend-armory/static/data/bone/
+frontend-armory/static/data/textures/
+frontend-armory/logs/
+frontend-armory/config.json
+
+# OS
+.DS_Store
+Thumbs.db

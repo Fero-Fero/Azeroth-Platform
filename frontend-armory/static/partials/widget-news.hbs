@@ -1,0 +1,25 @@
+{{#if news.length}}
+<div class="armory-panel">
+	<div class="panel-title">{{widgetTitle}}{{#if showViewAll}}<a class="panel-more" href="{{websiteRoot}}/news">View all →</a>{{/if}}</div>
+	<div class="panel-body">
+		<div class="news-list">
+			{{#each news}}
+			<a class="news-card{{#if this.tag}} news-card--{{this.tag}}{{/if}}" href="{{this.url}}">
+				{{#if this.imageUrl}}
+				<div class="news-cover"><img src="{{this.imageUrl}}" alt="{{this.title}}"></div>
+				{{/if}}
+				<div class="news-body">
+					{{#if this.tag}}<span class="news-eyebrow">{{this.tag}}</span>{{/if}}
+					<div class="news-head">
+						<span class="news-title">{{this.title}}</span>
+						{{#if this.date}}<span class="news-date">{{this.date}}</span>{{/if}}
+					</div>
+					{{#if this.excerpt}}<div class="news-excerpt">{{this.excerpt}}</div>{{/if}}
+					<span class="news-readmore">Read more</span>
+				</div>
+			</a>
+			{{/each}}
+		</div>
+	</div>
+</div>
+{{/if}}

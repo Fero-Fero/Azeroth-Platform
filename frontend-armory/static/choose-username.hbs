@@ -1,0 +1,28 @@
+<h1 class="title is-size-1">Choose your username</h1>
+
+<div class="armory-panel auth-panel">
+	<div class="panel-body">
+		{{#if authError}}
+		<div class="auth-error" role="alert">{{authError}}</div>
+		{{/if}}
+		<p class="auth-copy">
+			Your email <strong>{{email}}</strong> is verified. Pick the account name you will use in the WoW client.
+		</p>
+		<form class="auth-form" action="{{websiteRoot}}/choose-username" method="post" autocomplete="off">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			<label class="auth-label" for="displayName">Display name</label>
+			<input class="auth-input" id="displayName" name="displayName" type="text" minlength="3" maxlength="32" required value="{{displayName}}">
+			<p class="auth-hint">Your public name on the armory. Must be unique across all players.</p>
+
+			<label class="auth-label" for="username">Account name</label>
+			<input class="auth-input" id="username" name="username" type="text" minlength="3" maxlength="16" required autofocus value="{{username}}">
+			<p class="auth-hint">3-16 characters: letters, numbers, dashes or underscores.</p>
+
+			<label class="auth-label" for="password">Password</label>
+			<input class="auth-input" id="password" name="password" type="password" minlength="{{minPasswordLength}}" maxlength="{{maxPasswordLength}}" required>
+			<p class="auth-hint">Re-enter the password you chose when registering.</p>
+
+			<button class="btn-download auth-submit" type="submit">Create account</button>
+		</form>
+	</div>
+</div>

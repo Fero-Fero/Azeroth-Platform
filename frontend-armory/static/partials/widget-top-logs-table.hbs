@@ -1,0 +1,61 @@
+<div id="top-records-selectors">
+	{{#if (not (equalsLength @root.realms 1))}}
+	<div class="tr-selector">
+		<span class="tr-label">Realm:</span>
+		<div class="select">
+			<select id="select-realm">
+				{{#each @root.realms}}
+				<option>{{this}}</option>
+				{{/each}}
+			</select>
+		</div>
+	</div>
+	{{/if}}
+	<div class="tr-selector">
+		<span class="tr-label">Content:</span>
+		<div class="select">
+			<select id="select-content">
+				<option value="dungeon" selected>Dungeons</option>
+				<option value="raid">Raids</option>
+				<option value="world">World Bosses</option>
+			</select>
+		</div>
+	</div>
+	<div class="tr-selector">
+		<span class="tr-label">Instance:</span>
+		<div class="select">
+			<select id="select-instance"></select>
+		</div>
+	</div>
+	<div class="tr-selector" id="target-selector">
+		<span class="tr-label">Log:</span>
+		<div class="select">
+			<select id="select-target"></select>
+		</div>
+	</div>
+</div>
+
+<div id="size-filter" class="difficulty-switch tr-filter"></div>
+<div id="difficulty-filter" class="difficulty-switch tr-filter"></div>
+
+<h2 id="top-records-heading" class="progression-section-title is-size-4"></h2>
+
+<div class="table-wrapper">
+	<table id="top-records-table" class="armory-table">
+		<thead>
+			<tr>
+				<th class="tr-rank">#</th>
+				<th>Character</th>
+				<th>Guild</th>
+				<th>Class</th>
+				<th>Time</th>
+				<th>Difficulty</th>
+				<th>Group</th>
+				<th>Completions</th>
+				<th>Date</th>
+			</tr>
+		</thead>
+		<tbody></tbody>
+	</table>
+</div>
+<div id="top-records-empty" class="progression-empty" style="display: none;">No recorded times yet for this selection.</div>

@@ -1,0 +1,35 @@
+<div class="char-header">
+	{{#if faction}}
+		{{#eq faction 1}}
+		<img class="faction-icon" src="{{websiteRoot}}/img/PlusManz-Alliance.png">
+		{{else}}
+		<img class="faction-icon" src="{{websiteRoot}}/img/PlusManz-Horde.png">
+		{{/eq}}
+	{{/if}}
+
+	<div class="char-identity">
+		<div class="char-name title is-size-3">{{displayName}}</div>
+		{{#if guild}}
+		<a class="guild-name title is-size-5" href="{{websiteRoot}}/guild/{{realm}}/{{guild}}">&lt;{{guild}}&gt;</a>
+		{{/if}}
+		<div class="char-meta is-size-6">
+			Level <span class="char-level">{{level}}</span>
+			<span class="char-race">{{race}}</span>
+			<span class="char-class">{{class}}</span>
+			&middot; <span class="char-realm">{{realm}}</span>
+		</div>
+		<div class="char-meta is-size-7">
+			{{#if zoneName}}<span class="char-zone">{{zoneName}}</span> &middot; {{/if}}
+			{{#if online}}Online &#128994;{{else}}Offline &#128308;{{/if}}
+		</div>
+	</div>
+
+	{{#if avgItemLevel}}
+	<div class="char-ilvl">
+		<div class="ilvl-value">{{avgItemLevel}}</div>
+		<div class="char-meta is-size-7">avg item level</div>
+	</div>
+	{{/if}}
+</div>
+
+{{> character-subnav }}

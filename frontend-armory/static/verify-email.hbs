@@ -1,0 +1,16 @@
+<h1 class="title is-size-1">Email verification</h1>
+
+<div class="armory-panel auth-panel">
+	<div class="panel-body">
+		{{#if (eq status "success")}}
+		<p class="auth-copy">Your email address has been verified. You can continue setting up your account.</p>
+		<p class="auth-alt"><a href="{{websiteRoot}}/choose-username">Choose your username</a></p>
+		{{else if (eq status "expired")}}
+		<div class="auth-error" role="alert">This verification link has expired.</div>
+		<p class="auth-alt"><a href="{{websiteRoot}}/verify-email-pending">Request a new verification email</a></p>
+		{{else}}
+		<div class="auth-error" role="alert">This verification link is invalid.</div>
+		<p class="auth-alt"><a href="{{websiteRoot}}/login">Return to sign in</a></p>
+		{{/if}}
+	</div>
+</div>

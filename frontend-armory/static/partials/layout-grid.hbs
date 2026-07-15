@@ -1,0 +1,90 @@
+<div class="armory-layout-grid" data-armory-page="{{pageId}}">
+{{#each layoutWidgets}}
+<div class="azp-widget azp-widget--{{typeClass}}" data-widget-id="{{id}}" style="grid-column: {{add x 1}} / span {{w}}; grid-row: {{add y 1}} / span {{h}}; min-width: 0;">
+	{{#eq type "PageTitle"}}
+		{{> widget-page-title widgetTitle=widgetTitle websiteName=@root.websiteName}}
+	{{/eq}}
+	{{#eq type "News"}}
+		{{> widget-news widgetTitle=widgetTitle showViewAll=showViewAll news=newsItems}}
+	{{/eq}}
+	{{#eq type "RecentCharacters"}}
+		{{> widget-recent-characters widgetTitle=widgetTitle recentCharacters=recentItems}}
+	{{/eq}}
+	{{#eq type "CharacterSearch"}}
+		{{> widget-character-search pageLength=pageLength defaultRealm=@root.defaultRealm realms=@root.realms}}
+	{{/eq}}
+	{{#eq type "Spacer"}}
+		{{> widget-spacer}}
+	{{/eq}}
+	{{#eq type "ConnectCta"}}
+		{{> widget-connect-cta downloadAvailable=@root.downloadAvailable downloadUrl=@root.downloadUrl realmName=@root.realmName}}
+	{{/eq}}
+	{{#eq type "NewsFeed"}}
+		{{> widget-news-feed widgetTitle=widgetTitle newsItems=newsItems}}
+	{{/eq}}
+	{{#eq type "CharacterHeader"}}
+		{{> widget-character-header
+			faction=@root.faction
+			websiteRoot=@root.websiteRoot
+			displayName=@root.displayName
+			guild=@root.guild
+			level=@root.level
+			race=@root.race
+			class=@root.class
+			realm=@root.realm
+			zoneName=@root.zoneName
+			online=@root.online
+			avgItemLevel=@root.avgItemLevel
+			page=@root.page
+			name=@root.name
+			trackingEnabled=@root.trackingEnabled
+			trackingDefaultPage=@root.trackingDefaultPage
+			companionCount=@root.companionCount
+			classId=@root.classId
+			hasPets=@root.hasPets
+		}}
+	{{/eq}}
+	{{#eq type "CharacterModelViewer"}}
+		{{> widget-character-model overview=@root.overview faction=@root.faction}}
+	{{/eq}}
+	{{#eq type "CharacterStats"}}
+		{{> widget-character-stats overview=@root.overview}}
+	{{/eq}}
+	{{#eq type "CharacterOverviewCards"}}
+		{{> widget-character-overview-cards overview=@root.overview websiteRoot=@root.websiteRoot realm=@root.realm name=@root.name}}
+	{{/eq}}
+	{{#eq type "CharacterSubnav"}}
+		{{> widget-character-subnav
+			websiteRoot=@root.websiteRoot
+			realm=@root.realm
+			name=@root.name
+			page=@root.page
+			trackingEnabled=@root.trackingEnabled
+			trackingDefaultPage=@root.trackingDefaultPage
+			companionCount=@root.companionCount
+			classId=@root.classId
+			hasPets=@root.hasPets
+		}}
+	{{/eq}}
+	{{#eq type "GuildHeader"}}
+		{{> widget-guild-header
+			name=@root.name
+			realm=@root.realm
+			leader=@root.leader
+			membersCount=@root.membersCount
+			faction=@root.faction
+			websiteRoot=@root.websiteRoot
+		}}
+	{{/eq}}
+	{{#eq type "GuildRoster"}}
+		{{> widget-guild-roster}}
+	{{/eq}}
+	{{#eq type "TopLogsTable"}}
+		{{> widget-top-logs-table}}
+	{{/eq}}
+	{{#eq type "MapCanvas"}}
+		{{> widget-map-canvas}}
+	{{/eq}}
+</div>
+{{/each}}
+</div>

@@ -1,0 +1,24 @@
+<Project>
+
+  <ItemGroup>
+    <!--
+      GHSA-2m69-gcr7-jv3q (CVE-2025-6965): SQLitePCLRaw.lib.e_sqlite3 2.1.11 bundles a native SQLite
+      (3.49.1) affected by a memory-corruption bug that is only reachable by executing crafted SQL text
+      against the SQLite engine. It is pulled in transitively by Microsoft.EntityFrameworkCore.Sqlite and
+      the package is deprecated with NO patched release available for net10.0 (the successor
+      SourceGear.sqlite3 has no net10.0 build assets yet and ships static libs for Linux, so it does not
+      cleanly replace the loaded shared library). Tracked upstream in dotnet/efcore#38257.
+
+      This is suppressed rather than force-patched because it is not reachable in this application:
+        * SQLite is used ONLY by EF Core for the manager's own metadata database, with fully parameterized,
+          EF-generated queries. There are no FromSqlRaw/ExecuteSqlRaw call sites and no user-supplied raw
+          SQL reaches SQLite.
+        * The attacker-facing database (AzerothCore accounts/characters) is MySQL — a completely separate
+          engine — accessed via parameterized Dapper/EF queries.
+      Re-evaluate and remove this suppression once EF Core ships a Sqlite provider that depends on a
+      non-vulnerable native SQLite (or a net10.0-compatible SourceGear.sqlite3 becomes available).
+    -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+
+</Project>

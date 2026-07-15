@@ -1,0 +1,78 @@
+<div class="section-cards overview-card-grid">
+	<a class="section-card" href="{{websiteRoot}}/character/{{realm}}/{{name}}/talents">
+		<div class="armory-panel">
+			<div class="panel-title">Talents <span class="panel-more">View &raquo;</span></div>
+			<div class="panel-body">
+				<div class="talent-spec-name">{{overview.talentSpec.primary}}</div>
+				<div class="talent-trees">
+					{{#each overview.talentSpec.trees}}
+					<div class="talent-tree">
+						<span class="icon-tile" style="background-image:url('{{../websiteRoot}}/img/wow-icons/medium/{{this.icon}}.jpg')"></span>
+						<span class="talent-tree-points">{{this.points}}</span>
+						<span class="talent-tree-name">{{this.name}}</span>
+					</div>
+					{{/each}}
+				</div>
+			</div>
+		</div>
+	</a>
+
+	<a class="section-card" href="{{websiteRoot}}/character/{{realm}}/{{name}}/skills">
+		<div class="armory-panel">
+			<div class="panel-title">Professions <span class="panel-more">View &raquo;</span></div>
+			<div class="panel-body">
+				{{#each overview.professions}}
+				<div class="stat-row profession-row">
+					<span class="stat-label"><span class="icon-tile profession-icon" style="background-image:url('{{../websiteRoot}}/img/wow-icons/medium/{{this.icon}}.jpg')"></span>{{this.name}}</span>
+					<span class="stat-value">{{this.value}} / {{this.max}}</span>
+				</div>
+				{{else}}
+				<div class="empty-hint">No professions learned.</div>
+				{{/each}}
+			</div>
+		</div>
+	</a>
+
+	<a class="section-card" href="{{websiteRoot}}/character/{{realm}}/{{name}}/pvp">
+		<div class="armory-panel">
+			<div class="panel-title">Honorable Kills <span class="panel-more">View &raquo;</span></div>
+			<div class="panel-body">
+				<div class="stat-row"><span class="stat-label">Total Kills</span><span class="stat-value">{{overview.kills.total}}</span></div>
+				<div class="stat-row"><span class="stat-label">Today / Yesterday</span><span class="stat-value">{{overview.kills.today}} / {{overview.kills.yesterday}}</span></div>
+				<div class="stat-row"><span class="stat-label">Honor Points</span><span class="stat-value">{{overview.honorPoints}}</span></div>
+				<div class="stat-row"><span class="stat-label">Arena Points</span><span class="stat-value">{{overview.arenaPoints}}</span></div>
+			</div>
+		</div>
+	</a>
+
+	<a class="section-card" href="{{websiteRoot}}/character/{{realm}}/{{name}}/mounts">
+		<div class="armory-panel">
+			<div class="panel-title">Mounts <span class="panel-more">{{overview.mountCount}} &middot; View &raquo;</span></div>
+			<div class="panel-body">
+				<div class="icon-grid">
+					{{#each overview.mountIcons}}
+					<span class="icon-tile" style="background-image:url('{{../websiteRoot}}/img/wow-icons/medium/{{this}}.jpg')"></span>
+					{{else}}
+					<div class="empty-hint">No mounts collected.</div>
+					{{/each}}
+				</div>
+			</div>
+		</div>
+	</a>
+
+	<a class="section-card" href="{{websiteRoot}}/character/{{realm}}/{{name}}/achievements">
+		<div class="armory-panel">
+			<div class="panel-title">Recent Achievements <span class="panel-more">View &raquo;</span></div>
+			<div class="panel-body">
+				{{#each overview.recentAchievements}}
+				<div class="achievement-row">
+					<span class="icon-tile" style="background-image:url('{{../websiteRoot}}/img/wow-icons/medium/{{this.icon}}.jpg')"></span>
+					<span class="achievement-title">{{this.title}}</span>
+				</div>
+				{{else}}
+				<div class="empty-hint">No achievements earned yet.</div>
+				{{/each}}
+			</div>
+		</div>
+	</a>
+</div>

@@ -1,0 +1,749 @@
+{
+	"classic": [
+		{
+			"key": "ragefirechasm",
+			"name": "Ragefire Chasm",
+			"mapId": 389,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/ragefire_chasm.png",
+			"bosses": [
+				{ "name": "Oggleflint", "npcIds": [11517] },
+				{ "name": "Taragaman the Hungerer", "npcIds": [11520] },
+				{ "name": "Jergosh the Invoker", "npcIds": [11518] },
+				{ "name": "Bazzalan", "npcIds": [11519] }
+			]
+		},
+		{
+			"key": "wailingcaverns",
+			"name": "Wailing Caverns",
+			"mapId": 43,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/wailing_cavern.png",
+			"bosses": [
+				{ "name": "Lady Anacondra", "npcIds": [3671] },
+				{ "name": "Lord Cobrahn", "npcIds": [3669] },
+				{ "name": "Lord Pythas", "npcIds": [3670] },
+				{ "name": "Lord Serpentis", "npcIds": [3673] },
+				{ "name": "Skum", "npcIds": [3674] },
+				{ "name": "Verdan the Everliving", "npcIds": [5775] },
+				{ "name": "Mutanus the Devourer", "npcIds": [3654] }
+			]
+		},
+		{
+			"key": "deadmines",
+			"name": "The Deadmines",
+			"mapId": 36,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/the_deadmines.png",
+			"bosses": [
+				{ "name": "Rhahk'Zor", "npcIds": [644] },
+				{ "name": "Sneed's Shredder", "npcIds": [642, 643] },
+				{ "name": "Gilnid", "npcIds": [1763] },
+				{ "name": "Mr. Smite", "npcIds": [646] },
+				{ "name": "Captain Greenskin", "npcIds": [647] },
+				{ "name": "Edwin VanCleef", "npcIds": [639] },
+				{ "name": "Cookie", "npcIds": [645] }
+			]
+		},
+		{
+			"key": "shadowfangkeep",
+			"name": "Shadowfang Keep",
+			"mapId": 33,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/shadowfang_keep.png",
+			"bosses": [
+				{ "name": "Rethilgore", "npcIds": [3914] },
+				{ "name": "Razorclaw the Butcher", "npcIds": [3886] },
+				{ "name": "Baron Silverlaine", "npcIds": [3887] },
+				{ "name": "Commander Springvale", "npcIds": [4278] },
+				{ "name": "Odo the Blindwatcher", "npcIds": [4279] },
+				{ "name": "Fenrus the Devourer", "npcIds": [4274] },
+				{ "name": "Wolf Master Nandos", "npcIds": [3927] },
+				{ "name": "Archmage Arugal", "npcIds": [4275] }
+			]
+		},
+		{
+			"key": "stormwindstockade",
+			"name": "The Stockade",
+			"mapId": 34,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/the_stockades.png",
+			"bosses": [
+				{ "name": "Targorr the Dread", "npcIds": [1696] },
+				{ "name": "Kam Deepfury", "npcIds": [1666] },
+				{ "name": "Hamhock", "npcIds": [1717] },
+				{ "name": "Bazil Thredd", "npcIds": [1716] },
+				{ "name": "Dextren Ward", "npcIds": [1663] }
+			]
+		},
+		{
+			"key": "blackfathomdeeps",
+			"name": "Blackfathom Deeps",
+			"mapId": 48,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/blackfathom_deeps.png",
+			"bosses": [
+				{ "name": "Ghamoo-ra", "npcIds": [4887] },
+				{ "name": "Lady Sarevess", "npcIds": [4831] },
+				{ "name": "Gelihast", "npcIds": [6243] },
+				{ "name": "Twilight Lord Kelris", "npcIds": [4832] },
+				{ "name": "Old Serra'kis", "npcIds": [4830] },
+				{ "name": "Aku'mai", "npcIds": [4829] }
+			]
+		},
+		{
+			"key": "gnomeregan",
+			"name": "Gnomeregan",
+			"mapId": 90,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/gnomeregan.png",
+			"bosses": [
+				{ "name": "Grubbis", "npcIds": [7361] },
+				{ "name": "Viscous Fallout", "npcIds": [7079] },
+				{ "name": "Electrocutioner 6000", "npcIds": [6235] },
+				{ "name": "Crowd Pummeler 9-60", "npcIds": [6229] },
+				{ "name": "Mekgineer Thermaplugg", "npcIds": [7800] }
+			]
+		},
+		{
+			"key": "razorfenkraul",
+			"name": "Razorfen Kraul",
+			"mapId": 47,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/razorfen_kraul.png",
+			"bosses": [
+				{ "name": "Aggem Thorncurse", "npcIds": [6167] },
+				{ "name": "Death Speaker Jargba", "npcIds": [6177] },
+				{ "name": "Overlord Ramtusk", "npcIds": [6166] },
+				{ "name": "Agathelos the Raging", "npcIds": [4422] },
+				{ "name": "Charlga Razorflank", "npcIds": [4421] }
+			]
+		},
+		{
+			"key": "razorfendowns",
+			"name": "Razorfen Downs",
+			"mapId": 129,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/razorfen_downs.png",
+			"bosses": [
+				{ "name": "Tuten'kash", "npcIds": [7355] },
+				{ "name": "Mordresh Fire Eye", "npcIds": [7357] },
+				{ "name": "Glutton", "npcIds": [8567] },
+				{ "name": "Ragglesnout", "npcIds": [7356] },
+				{ "name": "Amnennar the Coldbringer", "npcIds": [7358] }
+			]
+		},
+		{
+			"key": "scarletmonastery",
+			"name": "Scarlet Monastery",
+			"mapId": 189,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/scarlet_monastary.png",
+			"bosses": [
+				{ "name": "Interrogator Vishas", "npcIds": [3983] },
+				{ "name": "Bloodmage Thalnos", "npcIds": [4543] },
+				{ "name": "Houndmaster Loksey", "npcIds": [3974] },
+				{ "name": "Arcanist Doan", "npcIds": [6487] },
+				{ "name": "Herod", "npcIds": [3975] },
+				{ "name": "High Inquisitor Fairbanks", "npcIds": [4542] },
+				{ "name": "Scarlet Commander Mograine", "npcIds": [3976] },
+				{ "name": "High Inquisitor Whitemane", "npcIds": [3977] }
+			]
+		},
+		{
+			"key": "uldaman",
+			"name": "Uldaman",
+			"mapId": 70,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/uldaman.png",
+			"bosses": [
+				{ "name": "Revelosh", "npcIds": [6910] },
+				{ "name": "Baelog", "npcIds": [6907] },
+				{ "name": "Ironaya", "npcIds": [7228] },
+				{ "name": "Ancient Stone Keeper", "npcIds": [7206] },
+				{ "name": "Galgann Firehammer", "npcIds": [7291] },
+				{ "name": "Grimlok", "npcIds": [4854] },
+				{ "name": "Archaedas", "npcIds": [2748] }
+			]
+		},
+		{
+			"key": "zulfarrak",
+			"name": "Zul'Farrak",
+			"mapId": 209,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/zul_farrak.png",
+			"bosses": [
+				{ "name": "Antu'sul", "npcIds": [8127] },
+				{ "name": "Theka the Martyr", "npcIds": [7272] },
+				{ "name": "Witch Doctor Zum'rah", "npcIds": [7271] },
+				{ "name": "Nekrum Gutchewer", "npcIds": [7796] },
+				{ "name": "Shadowpriest Sezz'ziz", "npcIds": [7275] },
+				{ "name": "Hydromancer Velratha", "npcIds": [7795] },
+				{ "name": "Chief Ukorz Sandscalp", "npcIds": [7267] },
+				{ "name": "Gahz'rilla", "npcIds": [7273] }
+			]
+		},
+		{
+			"key": "maraudon",
+			"name": "Maraudon",
+			"mapId": 349,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/maraudon.png",
+			"bosses": [
+				{ "name": "Noxxion", "npcIds": [13282] },
+				{ "name": "Razorlash", "npcIds": [12258] },
+				{ "name": "Lord Vyletongue", "npcIds": [12236] },
+				{ "name": "Celebras the Cursed", "npcIds": [12225] },
+				{ "name": "Landslide", "npcIds": [12203] },
+				{ "name": "Tinkerer Gizlock", "npcIds": [13601] },
+				{ "name": "Rotgrip", "npcIds": [13596] },
+				{ "name": "Princess Theradras", "npcIds": [12201] }
+			]
+		},
+		{
+			"key": "sunkentemple",
+			"name": "Sunken Temple",
+			"mapId": 109,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/sunken_temple.png",
+			"bosses": [
+				{ "name": "Atal'alarion", "npcIds": [8580] },
+				{ "name": "Jammal'an the Prophet", "npcIds": [5710] },
+				{ "name": "Ogom the Wretched", "npcIds": [5711] },
+				{ "name": "Dreamscythe & Weaver", "npcIds": [5721, 5720] },
+				{ "name": "Morphaz & Hazzas", "npcIds": [5722, 5723] },
+				{ "name": "Shade of Eranikus", "npcIds": [5709] }
+			]
+		},
+		{
+			"key": "blackrockdepths",
+			"name": "Blackrock Depths",
+			"mapId": 230,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/blackrock_depths.png",
+			"bosses": [
+				{ "name": "High Interrogator Gerstahn", "npcIds": [9018] },
+				{ "name": "Lord Roccor", "npcIds": [9025] },
+				{ "name": "Houndmaster Grebmar", "npcIds": [9319] },
+				{ "name": "Pyromancer Loregrain", "npcIds": [9024] },
+				{ "name": "Lord Incendius", "npcIds": [9017] },
+				{ "name": "Warder Stilgiss", "npcIds": [9041] },
+				{ "name": "Fineous Darkvire", "npcIds": [9056] },
+				{ "name": "Bael'Gar", "npcIds": [9016] },
+				{ "name": "General Angerforge", "npcIds": [9033] },
+				{ "name": "Golem Lord Argelmach", "npcIds": [8983] },
+				{ "name": "Ambassador Flamelash", "npcIds": [9156] },
+				{ "name": "Magmus", "npcIds": [9938] },
+				{ "name": "Emperor Dagran Thaurissan", "npcIds": [9019] }
+			]
+		},
+		{
+			"key": "lowerblackrockspire",
+			"name": "Lower Blackrock Spire",
+			"mapId": 229,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/lower_blackrock_spire.png",
+			"bosses": [
+				{ "name": "Highlord Omokk", "npcIds": [9196] },
+				{ "name": "Shadow Hunter Vosh'gajin", "npcIds": [9236] },
+				{ "name": "War Master Voone", "npcIds": [9237] },
+				{ "name": "Mother Smolderweb", "npcIds": [10596] },
+				{ "name": "Urok Doomhowl", "npcIds": [10584] },
+				{ "name": "Quartermaster Zigris", "npcIds": [9736] },
+				{ "name": "Gizrul the Slavener", "npcIds": [10268] },
+				{ "name": "Halycon", "npcIds": [10220] },
+				{ "name": "Overlord Wyrmthalak", "npcIds": [9568] }
+			]
+		},
+		{
+			"key": "upperblackrockspire",
+			"name": "Upper Blackrock Spire",
+			"mapId": 229,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/upper_blackrock_spire.png",
+			"bosses": [
+				{ "name": "Pyroguard Emberseer", "npcIds": [9816] },
+				{ "name": "Solakar Flamewreath", "npcIds": [10264] },
+				{ "name": "Jed Runewatcher", "npcIds": [10509] },
+				{ "name": "Warchief Rend Blackhand", "npcIds": [10429] },
+				{ "name": "Gyth", "npcIds": [10339] },
+				{ "name": "The Beast", "npcIds": [10430] },
+				{ "name": "General Drakkisath", "npcIds": [10363] }
+			]
+		},
+		{
+			"key": "scholomance",
+			"name": "Scholomance",
+			"mapId": 289,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/scholomance.png",
+			"bosses": [
+				{ "name": "Kirtonos the Herald", "npcIds": [10506] },
+				{ "name": "Jandice Barov", "npcIds": [10503] },
+				{ "name": "Rattlegore", "npcIds": [11622] },
+				{ "name": "Marduk Blackpool & Vectus", "npcIds": [10433, 10432] },
+				{ "name": "Ras Frostwhisper", "npcIds": [10508] },
+				{ "name": "Instructor Malicia", "npcIds": [10505] },
+				{ "name": "Doctor Theolen Krastinov", "npcIds": [11261] },
+				{ "name": "Lorekeeper Polkelt", "npcIds": [10901] },
+				{ "name": "The Ravenian", "npcIds": [10507] },
+				{ "name": "Lord Alexei Barov", "npcIds": [10504] },
+				{ "name": "Lady Illucia Barov", "npcIds": [10502] },
+				{ "name": "Darkmaster Gandling", "npcIds": [1853] }
+			]
+		},
+		{
+			"key": "stratholme",
+			"name": "Stratholme",
+			"mapId": 329,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/stratholme.png",
+			"bosses": [
+				{ "name": "Hearthsinger Forresten", "npcIds": [10558] },
+				{ "name": "The Unforgiven", "npcIds": [10516] },
+				{ "name": "Timmy the Cruel", "npcIds": [10808] },
+				{ "name": "Magistrate Barthilas", "npcIds": [10435] },
+				{ "name": "Baroness Anastari", "npcIds": [10436] },
+				{ "name": "Nerub'enkan", "npcIds": [10437] },
+				{ "name": "Maleki the Pallid", "npcIds": [10438] },
+				{ "name": "Ramstein the Gorger", "npcIds": [10439] },
+				{ "name": "Baron Rivendare", "npcIds": [10440] },
+				{ "name": "Cannon Master Willey", "npcIds": [10997] },
+				{ "name": "Archivist Galford", "npcIds": [10811] },
+				{ "name": "Balnazzar", "npcIds": [10813] }
+			]
+		},
+		{
+			"key": "diremaul",
+			"name": "Dire Maul",
+			"mapId": 429,
+			"difficulty": null,
+			"image": "/data/progression/dungeon/classic/dire_maul.png",
+			"bosses": [
+				{ "name": "Zevrim Thornhoof", "npcIds": [11490] },
+				{ "name": "Lethtendris", "npcIds": [14327] },
+				{ "name": "Hydrospawn", "npcIds": [13280] },
+				{ "name": "Alzzin the Wildshaper", "npcIds": [11492] },
+				{ "name": "Tendris Warpwood", "npcIds": [11489] },
+				{ "name": "Illyanna Ravenoak", "npcIds": [11488] },
+				{ "name": "Magister Kalendris", "npcIds": [11487] },
+				{ "name": "Immol'thar", "npcIds": [11496] },
+				{ "name": "Prince Tortheldrin", "npcIds": [11486] },
+				{ "name": "Guard Mol'dar", "npcIds": [14326] },
+				{ "name": "Stomper Kreeg", "npcIds": [14322] },
+				{ "name": "Guard Fengus", "npcIds": [14321] },
+				{ "name": "Guard Slip'kik", "npcIds": [14323] },
+				{ "name": "Captain Kromcrush", "npcIds": [14325] },
+				{ "name": "Cho'Rush the Observer", "npcIds": [14324] },
+				{ "name": "King Gordok", "npcIds": [11501] }
+			]
+		}
+	],
+	"tbc": [
+		{
+			"key": "hellfireramparts",
+			"name": "Hellfire Ramparts",
+			"mapId": 543,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/hellfire_ramparts.png",
+			"bosses": [
+				{ "name": "Watchkeeper Gargolmar", "npcIds": [17306] },
+				{ "name": "Omor the Unscarred", "npcIds": [17308] },
+				{ "name": "Vazruden the Herald", "npcIds": [17537, 17536] }
+			]
+		},
+		{
+			"key": "thebloodfurnace",
+			"name": "The Blood Furnace",
+			"mapId": 542,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_blood_furnace.png",
+			"bosses": [
+				{ "name": "The Maker", "npcIds": [17381] },
+				{ "name": "Broggok", "npcIds": [17380] },
+				{ "name": "Keli'dan the Breaker", "npcIds": [17377] }
+			]
+		},
+		{
+			"key": "theshatteredhalls",
+			"name": "The Shattered Halls",
+			"mapId": 540,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_shattered_halls.png",
+			"bosses": [
+				{ "name": "Grand Warlock Nethekurse", "npcIds": [16807] },
+				{ "name": "Warbringer O'mrogg", "npcIds": [16809] },
+				{ "name": "Warchief Kargath Bladefist", "npcIds": [16808] }
+			]
+		},
+		{
+			"key": "theslavepens",
+			"name": "The Slave Pens",
+			"mapId": 547,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_slaves_pens.png",
+			"bosses": [
+				{ "name": "Mennu the Betrayer", "npcIds": [17941] },
+				{ "name": "Rokmar the Crackler", "npcIds": [17991] },
+				{ "name": "Quagmirran", "npcIds": [17942] }
+			]
+		},
+		{
+			"key": "theunderbog",
+			"name": "The Underbog",
+			"mapId": 546,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_underbog.png",
+			"bosses": [
+				{ "name": "Hungarfen", "npcIds": [17770] },
+				{ "name": "Ghaz'an", "npcIds": [18105] },
+				{ "name": "Swamplord Musel'ek", "npcIds": [17826] },
+				{ "name": "The Black Stalker", "npcIds": [17882] }
+			]
+		},
+		{
+			"key": "thesteamvault",
+			"name": "The Steamvault",
+			"mapId": 545,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_steamvault.png",
+			"bosses": [
+				{ "name": "Hydromancer Thespia", "npcIds": [17797] },
+				{ "name": "Mekgineer Steamrigger", "npcIds": [17796] },
+				{ "name": "Warlord Kalithresh", "npcIds": [17798] }
+			]
+		},
+		{
+			"key": "manatombs",
+			"name": "Mana-Tombs",
+			"mapId": 557,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/mana_tombs.png",
+			"bosses": [
+				{ "name": "Pandemonius", "npcIds": [18341] },
+				{ "name": "Tavarok", "npcIds": [18343] },
+				{ "name": "Nexus-Prince Shaffar", "npcIds": [18344] }
+			]
+		},
+		{
+			"key": "auchenaicrypts",
+			"name": "Auchenai Crypts",
+			"mapId": 558,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/auchenai_crypts.png",
+			"bosses": [
+				{ "name": "Shirrak the Dead Watcher", "npcIds": [18371] },
+				{ "name": "Exarch Maladaar", "npcIds": [18373] }
+			]
+		},
+		{
+			"key": "sethekkhalls",
+			"name": "Sethekk Halls",
+			"mapId": 556,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/sethekk_halls.png",
+			"bosses": [
+				{ "name": "Darkweaver Syth", "npcIds": [18472] },
+				{ "name": "Talon King Ikiss", "npcIds": [18473] },
+				{ "name": "Anzu", "npcIds": [23035] }
+			]
+		},
+		{
+			"key": "shadowlabyrinth",
+			"name": "Shadow Labyrinth",
+			"mapId": 555,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/shadow_labyrinth.png",
+			"bosses": [
+				{ "name": "Ambassador Hellmaw", "npcIds": [18731] },
+				{ "name": "Blackheart the Inciter", "npcIds": [18667] },
+				{ "name": "Grandmaster Vorpil", "npcIds": [18732] },
+				{ "name": "Murmur", "npcIds": [18708] }
+			]
+		},
+		{
+			"key": "themechanar",
+			"name": "The Mechanar",
+			"mapId": 554,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_mechanar.png",
+			"bosses": [
+				{ "name": "Gatewatcher Gyro-Kill", "npcIds": [19218] },
+				{ "name": "Gatewatcher Iron-Hand", "npcIds": [19710] },
+				{ "name": "Mechano-Lord Capacitus", "npcIds": [19219] },
+				{ "name": "Nethermancer Sepethrea", "npcIds": [19221] },
+				{ "name": "Pathaleon the Calculator", "npcIds": [19220] }
+			]
+		},
+		{
+			"key": "thebotanica",
+			"name": "The Botanica",
+			"mapId": 553,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_botanica.png",
+			"bosses": [
+				{ "name": "Commander Sarannis", "npcIds": [17976] },
+				{ "name": "High Botanist Freywinn", "npcIds": [17975] },
+				{ "name": "Thorngrin the Tender", "npcIds": [17978] },
+				{ "name": "Laj", "npcIds": [17980] },
+				{ "name": "Warp Splinter", "npcIds": [17977] }
+			]
+		},
+		{
+			"key": "thearcatraz",
+			"name": "The Arcatraz",
+			"mapId": 552,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_arcatraz.png",
+			"bosses": [
+				{ "name": "Zereketh the Unbound", "npcIds": [20870] },
+				{ "name": "Dalliah the Doomsayer", "npcIds": [20885] },
+				{ "name": "Wrath-Scryer Soccothrates", "npcIds": [20886] },
+				{ "name": "Harbinger Skyriss", "npcIds": [20912] }
+			]
+		},
+		{
+			"key": "oldhillsbradfoothills",
+			"name": "Old Hillsbrad Foothills",
+			"mapId": 560,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/old_hillsbrad_foothills.png",
+			"bosses": [
+				{ "name": "Lieutenant Drake", "npcIds": [17848] },
+				{ "name": "Captain Skarloc", "npcIds": [17862] },
+				{ "name": "Epoch Hunter", "npcIds": [18096] }
+			]
+		},
+		{
+			"key": "theblackmorass",
+			"name": "The Black Morass",
+			"mapId": 269,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/the_black_morass.png",
+			"bosses": [
+				{ "name": "Chrono Lord Deja", "npcIds": [17879] },
+				{ "name": "Temporus", "npcIds": [17880] },
+				{ "name": "Aeonus", "npcIds": [17881] }
+			]
+		},
+		{
+			"key": "magistersterrace",
+			"name": "Magisters' Terrace",
+			"mapId": 585,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/tbc/magisters_terrace.png",
+			"bosses": [
+				{ "name": "Selin Fireheart", "npcIds": [24723] },
+				{ "name": "Vexallus", "npcIds": [24744] },
+				{ "name": "Priestess Delrissa", "npcIds": [24560] },
+				{ "name": "Kael'thas Sunstrider", "npcIds": [24664] }
+			]
+		}
+	],
+	"wotlk": [
+		{
+			"key": "utgardekeep",
+			"name": "Utgarde Keep",
+			"mapId": 574,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/utgarde_keep.png",
+			"bosses": [
+				{ "name": "Prince Keleseth", "npcIds": [23953] },
+				{ "name": "Skarvald & Dalronn", "npcIds": [24200, 24201] },
+				{ "name": "Ingvar the Plunderer", "npcIds": [23954] }
+			]
+		},
+		{
+			"key": "thenexus",
+			"name": "The Nexus",
+			"mapId": 576,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/the_nexus.png",
+			"bosses": [
+				{ "name": "Grand Magus Telestra", "npcIds": [26731] },
+				{ "name": "Anomalus", "npcIds": [26763] },
+				{ "name": "Ormorok the Tree-Shaper", "npcIds": [26794] },
+				{ "name": "Keristrasza", "npcIds": [26723] }
+			]
+		},
+		{
+			"key": "azjolnerub",
+			"name": "Azjol-Nerub",
+			"mapId": 601,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/azjol_nerub.png",
+			"bosses": [
+				{ "name": "Krik'thir the Gatewatcher", "npcIds": [28684] },
+				{ "name": "Hadronox", "npcIds": [28921] },
+				{ "name": "Anub'arak", "npcIds": [29120] }
+			]
+		},
+		{
+			"key": "ahnkahet",
+			"name": "Ahn'kahet: The Old Kingdom",
+			"mapId": 619,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/ahn_kahet_the_old_kingdom.png",
+			"bosses": [
+				{ "name": "Elder Nadox", "npcIds": [29309] },
+				{ "name": "Prince Taldaram", "npcIds": [29308] },
+				{ "name": "Jedoga Shadowseeker", "npcIds": [29310] },
+				{ "name": "Amanitar", "npcIds": [30258] },
+				{ "name": "Herald Volazj", "npcIds": [29311] }
+			]
+		},
+		{
+			"key": "draktharonkeep",
+			"name": "Drak'Tharon Keep",
+			"mapId": 600,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/drak_tharon_keep.png",
+			"bosses": [
+				{ "name": "Trollgore", "npcIds": [26630] },
+				{ "name": "Novos the Summoner", "npcIds": [26631] },
+				{ "name": "King Dred", "npcIds": [27483] },
+				{ "name": "The Prophet Tharon'ja", "npcIds": [26632] }
+			]
+		},
+		{
+			"key": "violethold",
+			"name": "The Violet Hold",
+			"mapId": 608,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/the_violet_hold.png",
+			"bosses": [
+				{ "name": "Erekem", "npcIds": [29315] },
+				{ "name": "Moragg", "npcIds": [29316] },
+				{ "name": "Ichoron", "npcIds": [29313] },
+				{ "name": "Xevozz", "npcIds": [29266] },
+				{ "name": "Lavanthor", "npcIds": [29312] },
+				{ "name": "Zuramat the Obliterator", "npcIds": [29314] },
+				{ "name": "Cyanigosa", "npcIds": [31134] }
+			]
+		},
+		{
+			"key": "gundrak",
+			"name": "Gundrak",
+			"mapId": 604,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/gundrak.png",
+			"bosses": [
+				{ "name": "Slad'ran", "npcIds": [29304] },
+				{ "name": "Drakkari Colossus", "npcIds": [29307] },
+				{ "name": "Moorabi", "npcIds": [29305] },
+				{ "name": "Gal'darah", "npcIds": [29306] },
+				{ "name": "Eck the Ferocious", "npcIds": [29932] }
+			]
+		},
+		{
+			"key": "hallsofstone",
+			"name": "Halls of Stone",
+			"mapId": 599,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/halls_of_stone.png",
+			"bosses": [
+				{ "name": "Krystallus", "npcIds": [27977] },
+				{ "name": "Maiden of Grief", "npcIds": [27975] },
+				{ "name": "Sjonnir the Ironshaper", "npcIds": [27978] }
+			]
+		},
+		{
+			"key": "hallsoflightning",
+			"name": "Halls of Lightning",
+			"mapId": 602,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/halls_of_lightning.png",
+			"bosses": [
+				{ "name": "General Bjarngrim", "npcIds": [28586] },
+				{ "name": "Volkhan", "npcIds": [28587] },
+				{ "name": "Ionar", "npcIds": [28546] },
+				{ "name": "Loken", "npcIds": [28923] }
+			]
+		},
+		{
+			"key": "theoculus",
+			"name": "The Oculus",
+			"mapId": 578,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/the_oculus.png",
+			"bosses": [
+				{ "name": "Drakos the Interrogator", "npcIds": [27654] },
+				{ "name": "Varos Cloudstrider", "npcIds": [27447] },
+				{ "name": "Mage-Lord Urom", "npcIds": [27655] },
+				{ "name": "Ley-Guardian Eregos", "npcIds": [27656] }
+			]
+		},
+		{
+			"key": "utgardepinnacle",
+			"name": "Utgarde Pinnacle",
+			"mapId": 575,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/utgarde_pinnacle.png",
+			"bosses": [
+				{ "name": "Svala Sorrowgrave", "npcIds": [26668] },
+				{ "name": "Gortok Palehoof", "npcIds": [26687] },
+				{ "name": "Skadi the Ruthless", "npcIds": [26693] },
+				{ "name": "King Ymiron", "npcIds": [26861] }
+			]
+		},
+		{
+			"key": "cullingofstratholme",
+			"name": "The Culling of Stratholme",
+			"mapId": 595,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/the_culling_of_stratholme.png",
+			"bosses": [
+				{ "name": "Meathook", "npcIds": [26529] },
+				{ "name": "Salramm the Fleshcrafter", "npcIds": [26530] },
+				{ "name": "Chrono-Lord Epoch", "npcIds": [26532] },
+				{ "name": "Mal'Ganis", "npcIds": [26533] },
+				{ "name": "Infinite Corruptor", "npcIds": [32273] }
+			]
+		},
+		{
+			"key": "trialofthechampion",
+			"name": "Trial of the Champion",
+			"mapId": 650,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/trial_of_the_champion.png",
+			"bosses": [
+				{ "name": "Eadric the Pure / Argent Confessor Paletress", "npcIds": [35119, 34928] },
+				{ "name": "The Black Knight", "npcIds": [35451] }
+			]
+		},
+		{
+			"key": "forgeofsouls",
+			"name": "The Forge of Souls",
+			"mapId": 632,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/the_forge_of_souls.png",
+			"bosses": [
+				{ "name": "Bronjahm", "npcIds": [36497] },
+				{ "name": "Devourer of Souls", "npcIds": [36502] }
+			]
+		},
+		{
+			"key": "pitofsaron",
+			"name": "Pit of Saron",
+			"mapId": 658,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/pit_of_saron.png",
+			"bosses": [
+				{ "name": "Forgemaster Garfrost", "npcIds": [36494] },
+				{ "name": "Ick & Krick", "npcIds": [36476, 36477] },
+				{ "name": "Scourgelord Tyrannus", "npcIds": [36658] }
+			]
+		},
+		{
+			"key": "hallsofreflection",
+			"name": "Halls of Reflection",
+			"mapId": 668,
+			"difficulties": [0, 1],
+			"image": "/data/progression/dungeon/wotlk/halls_of_reflection.png",
+			"bosses": [
+				{ "name": "Falric", "npcIds": [38112] },
+				{ "name": "Marwyn", "npcIds": [38113] }
+			]
+		}
+	]
+}
