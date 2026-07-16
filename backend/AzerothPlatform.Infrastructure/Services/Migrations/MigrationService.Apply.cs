@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
+using AzerothPlatform.Infrastructure.Services.IndividualProgression;
 using Microsoft.Extensions.Logging;
 
 namespace AzerothPlatform.Infrastructure.Services.Migrations;
@@ -351,6 +352,12 @@ public sealed partial class MigrationService
                 {
                     foreach (var mpqName in manifest.Add)
                     {
+                        if (!MpqPackFilter.IsValidConstructedMpqName(mpqName))
+                        {
+                            AddLog(result, $"Skipping invalid MPQ name in manifest: {mpqName}");
+                            continue;
+                        }
+
                         var mpqPath = Path.Combine(MigrationLayout.MpqDir(stackRoot, patch.Key), mpqName);
                         if (File.Exists(mpqPath))
                         {
@@ -412,8 +419,11 @@ public sealed partial class MigrationService
                 }
             }, cancellationToken);
 
-            // 12) Restart the stack (bring world/auth back up) only if we stopped them.
-            if (needsServerStop)
+            // 11.5) Apply config overrides from the patch's config/ directory (worldserver.json, etc.).
+            var configApplied = await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
+
+            // 12) Restart the stack (bring world/auth back up) only if we stopped them or config changed.
+            if (needsServerStop || configApplied)
             {
                 await RunStageAsync("restart", result, async () =>
                 {
@@ -762,6 +772,12 @@ public sealed partial class MigrationService
                     await RunStageAsync($"mpq:{plan.Patch.Key}", result,
                         () => PublishMpqAsync(stack, stackRoot, plan.Patch.Key, patchMpqRemovals, result, cancellationToken), cancellationToken);
                 }
+            }
+
+            // 5c) Apply config overrides from each patch's config/ directory in order.
+            foreach (var plan in plans)
+            {
+                await ApplyPatchConfigOverridesAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
             }
 
             // 6) Restart the stack so the worldserver reloads the pushed DBCs and the client-server is up.
@@ -1176,13 +1192,20 @@ public sealed partial class MigrationService
 
     /// <summary>
     /// Builds an MPQ file from raw content in a patch's mpq directory using the mpqtool.
-    /// Raw content is any non-.mpq file or directory in the mpq directory (the content tree
-    /// forms the internal MPQ path structure).
+    /// Raw content is any file or directory tree under the content root (typically the mpq
+    /// folder or a subfolder named after the archive). Manifest files such as mpq.json are
+    /// never packed into the archive.
     /// </summary>
     private async Task BuildMpqFromContentAsync(
         Data.Entities.ManagedStackEntity stack, string stackRoot, string patchKey,
         string mpqName, ApplyPatchResultDto result, CancellationToken cancellationToken)
     {
+        if (!MpqPackFilter.IsValidConstructedMpqName(mpqName))
+        {
+            AddLog(result, $"Skipping invalid MPQ construction target '{mpqName}' (must be a .mpq file name, not a manifest).");
+            return;
+        }
+
         var mpqDir = MigrationLayout.MpqDir(stackRoot, patchKey);
 
         var contentDirName = Path.GetFileNameWithoutExtension(mpqName);
@@ -1201,9 +1224,10 @@ public sealed partial class MigrationService
         {
             foreach (var file in Directory.EnumerateFiles(contentDir, "*", SearchOption.AllDirectories))
             {
-                var ext = Path.GetExtension(file).ToLowerInvariant();
-                if (ext is ".mpq" or ".json" or ".desc")
+                if (!MpqPackFilter.ShouldIncludeInConstructedMpq(file))
+                {
                     continue;
+                }
 
                 var relativePath = Path.GetRelativePath(contentDir, file);
                 var destPath = Path.Combine(stageDir, relativePath);
@@ -1262,6 +1286,99 @@ public sealed partial class MigrationService
     {
         var mapDir = MigrationLayout.MapDir(stackRoot, patchKey);
         return Directory.Exists(mapDir) && Directory.EnumerateFiles(mapDir, "*", SearchOption.AllDirectories).Any();
+    }
+
+    /// <summary>
+    /// Applies config overrides from a patch's config/ directory. Each JSON file maps config keys
+    /// to values (e.g. worldserver.json → worldserver.conf, mod_ahbot.json → modules/mod_ahbot.conf)
+    /// and updates the corresponding .conf file in the stack's etc/ directory.
+    /// Server configs (worldserver, authserver) live at etc/; module configs live at etc/modules/.
+    /// </summary>
+    private async Task<bool> ApplyPatchConfigOverridesAsync(
+        string stackRoot, string patchKey, ApplyPatchResultDto result, CancellationToken cancellationToken)
+    {
+        var configDir = MigrationLayout.ConfigDir(stackRoot, patchKey);
+        if (!Directory.Exists(configDir))
+            return false;
+
+        var jsonFiles = Directory.EnumerateFiles(configDir, "*.json", SearchOption.TopDirectoryOnly).ToList();
+        if (jsonFiles.Count == 0)
+            return false;
+
+        var etcDir = MigrationLayout.EtcDir(stackRoot);
+        var applied = false;
+
+        await RunStageAsync("config", result, async () =>
+        {
+            foreach (var jsonFile in jsonFiles)
+            {
+                var baseName = Path.GetFileNameWithoutExtension(jsonFile);
+                var confPath = ResolveConfPath(etcDir, baseName);
+
+                if (confPath is null)
+                {
+                    AddLog(result, $"Config target not found: {baseName}.conf — skipping {Path.GetFileName(jsonFile)}.");
+                    continue;
+                }
+
+                Dictionary<string, string>? overrides;
+                try
+                {
+                    var json = await File.ReadAllTextAsync(jsonFile, cancellationToken);
+                    overrides = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json, JsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    AddLog(result, $"Failed to parse {Path.GetFileName(jsonFile)}: {ex.Message}");
+                    continue;
+                }
+
+                if (overrides is null || overrides.Count == 0)
+                    continue;
+
+                var content = await File.ReadAllTextAsync(confPath, cancellationToken);
+                var updatedCount = 0;
+
+                foreach (var (key, value) in overrides)
+                {
+                    content = ServerConfigValueEditor.SetValue(content, key, value);
+                    updatedCount++;
+                }
+
+                await File.WriteAllTextAsync(confPath, content, cancellationToken);
+                applied = true;
+                var relativeConf = Path.GetRelativePath(etcDir, confPath).Replace('\\', '/');
+                AddLog(result, $"Applied {updatedCount} config override(s) from {Path.GetFileName(jsonFile)} to {relativeConf}.");
+            }
+        }, cancellationToken);
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Resolves a JSON config file name to its matching .conf path. Server configs (worldserver,
+    /// authserver) live directly in etc/; module configs live in etc/modules/.
+    /// </summary>
+    private static string? ResolveConfPath(string etcDir, string baseName)
+    {
+        var serverPath = Path.Combine(etcDir, $"{baseName}.conf");
+        if (File.Exists(serverPath))
+            return serverPath;
+
+        var modulesDir = Path.Combine(etcDir, "modules");
+        if (!Directory.Exists(modulesDir))
+            return null;
+
+        var modulePath = Path.Combine(modulesDir, $"{baseName}.conf");
+        if (File.Exists(modulePath))
+            return modulePath;
+
+        // Case-insensitive fallback: scan etc/modules/ for a matching conf file name.
+        var match = Directory.EnumerateFiles(modulesDir, "*.conf", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault(f => string.Equals(
+                Path.GetFileNameWithoutExtension(f), baseName, StringComparison.OrdinalIgnoreCase));
+
+        return match;
     }
 
     /// <summary>

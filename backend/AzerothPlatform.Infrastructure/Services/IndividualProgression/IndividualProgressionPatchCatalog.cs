@@ -73,8 +73,6 @@ public static class IndividualProgressionPatchCatalog
 internal static partial class IndividualProgressionHeaderParser
 {
     private const string HeaderFileName = "IndividualProgression.h";
-    private const string GrimfeatherHeaderUrl =
-        "https://raw.githubusercontent.com/Grimfeather/mod-individual-progression/master/src/IndividualProgression.h";
 
     [GeneratedRegex(@"^\s*PROGRESSION_(\w+)\s*=\s*(\d+)\s*,?", RegexOptions.Multiline)]
     private static partial Regex ProgressionEntryRegex();
@@ -98,23 +96,6 @@ internal static partial class IndividualProgressionHeaderParser
         }
 
         return null;
-    }
-
-    public static async Task<IReadOnlyList<ParsedState>?> TryParseFromRemoteAsync(
-        IHttpClientFactory httpClientFactory,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var client = httpClientFactory.CreateClient();
-            var content = await client.GetStringAsync(GrimfeatherHeaderUrl, cancellationToken);
-            var parsed = ParseHeader(content);
-            return parsed.Count > 0 ? parsed : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static List<ParsedState> ParseHeader(string content)

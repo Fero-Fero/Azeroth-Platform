@@ -67,4 +67,11 @@ public sealed class MigrationOptions
     /// always receives a realmlist.wtf to write.
     /// </summary>
     public string ClientSettingsTemplatePath { get; set; } = "/app/client-example/settings";
+
+    /// <summary>
+    /// Optional path to a local clone of Azeroth-Platform-Progression used for patch structure validation.
+    /// When unset, validation looks for a sibling directory named <c>Azeroth-Platform-Progression</c>
+    /// next to the platform repository root.
+    /// </summary>
+    public string? ProgressionRepoPath { get; set; }
 }

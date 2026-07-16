@@ -108,6 +108,9 @@ public static class MigrationLayout
     public static string MpqDir(string stackRoot, string patchKey) =>
         Path.Combine(PatchDir(stackRoot, patchKey), "mpq");
 
+    public static string ConfigDir(string stackRoot, string patchKey) =>
+        Path.Combine(PatchDir(stackRoot, patchKey), "config");
+
     public static string ServerDbcDir(string stackRoot) => Path.Combine(stackRoot, ServerDbcDirName);
 
     public static string ClientGameDir(string stackRoot) =>
@@ -223,6 +226,7 @@ public static class MigrationLayout
         Directory.CreateDirectory(DbcDir(stackRoot, patchKey));
         Directory.CreateDirectory(MapDir(stackRoot, patchKey));
         Directory.CreateDirectory(MpqDir(stackRoot, patchKey));
+        Directory.CreateDirectory(ConfigDir(stackRoot, patchKey));
         SeedPatchDescriptionIfMissing(stackRoot, patchKey);
     }
 
@@ -344,7 +348,8 @@ public static class MigrationLayout
                 "sql/characters/",
                 "dbc/",
                 "map/",
-                "mpq/"
+                "mpq/",
+                "config/"
             })
             {
                 AddZipDirectoryEntry(archive, patchRoot + relativeDir);

@@ -6,6 +6,9 @@ import { stackKeys } from '@/hooks/useStacks'
 import { StackStatus } from '@/types/stack.types'
 import type { StackDetailsDto } from '@/types/stack.types'
 import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
+import IndividualProgressionSyncHint, {
+  isIpSyncHintDismissed,
+} from '@/components/modules/IndividualProgressionSyncHint'
 
 interface ModuleSetupWarningsProps {
   stack: StackDetailsDto
@@ -19,6 +22,7 @@ const AH_BOT_GUID_KEY = 'AC_AUCTION_HOUSE_BOT_GUIDS'
  */
 export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps) {
   const queryClient = useQueryClient()
+  const [ipHintDismissed, setIpHintDismissed] = useState(() => isIpSyncHintDismissed(stack.stackId))
 
   // ── AH Bot ──────────────────────────────────────────────────────────────────
   const [ahBotDone, setAhBotDone] = useState(false)
@@ -28,6 +32,7 @@ export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps)
 
   const hasDungeonSim = stack.configuration.moduleIds?.includes('mod-playerbot-dungeon-sim')
   const hasIndividualProgression = stack.configuration.moduleIds?.includes(INDIVIDUAL_PROGRESSION_MODULE_ID)
+  const showIpSyncHint = hasIndividualProgression && !ipHintDismissed
 
   const createAhBotMutation = useMutation({
     mutationFn: async () => {
@@ -71,30 +76,17 @@ export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps)
 
   const soapUsername = `acmgr_${stack.stackId.substring(0, 8)}`
 
-  if (!soapNeedsSetup && !ahBotNeedsSetup && !hasDungeonSim && !hasIndividualProgression) return null
+  if (!soapNeedsSetup && !ahBotNeedsSetup && !hasDungeonSim && !showIpSyncHint) return null
 
   return (
     <div className="mb-8 space-y-3">
 
-      {hasIndividualProgression && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-5 py-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
-            <div>
-              <p className="text-sm font-semibold text-violet-900">Individual Progression — next steps</p>
-              <p className="mt-1 text-sm text-violet-800">
-                Open the{' '}
-                <a
-                  href={`/stacks/${stack.stackId}?tab=patches`}
-                  className="font-medium text-violet-700 underline hover:text-violet-900"
-                >
-                  Patches tab
-                </a>{' '}
-                to prepare server-wide progression (bootstrap), import release content, and apply patches in order.
-              </p>
-            </div>
-          </div>
-        </div>
+      {showIpSyncHint && (
+        <IndividualProgressionSyncHint
+          stackId={stack.stackId}
+          patchesHref={`/stacks/${stack.stackId}?tab=patches`}
+          onDismiss={() => setIpHintDismissed(true)}
+        />
       )}
 
       {hasDungeonSim && (

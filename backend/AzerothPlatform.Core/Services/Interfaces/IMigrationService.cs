@@ -30,13 +30,6 @@ public interface IMigrationService
     /// </summary>
     Task<ImportPatchCollectionResultDto> ImportPatchCollectionAsync(string stackId, Stream zipContent, string mode, CancellationToken cancellationToken = default);
 
-    Task<MergePatchImportResultDto> MergePatchImportAsync(
-        string stackId,
-        string targetPatchKey,
-        Stream? sqlArchive,
-        Stream? clientArchive,
-        CancellationToken cancellationToken = default);
-
     /// <summary>Lists one directory level of the stack's patch folder tree.</summary>
     Task<ClientBrowseResultDto> BrowsePatchFilesAsync(string stackId, string relativePath, CancellationToken cancellationToken = default);
 

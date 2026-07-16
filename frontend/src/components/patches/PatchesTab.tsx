@@ -21,7 +21,6 @@ import {
   useBootstrapIndividualProgression,
   useValidateIndividualProgressionPatches,
   useRecreateMissingProgressionPatches,
-  useIndividualProgressionSettings,
   patchKeys,
 } from '@/hooks/usePatches'
 import { stackKeys } from '@/hooks/useStacks'
@@ -32,7 +31,6 @@ import DbcEditorDialog from './DbcEditorDialog'
 import MpqRemovalPanel from './MpqRemovalPanel'
 import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
-import ServerProgressionTab from './ServerProgressionTab'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
 import type { IndividualProgressionValidationResult } from '@/types/individual-progression.types'
 import { INDIVIDUAL_PROGRESSION_EXPECTED_PATCH_COUNT } from '@/types/individual-progression.types'
@@ -189,24 +187,6 @@ const IMPORT_ARCHIVE_EXTENSIONS = [
 ] as const
 const IMPORT_ARCHIVE_ACCEPT = IMPORT_ARCHIVE_EXTENSIONS.join(',')
 
-type ProgressionImportExpansion = 'classic' | 'tbc' | 'wotlk'
-
-const PROGRESSION_IMPORT_SLOTS: {
-  id: ProgressionImportExpansion
-  label: string
-  fileHint: string
-  indexRoot: number
-}[] = [
-  { id: 'classic', label: 'Classic', fileHint: 'client.zip', indexRoot: 1 },
-  { id: 'tbc', label: 'TBC', fileHint: 'tbc.zip', indexRoot: 2 },
-  { id: 'wotlk', label: 'WotLK', fileHint: 'wotlk.zip', indexRoot: 3 },
-]
-
-const EMPTY_PROGRESSION_IMPORT_FILES: Record<ProgressionImportExpansion, File | null> = {
-  classic: null,
-  tbc: null,
-  wotlk: null,
-}
 
 function isImportArchive(file: File): boolean {
   const lower = file.name.toLowerCase()
@@ -264,35 +244,24 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const recreatePatchesMutation = useRecreateMissingProgressionPatches(stackId)
   const hasIpModule = overview?.hasIndividualProgressionModule ?? false
   const ipBootstrapped = hasIpModule && (overview?.individualProgressionBootstrapped ?? false)
-  const { data: ipSettings } = useIndividualProgressionSettings(stackId, hasIpModule)
 
   const [showCreate, setShowCreate] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [showProgressionImport, setShowProgressionImport] = useState(false)
   const [showBrowser, setShowBrowser] = useState(false)
   const [confirmReapply, setConfirmReapply] = useState(false)
   const [confirmApply, setConfirmApply] = useState(false)
-  const [patchesPageTab, setPatchesPageTab] = useState<'patches' | 'progression'>('patches')
   const [newExpansion, setNewExpansion] = useState<Expansion>('classic')
   const [newKind, setNewKind] = useState<PatchKind>('patch')
   const [newParentIndex, setNewParentIndex] = useState('')
   const [newName, setNewName] = useState('')
   const [importMode, setImportMode] = useState<ImportPatchCollectionMode>('merge')
   const [importFile, setImportFile] = useState<File | null>(null)
-  const [progressionImportFiles, setProgressionImportFiles] = useState(EMPTY_PROGRESSION_IMPORT_FILES)
-  const [progressionImportSlot, setProgressionImportSlot] = useState<ProgressionImportExpansion | null>(null)
   const [importSummary, setImportSummary] = useState<string | null>(null)
   const [validationResult, setValidationResult] = useState<IndividualProgressionValidationResult | null>(null)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const [importDragActive, setImportDragActive] = useState(false)
-  const [progressionDragActive, setProgressionDragActive] = useState<ProgressionImportExpansion | null>(null)
   const [importUploadPercent, setImportUploadPercent] = useState<number | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
-  const progressionImportFileRefs = useRef<Record<ProgressionImportExpansion, HTMLInputElement | null>>({
-    classic: null,
-    tbc: null,
-    wotlk: null,
-  })
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null)
   const [editFile, setEditFile] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -512,79 +481,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     setImportFile(file)
   }
 
-  const handleSelectProgressionImportFile = (
-    expansion: ProgressionImportExpansion,
-    file: File | null | undefined
-  ) => {
-    if (!file) return
-    if (!isImportArchive(file)) {
-      setActionError(`Unsupported file type. Accepted archives: ${IMPORT_ARCHIVE_EXTENSIONS.join(', ')}.`)
-      return
-    }
-    setActionError(null)
-    setImportSummary(null)
-    setProgressionImportFiles((prev) => ({ ...prev, [expansion]: file }))
-  }
-
-  const closeProgressionImport = () => {
-    setShowProgressionImport(false)
-    setProgressionImportFiles(EMPTY_PROGRESSION_IMPORT_FILES)
-    setProgressionImportSlot(null)
-    setProgressionDragActive(null)
-  }
 
   const handleImportCollection = async () => {
     setActionError(null)
     setImportSummary(null)
-
-    if (showProgressionImport) {
-      const slots = PROGRESSION_IMPORT_SLOTS.filter((slot) => progressionImportFiles[slot.id])
-      if (slots.length === 0) {
-        setActionError('Choose at least one progression archive (client.zip, tbc.zip, or wotlk.zip).')
-        return
-      }
-
-      setImportUploadPercent(0)
-      let totalImported = 0
-      const allRemapped: { sourceKey: string; targetKey: string }[] = []
-      let lastTargetKey: string | undefined
-
-      try {
-        for (const slot of slots) {
-          const file = progressionImportFiles[slot.id]!
-          setProgressionImportSlot(slot.id)
-          const res = await importMutation.mutateAsync({
-            file,
-            mode: 'merge',
-            onProgress: setImportUploadPercent,
-          })
-          totalImported += res.data.importedCount
-          allRemapped.push(
-            ...res.data.importedPatches.filter((p) => p.sourceKey !== p.targetKey)
-          )
-          if (res.data.importedPatches[0]?.targetKey) {
-            lastTargetKey = res.data.importedPatches[0].targetKey
-          }
-        }
-
-        setProgressionImportFiles(EMPTY_PROGRESSION_IMPORT_FILES)
-        setImportSummary(
-          `Imported ${totalImported} progression patch${totalImported === 1 ? '' : 'es'} from ${slots.length} archive${slots.length === 1 ? '' : 's'} in merge mode.` +
-            (allRemapped.length > 0
-              ? ` Mapped ${allRemapped.length} archive folder${allRemapped.length === 1 ? '' : 's'} onto existing templates (e.g. ${allRemapped[0].sourceKey} → ${allRemapped[0].targetKey}).`
-              : '')
-        )
-        if (lastTargetKey) {
-          setSelectedKey(lastTargetKey)
-        }
-      } catch (err) {
-        setActionError(extractError(err))
-      } finally {
-        setImportUploadPercent(null)
-        setProgressionImportSlot(null)
-      }
-      return
-    }
 
     if (!importFile) {
       setActionError('Choose a patch collection archive to import.')
@@ -646,7 +546,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       setImportSummary(
         `Prepared server-wide progression: ${res.data.templatesCreated} patch templates created. Import patch content, then run patch validation before applying.`
       )
-      setShowProgressionImport(false)
     } catch (err) {
       setActionError(extractError(err))
     }
@@ -673,7 +572,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
           ? `Created ${res.data.templatesCreated} missing progression patch template(s). Re-run validation after importing content.`
           : 'All progression patch templates are already present.'
       )
-      setShowProgressionImport(false)
     } catch (err) {
       setActionError(extractError(err))
     }
@@ -924,39 +822,23 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const importInProgress = importMutation.isPending || importUploadPercent !== null
   const importUploading = importUploadPercent !== null && importUploadPercent < 100
   const importProcessing = importMutation.isPending && !importUploading
-  const progressionImportReady = PROGRESSION_IMPORT_SLOTS.some((slot) => progressionImportFiles[slot.id])
-  const progressionImportSlotLabel =
-    progressionImportSlot != null
-      ? PROGRESSION_IMPORT_SLOTS.find((slot) => slot.id === progressionImportSlot)?.label
-      : null
   const showBootstrapCta =
     hasIpModule &&
     (overview?.currentLevel ?? 0) === 0 &&
     !isApplying &&
     !overview?.individualProgressionBootstrapped
-  const showValidationPanel =
-    ipBootstrapped && patchesPageTab === 'patches'
-  const showProgressionImportPrompt =
-    ipBootstrapped && patchesPageTab === 'patches' && !showProgressionImport && !showImport
+  const showValidationPanel = ipBootstrapped
   const progressionPatchCountMismatch =
     (validationResult?.patchCount ?? overview?.individualProgressionPatchCount ?? 0) !==
     expectedProgressionPatchCount
 
   const applyProgressionPreview = (() => {
     const meta = detail?.progression
-    if (!meta || !ipSettings) return null
-    const keys = ipSettings.keys
-    const starting = ipSettings.values[keys.startingProgression] ?? '?'
-    const limit = ipSettings.values[keys.progressionLimit] ?? '?'
-    const expansion = ipSettings.values.Expansion ?? '?'
-    const nextStarting = meta.incrementsProgression
-      ? String(Number(starting) + 1 || 1)
-      : starting
-    const nextLimit = meta.incrementsProgression ? String(Number(limit) + 1 || 1) : limit
+    if (!meta) return null
     let nextExpansion: string | null = null
     if (meta.expansion === 'tbc' && meta.state === 8) nextExpansion = '1'
     if (meta.expansion === 'wotlk' && meta.state === 14) nextExpansion = '2'
-    return { meta, starting, limit, expansion, nextStarting, nextLimit, nextExpansion }
+    return { meta, nextExpansion }
   })()
 
   return (
@@ -1075,44 +957,16 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             </div>
           </div>
         </div>
-        {hasIpModule && (
-          <div className="flex gap-1 border-t border-gray-100 bg-gray-50/50 px-5">
-            <button
-              type="button"
-              onClick={() => setPatchesPageTab('patches')}
-              className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                patchesPageTab === 'patches'
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              Patch library
-            </button>
-            <button
-              type="button"
-              onClick={() => setPatchesPageTab('progression')}
-              className={`inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                patchesPageTab === 'progression'
-                  ? 'border-violet-600 text-violet-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              <TrendingUp className="h-4 w-4" />
-              Server Progression
-            </button>
-          </div>
-        )}
       </section>
 
-      {showBootstrapCta && patchesPageTab === 'patches' && (
+      {showBootstrapCta && (
         <section className="rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-violet-900">Individual Progression</p>
               <p className="mt-1 max-w-2xl text-sm text-violet-800">
-                No progression patches applied yet. <strong>Apply server-wide progression</strong> prepares
-                Classic-era config, discovers conf keys, and installs the progression patch template set. You
-                apply patches yourself when ready — nothing is auto-applied.
+                Prepare progression patch templates, then use <strong>Sync with mod-individual-progression</strong>{' '}
+                below to pull content before applying patches.
               </p>
             </div>
             <button
@@ -1142,8 +996,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900">Patch validation</p>
               <p className="mt-1 max-w-2xl text-sm text-gray-700">
-                After importing progression patch content, run validation before applying any patch. Re-run
-                validation after every server recompile — a new build invalidates the previous check.
+                After importing progression patch content, run validation before applying any patch. Checks
+                patch folders against the local Azeroth-Platform-Progression repository structure, progression
+                patch count, and server config keys. Re-run validation after every server recompile — a new
+                build invalidates the previous check.
               </p>
               {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-green-800">
@@ -1256,17 +1112,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
         </section>
       )}
 
-      {ipBootstrapped && patchesPageTab === 'patches' && (
+      {ipBootstrapped && (
         <ProgressionSyncPanel stackId={stackId} />
       )}
-
-      {patchesPageTab === 'progression' && hasIpModule ? (
-        <ServerProgressionTab
-          stackId={stackId}
-          bootstrapped={overview?.individualProgressionBootstrapped ?? false}
-        />
-      ) : (
-        <>
 
       {actionError && (
         <div className="bg-red-50 border border-red-200 rounded-md px-4 py-2 text-sm text-red-700">
@@ -1337,94 +1185,30 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
 
       {showBrowser && <PatchesFolderBrowser stackId={stackId} />}
 
-      {showProgressionImportPrompt && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-violet-200 bg-violet-50/60 px-4 py-2.5 text-sm text-violet-900">
-          <span>
-            Progression templates are ready. Import preset archives{' '}
-            <span className="font-mono">client.zip</span>, <span className="font-mono">tbc.zip</span>, and/or{' '}
-            <span className="font-mono">wotlk.zip</span>.
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowProgressionImport(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Import preset
-          </button>
-        </div>
-      )}
 
-      {(showImport || showProgressionImport) && (
+      {showImport && (
         <section
-          className={`rounded-lg border p-5 shadow-sm space-y-4 ${
-            showProgressionImport
-              ? 'border-violet-200 bg-violet-50/30'
-              : 'border-gray-200 bg-white'
-          }`}
+          className="rounded-lg border p-5 shadow-sm space-y-4 border-gray-200 bg-white"
         >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-            <h3 className="font-semibold text-gray-900">
-              {showProgressionImport ? 'Import progression preset' : 'Import patch collection'}
-            </h3>
+          <div>
+            <h3 className="font-semibold text-gray-900">Import patch collection</h3>
             <p className="text-sm text-gray-500 mt-1">
-              {showProgressionImport ? (
-                <>
-                  Upload one or more progression preset archives —{' '}
-                  <span className="font-mono">client.zip</span> (Classic),{' '}
-                  <span className="font-mono">tbc.zip</span> (TBC), and{' '}
-                  <span className="font-mono">wotlk.zip</span> (WotLK). Each archive contains patch folders
-                  such as <span className="font-mono">patch 1.0</span>, <span className="font-mono">patch 1.1</span>,{' '}
-                  <span className="font-mono">patch 2.0</span>, and so on. SQL, DBC, map, and MPQ files land in
-                  the matching template folders for that expansion.
-                </>
-              ) : (
-                <>
-                  Upload an archive (zip, rar, 7z, tar, …) with expansion folders (
-                  <span className="font-mono">classic</span>, <span className="font-mono">tbc</span>,{' '}
-                  <span className="font-mono">wotlk</span>, <span className="font-mono">custom</span>) or patch
-                  folders at the root. Each patch folder must be named <span className="font-mono">patch {'{index}'}</span>{' '}
-                  or <span className="font-mono">patch {'{index} {name}'}</span>. Indices use expansion roots{' '}
-                  <span className="font-mono">1</span> (classic), <span className="font-mono">2</span> (tbc),{' '}
-                  <span className="font-mono">3</span> (wotlk), <span className="font-mono">4</span> (custom) with
-                  sub-versions like <span className="font-mono">1.1</span> (patch) or{' '}
-                  <span className="font-mono">1.1.1</span> (hotfix). Override imports preserve archive indices;
-                  append assigns the next <span className="font-mono">1.x</span>, <span className="font-mono">2.x</span>,{' '}
-                  <span className="font-mono">3.x</span>, or <span className="font-mono">4.x</span> per expansion.
-                </>
-              )}
+              Upload an archive (zip, rar, 7z, tar, …) with expansion folders (
+              <span className="font-mono">classic</span>, <span className="font-mono">tbc</span>,{' '}
+              <span className="font-mono">wotlk</span>, <span className="font-mono">custom</span>) or patch
+              folders at the root. Each patch folder must be named <span className="font-mono">patch {'{index}'}</span>{' '}
+              or <span className="font-mono">patch {'{index} {name}'}</span>. Indices use expansion roots{' '}
+              <span className="font-mono">1</span> (classic), <span className="font-mono">2</span> (tbc),{' '}
+              <span className="font-mono">3</span> (wotlk), <span className="font-mono">4</span> (custom) with
+              sub-versions like <span className="font-mono">1.1</span> (patch) or{' '}
+              <span className="font-mono">1.1.1</span> (hotfix). Override imports preserve archive indices;
+              append assigns the next <span className="font-mono">1.x</span>, <span className="font-mono">2.x</span>,{' '}
+              <span className="font-mono">3.x</span>, or <span className="font-mono">4.x</span> per expansion.
             </p>
-            </div>
-            {showProgressionImport && (
-              <button
-                type="button"
-                onClick={closeProgressionImport}
-                className="shrink-0 text-xs text-violet-700 hover:text-violet-900"
-              >
-                Close
-              </button>
-            )}
           </div>
 
           <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 font-mono whitespace-pre-wrap">
-            {showProgressionImport
-              ? `client.zip
-├── patch 1.0 START/
-├── patch 1.1 MOLTEN_CORE/
-└── patch 1.2 ONYXIA/
-
-tbc.zip
-├── patch 2.0 PRE_TBC/
-└── patch 2.1 TBC_TIER_1/
-
-wotlk.zip
-├── patch 3.0 WOTLK_TIER_1/
-└── patch 3.1 WOTLK_TIER_2/
-
-Each patch folder may contain sql/world/, sql/auth/, sql/characters/, dbc/, map/, and mpq/ subfolders.
-Upload one, two, or all three archives — each merges into the matching expansion.`
-              : `collection.zip
+            {`collection.zip
 ├── classic/                         (or tbc/, wotlk/)
 │   └── patch 1.1/                   e.g. patch 1.0, patch 1.1, patch 2.0, patch 3.1 my_content
 │       ├── description.md           optional — shown on the Description tab
@@ -1464,205 +1248,118 @@ Flat layout also works:
             Download patch template
           </button>
 
-          {!showProgressionImport && (
-            <>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setImportMode('merge')}
-                  className={`px-3 py-2 rounded-md border text-sm ${
-                    effectiveImportMode === 'merge'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  Merge
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMode('append')}
-                  className={`px-3 py-2 rounded-md border text-sm ${
-                    effectiveImportMode === 'append'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  Append
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setImportMode('override')}
-                  disabled={hasAppliedPatches}
-                  title={hasAppliedPatches ? 'Override is unavailable after any patch has been applied.' : undefined}
-                  className={`px-3 py-2 rounded-md border text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
-                    effectiveImportMode === 'override'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  Override
-                </button>
-              </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setImportMode('merge')}
+              className={`px-3 py-2 rounded-md border text-sm ${
+                effectiveImportMode === 'merge'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Merge
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportMode('append')}
+              className={`px-3 py-2 rounded-md border text-sm ${
+                effectiveImportMode === 'append'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Append
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportMode('override')}
+              disabled={hasAppliedPatches}
+              title={hasAppliedPatches ? 'Override is unavailable after any patch has been applied.' : undefined}
+              className={`px-3 py-2 rounded-md border text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
+                effectiveImportMode === 'override'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Override
+            </button>
+          </div>
 
-              <p className="text-xs text-gray-500">
-                {effectiveImportMode === 'merge'
-                  ? 'Merge copies files into existing patch folders that match the archive names, and creates any missing patches using the indices from the archive.'
-                  : effectiveImportMode === 'append'
-                  ? 'Append keeps existing patches and assigns each imported folder the next patch index (1.x, 2.x, or 3.x) for its expansion. Optional labels from the archive are preserved.'
-                  : 'Override removes all existing patch folders first, then imports using the indices provided in the archive.'}
-                {hasAppliedPatches && (
-                  <span className="ml-1 text-amber-600">
-                    Override is locked because patches have already been applied.
-                  </span>
-                )}
-              </p>
-            </>
-          )}
-
-          {showProgressionImport && (
-            <p className="text-xs text-gray-500">
-              Progression preset imports always use merge mode — files are copied into existing template
-              folders that match by patch index (e.g. archive <span className="font-mono">patch 1.0</span>{' '}
-              → template <span className="font-mono">patch 1.0 START</span>).
-            </p>
-          )}
+          <p className="text-xs text-gray-500">
+            {effectiveImportMode === 'merge'
+              ? 'Merge copies files into existing patch folders that match the archive names, and creates any missing patches using the indices from the archive.'
+              : effectiveImportMode === 'append'
+              ? 'Append keeps existing patches and assigns each imported folder the next patch index (1.x, 2.x, or 3.x) for its expansion. Optional labels from the archive are preserved.'
+              : 'Override removes all existing patch folders first, then imports using the indices provided in the archive.'}
+            {hasAppliedPatches && (
+              <span className="ml-1 text-amber-600">
+                Override is locked because patches have already been applied.
+              </span>
+            )}
+          </p>
 
           <div className="space-y-3">
-            {showProgressionImport ? (
-              <div className="grid gap-3 md:grid-cols-3">
-                {PROGRESSION_IMPORT_SLOTS.map((slot) => {
-                  const selectedFile = progressionImportFiles[slot.id]
-                  const isActiveSlot = progressionImportSlot === slot.id
-                  const isDragTarget = progressionDragActive === slot.id
-                  return (
-                    <div
-                      key={slot.id}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        if (!importInProgress && !isApplying) setProgressionDragActive(slot.id)
-                      }}
-                      onDragLeave={(e) => {
-                        e.preventDefault()
-                        if (progressionDragActive === slot.id) setProgressionDragActive(null)
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        setProgressionDragActive(null)
-                        if (importInProgress || isApplying) return
-                        handleSelectProgressionImportFile(slot.id, e.dataTransfer.files?.[0])
-                      }}
-                      onClick={() => {
-                        if (importInProgress || isApplying) return
-                        progressionImportFileRefs.current[slot.id]?.click()
-                      }}
-                      className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-3 py-6 text-center text-sm transition-colors ${
-                        importInProgress || isApplying
-                          ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                          : isDragTarget
-                          ? 'border-violet-500 bg-violet-50 text-violet-700 cursor-pointer'
-                          : selectedFile
-                          ? 'border-violet-300 bg-violet-50/60 text-violet-900 cursor-pointer'
-                          : 'border-gray-300 bg-gray-50/50 text-gray-600 hover:border-violet-400 hover:bg-violet-50/40 cursor-pointer'
-                      }`}
-                    >
-                      {importInProgress && isActiveSlot ? (
-                        <Loader2 className="h-5 w-5 animate-spin text-violet-600" />
-                      ) : (
-                        <Upload className="h-5 w-5 text-violet-600" />
-                      )}
-                      <span className="font-medium">{slot.label}</span>
-                      <span className="font-mono text-xs text-gray-500">{slot.fileHint}</span>
-                      <span className="text-xs text-gray-500">
-                        patch {slot.indexRoot}.x folders
-                      </span>
-                      <span className="text-xs font-medium break-all">
-                        {importInProgress && isActiveSlot
-                          ? importUploading
-                            ? `Uploading… ${importUploadPercent}%`
-                            : 'Processing on server…'
-                          : selectedFile
-                          ? selectedFile.name
-                          : 'Drop or click to browse'}
-                      </span>
-                      <input
-                        ref={(el) => {
-                          progressionImportFileRefs.current[slot.id] = el
-                        }}
-                        type="file"
-                        accept={IMPORT_ARCHIVE_ACCEPT}
-                        className="hidden"
-                        disabled={importInProgress || isApplying}
-                        onChange={(e) => {
-                          handleSelectProgressionImportFile(slot.id, e.target.files?.[0])
-                          e.target.value = ''
-                        }}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault()
-                  if (!importInProgress && !isApplying) setImportDragActive(true)
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault()
-                  setImportDragActive(false)
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  setImportDragActive(false)
-                  if (importInProgress || isApplying) return
-                  handleSelectImportFile(e.dataTransfer.files?.[0])
-                }}
-                onClick={() => {
-                  if (importInProgress || isApplying) return
-                  importFileRef.current?.click()
-                }}
-                className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-8 text-center text-sm transition-colors ${
-                  importInProgress || isApplying
-                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
-                    : importDragActive
-                    ? 'border-blue-500 bg-blue-50 text-blue-700 cursor-pointer'
-                    : 'border-gray-300 bg-gray-50/50 text-gray-600 hover:border-blue-400 hover:bg-blue-50/40 cursor-pointer'
-                }`}
-              >
-                {importInProgress ? (
-                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-                ) : (
-                  <Upload className="h-6 w-6 text-blue-600" />
-                )}
-                <span className="font-medium">
-                  {importUploading
-                    ? `Uploading… ${importUploadPercent}%`
-                    : importProcessing
-                    ? 'Processing archive on server…'
-                    : importDragActive
-                    ? 'Drop the archive to select it'
-                    : importFile
-                    ? importFile.name
-                    : 'Drag & drop a patch collection archive here, or click to browse'}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                if (!importInProgress && !isApplying) setImportDragActive(true)
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault()
+                setImportDragActive(false)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                setImportDragActive(false)
+                if (importInProgress || isApplying) return
+                handleSelectImportFile(e.dataTransfer.files?.[0])
+              }}
+              onClick={() => {
+                if (importInProgress || isApplying) return
+                importFileRef.current?.click()
+              }}
+              className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-8 text-center text-sm transition-colors ${
+                importInProgress || isApplying
+                  ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                  : importDragActive
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 cursor-pointer'
+                  : 'border-gray-300 bg-gray-50/50 text-gray-600 hover:border-blue-400 hover:bg-blue-50/40 cursor-pointer'
+              }`}
+            >
+              {importInProgress ? (
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              ) : (
+                <Upload className="h-6 w-6 text-blue-600" />
+              )}
+              <span className="font-medium">
+                {importUploading
+                  ? `Uploading… ${importUploadPercent}%`
+                  : importProcessing
+                  ? 'Processing archive on server…'
+                  : importDragActive
+                  ? 'Drop the archive to select it'
+                  : importFile
+                  ? importFile.name
+                  : 'Drag & drop a patch collection archive here, or click to browse'}
+              </span>
+              {!importInProgress && (
+                <span className="text-xs text-gray-400">
+                  {importFile ? 'Click or drop another file to replace' : 'zip · rar · 7z · tar / tar.gz'}
                 </span>
-                {!importInProgress && (
-                  <span className="text-xs text-gray-400">
-                    {importFile ? 'Click or drop another file to replace' : 'zip · rar · 7z · tar / tar.gz'}
-                  </span>
-                )}
-                <input
-                  ref={importFileRef}
-                  type="file"
-                  accept={IMPORT_ARCHIVE_ACCEPT}
-                  className="hidden"
-                  disabled={importInProgress || isApplying}
-                  onChange={(e) => {
-                    handleSelectImportFile(e.target.files?.[0])
-                    e.target.value = ''
-                  }}
-                />
-              </div>
-            )}
+              )}
+              <input
+                ref={importFileRef}
+                type="file"
+                accept={IMPORT_ARCHIVE_ACCEPT}
+                className="hidden"
+                disabled={importInProgress || isApplying}
+                onChange={(e) => {
+                  handleSelectImportFile(e.target.files?.[0])
+                  e.target.value = ''
+                }}
+              />
+            </div>
 
             {importUploading && (
               <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
@@ -1673,37 +1370,20 @@ Flat layout also works:
               </div>
             )}
             {importProcessing && (
-              <div className="space-y-1">
-                {showProgressionImport && progressionImportSlotLabel && (
-                  <p className="text-xs text-gray-500">
-                    Processing {progressionImportSlotLabel} archive…
-                  </p>
-                )}
-                <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
-                  <div className="h-full w-full animate-pulse bg-blue-400" />
-                </div>
+              <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
+                <div className="h-full w-full animate-pulse bg-blue-400" />
               </div>
             )}
 
             <button
               type="button"
               onClick={handleImportCollection}
-              disabled={
-                importInProgress ||
-                isApplying ||
-                (showProgressionImport ? !progressionImportReady : !importFile)
-              }
-              className={`px-4 py-2 text-white rounded-md flex items-center gap-2 disabled:opacity-50 ${
-                showProgressionImport
-                  ? 'bg-violet-600 hover:bg-violet-700'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
+              disabled={importInProgress || isApplying || !importFile}
+              className="px-4 py-2 text-white rounded-md flex items-center gap-2 disabled:opacity-50 bg-blue-600 hover:bg-blue-700"
             >
               {importInProgress && <Loader2 className="w-4 h-4 animate-spin" />}
               {importUploading
-                ? progressionImportSlotLabel
-                  ? `Uploading ${progressionImportSlotLabel} ${importUploadPercent}%`
-                  : `Uploading ${importUploadPercent}%`
+                ? `Uploading ${importUploadPercent}%`
                 : importProcessing
                 ? 'Processing…'
                 : 'Import'}
@@ -2047,6 +1727,23 @@ Flat layout also works:
                   mpqRemovals={detail?.mpqRemovals ?? []}
                 />
               </div>
+              <PatchFileCategory
+                title="Config overrides"
+                category="config"
+                accept=".json"
+                files={filesByCategory['config'] ?? []}
+                uploading={uploadingCategory === 'config'}
+                error={errorFor('config')}
+                notice={
+                  <span>
+                    Upload JSON files (e.g.{' '}
+                    <span className="font-mono">worldserver.json</span>) mapping config keys to
+                    values. On apply, each key is written to the matching <span className="font-mono">.conf</span> file.
+                  </span>
+                }
+                onUpload={handleUpload}
+                onDelete={handleDelete}
+              />
                 </>
               ) : (
                 <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
@@ -2097,8 +1794,6 @@ Flat layout also works:
           )}
         </main>
       </div>
-      </>
-      )}
 
       {editFile && selectedKey && (
         <DbcEditorDialog
@@ -2125,26 +1820,17 @@ Flat layout also works:
                     START patch — does not increment progression counters.
                   </p>
                 )}
-                <ul className="mt-3 space-y-1 text-sm text-gray-700">
-                  {applyProgressionPreview.meta.incrementsProgression && (
-                    <>
-                      <li>
-                        Starting progression: {applyProgressionPreview.starting} →{' '}
-                        <strong>{applyProgressionPreview.nextStarting}</strong>
-                      </li>
-                      <li>
-                        Progression limit: {applyProgressionPreview.limit} →{' '}
-                        <strong>{applyProgressionPreview.nextLimit}</strong>
-                      </li>
-                    </>
-                  )}
-                  {applyProgressionPreview.nextExpansion && (
-                    <li>
-                      Expansion: {applyProgressionPreview.expansion} →{' '}
-                      <strong>{applyProgressionPreview.nextExpansion}</strong>
-                    </li>
-                  )}
-                </ul>
+                {applyProgressionPreview.meta.incrementsProgression && (
+                  <p className="text-sm text-gray-700 mt-2">
+                    Progression counters will be incremented when this patch finishes applying.
+                  </p>
+                )}
+                {applyProgressionPreview.nextExpansion && (
+                  <p className="text-sm text-gray-700 mt-2">
+                    Expansion will be set to{' '}
+                    <strong>{applyProgressionPreview.nextExpansion}</strong>.
+                  </p>
+                )}
                 <p className="text-xs text-gray-500 mt-3">
                   Individual Progression config will be updated automatically when this patch finishes applying.
                 </p>

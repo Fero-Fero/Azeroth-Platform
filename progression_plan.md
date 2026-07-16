@@ -72,11 +72,18 @@ An admin can request an update, which triggers the following background process:
 
 ## MPQ Construction
 
-The MPQ directory currently supports uploading pre-built `.mpq` files, which should continue to work. In addition, there should be support for uploading raw content files and having the `.mpq` archive constructed automatically when a patch is applied.
+The `mpq/` directory supports **two ways** to ship client MPQ changes:
+
+| Approach | What you put in `mpq/` | What happens on apply |
+|----------|------------------------|------------------------|
+| **Pre-built archive** | A finished file such as `patch-k.mpq` | Published to clients unchanged |
+| **Raw content** | The files that belong inside an MPQ (e.g. `Interface/…`) plus an `mpq.json` manifest | Platform builds the archive named in **`add`** from the raw files |
+
+For each name in **`add`**, construction is skipped when a matching `.mpq` file already exists in the directory; otherwise the platform packs the raw content tree into a new archive with that name.
 
 ### MPQ Manifest
 
-Each MPQ directory should contain an `mpq.json` manifest with the following structure:
+When using raw content, each MPQ directory should contain an `mpq.json` manifest with the following structure:
 
 ```json
 {
@@ -92,9 +99,11 @@ Each MPQ directory should contain an `mpq.json` manifest with the following stru
 }
 ```
 
-- **`add`** — Lists `.mpq` files to be constructed from the raw content within the MPQ directory.
-- **`remove`** — Lists `.mpq` files to be deleted when the patch is applied.
-- **`description`** — Provides a human-readable description for each added `.mpq` file.
+- **`add`** — `.mpq` file names this patch adds. Each entry is either a pre-built file already present in `mpq/`, or the name of an archive to build from raw content in that folder.
+- **`remove`** — `.mpq` file names to delete from the client when the patch is applied.
+- **`description`** — Optional human-readable notes for entries in **`add`** (shown in the Patches UI).
+
+The `mpq.json` file is only a manifest — it is never included inside a constructed archive.
 
 ### Construction Logic
 
@@ -110,4 +119,48 @@ When re-applying all patches, the system should resolve the final set of `.mpq` 
 
 The final result should only construct `patch-e.mpq` and `patch-s.mpq` from their respective patch directories. Construction of `patch-k.mpq` is skipped entirely since it would be removed by a later patch. This avoids wasting time building archives that will be discarded.
 
-**Pre-built files:** If a patch directory already contains a pre-built `.mpq` file (rather than raw content), skip construction and apply the file directly.
+**Pre-built files:** If `mpq/` already contains a file whose name matches an entry in **`add`**, that archive is used as-is and construction is skipped for that name.
+
+**Raw content:** If no matching `.mpq` exists, the platform builds one from the non-manifest files in `mpq/` (and subfolders), using the file name from **`add`**.
+
+---
+
+## Config Overrides
+
+Each patch directory may contain a `config/` sub-directory holding JSON files that define server configuration overrides. When a patch is applied, the overrides are written to the corresponding `.conf` file in the stack's `etc/` directory before the server restarts.
+
+### File Format
+
+Each JSON file is named after the target config file. The file name determines which `.conf` file is updated:
+
+- **Server configs:** `worldserver.json` → `etc/worldserver.conf`, `authserver.json` → `etc/authserver.conf`
+- **Module configs:** `individualProgression.json` → `etc/modules/individualProgression.conf`, `mod_ahbot.json` → `etc/modules/mod_ahbot.conf`
+
+Resolution order: the system first checks `etc/{name}.conf`, then `etc/modules/{name}.conf` (with a case-insensitive fallback).
+
+Example `worldserver.json`:
+
+```json
+{
+    "Rate.XP.Kill": "2",
+    "Rate.XP.Quest": "3"
+}
+```
+
+Example `individualProgression.json`:
+
+```json
+{
+    "IndividualProgression.StartingProgression": "5",
+    "IndividualProgression.ProgressionLimit": "5"
+}
+```
+
+Each key corresponds to a config key in the `.conf` file. The key is always followed by an `=` sign in the conf file, potentially with surrounding whitespace (e.g. `Rate.XP.Kill         = 1`). The value in the JSON replaces the existing value.
+
+### Apply Behaviour
+
+- Config overrides are applied **after** SQL, DBC, maps, and MPQ stages but **before** the server restart, ensuring the updated config is read on the next startup.
+- When re-applying all patches, config overrides from each patch are applied in order so later patches override earlier ones.
+- If the target `.conf` file does not exist, the override is skipped with a log message.
+- If a key does not exist in the `.conf` file, it is appended at the end.

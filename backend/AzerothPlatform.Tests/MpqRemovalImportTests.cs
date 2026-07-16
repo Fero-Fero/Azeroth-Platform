@@ -76,46 +76,6 @@ public sealed class MpqRemovalImportTests
         }
     }
 
-    [Fact]
-    public async Task MergePatchImportAsync_imports_mpq_remove_json_into_remove_sidecar()
-    {
-        var stackId = "merge-remove";
-        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-merge-remove-" + Guid.NewGuid().ToString("N"));
-        var stackRoot = Path.Combine(buildsPath, stackId);
-        var patchKey = "patch 1.1 TEST";
-        try
-        {
-            MigrationLayout.EnsurePatchDirectories(stackRoot, patchKey);
-            var stack = new ManagedStackEntity
-            {
-                Id = stackId,
-                StackName = stackId,
-                AppliedPatchLevel = 0,
-            };
-
-            await using var db = CreateDbContext(stack);
-            var service = CreateMigrationService(db, buildsPath);
-
-            await using var clientStream = CreateZip(
-                ("mpq/remove.json", """{"remove": "patch-l.mpq"}"""),
-                ("mpq/patch-a.MPQ", "MPQ"));
-
-            var result = await service.MergePatchImportAsync(stackId, patchKey, null, clientStream);
-
-            result.MpqFiles.Should().Be(2);
-            MigrationService.ReadMpqRemovals(stackRoot, patchKey)
-                .Should().ContainSingle(name => name.Equals("patch-l.mpq", StringComparison.OrdinalIgnoreCase));
-            File.Exists(Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "patch-a.MPQ")).Should().BeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(buildsPath))
-            {
-                Directory.Delete(buildsPath, recursive: true);
-            }
-        }
-    }
-
     private static MemoryStream CreateZip(params (string path, string content)[] entries)
     {
         var stream = new MemoryStream();
@@ -166,5 +126,34 @@ public sealed class MpqRemovalImportTests
         db.ManagedStacks.Add(stack);
         db.SaveChanges();
         return db;
+    }
+}
+
+public sealed class MpqPackFilterTests
+{
+    [Theory]
+    [InlineData("mpq.json", false)]
+    [InlineData("MPQ.JSON", false)]
+    [InlineData("remove.json", false)]
+    [InlineData(".remove.json", false)]
+    [InlineData("patch-k.mpq", false)]
+    [InlineData("patch-k.mpq.desc", false)]
+    [InlineData("other.json", false)]
+    [InlineData("Interface/GLUES/foo.blp", true)]
+    [InlineData("Interface/mpq.json", false)]
+    public void ShouldIncludeInConstructedMpq_excludes_manifests_and_sidecars(string path, bool expected)
+    {
+        MpqPackFilter.ShouldIncludeInConstructedMpq(path).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("patch-k.mpq", true)]
+    [InlineData("Patch-W.MPQ", true)]
+    [InlineData("mpq.json", false)]
+    [InlineData("readme.txt", false)]
+    [InlineData("", false)]
+    public void IsValidConstructedMpqName_requires_mpq_extension(string name, bool expected)
+    {
+        MpqPackFilter.IsValidConstructedMpqName(name).Should().Be(expected);
     }
 }

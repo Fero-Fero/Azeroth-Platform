@@ -16,7 +16,7 @@ public enum PatchStatus
 /// <summary>A single file inside a patch.</summary>
 public sealed class PatchFileDto
 {
-    /// <summary>Category: "sql/world", "sql/auth", "sql/characters", "dbc", "map", or "mpq".</summary>
+    /// <summary>Category: "sql/world", "sql/auth", "sql/characters", "dbc", "map", "mpq", or "config".</summary>
     public string Category { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;

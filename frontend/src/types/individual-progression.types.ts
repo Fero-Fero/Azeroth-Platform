@@ -34,14 +34,6 @@ export interface PatchProgressionMetadata {
   incrementsProgression: boolean
 }
 
-export interface MergePatchImportResult {
-  targetPatchKey: string
-  sqlFiles: number
-  mpqFiles: number
-  dbcFiles: number
-  mapFiles: number
-}
-
 export interface IndividualProgressionKeyCheck {
   key: string
   configPath: string
@@ -119,6 +111,12 @@ export interface ProgressionSyncStatus {
   hasOptionalFilesLog: boolean
   ignoredFilesCount: number
   lastSyncAt?: string | null
+  hasCompletedInitialSync?: boolean
+  phase?: string | null
+  progressPercent?: number
+  message?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
   error?: string | null
   log: string[]
 }

@@ -1314,6 +1314,11 @@ public sealed partial class MigrationService : IMigrationService
 
             foreach (var name in manifest.Add)
             {
+                if (!MpqPackFilter.IsValidConstructedMpqName(name))
+                {
+                    continue;
+                }
+
                 manifest.Description.TryGetValue(name, out var desc);
                 adds.Add((name, patch.Key, desc));
             }
@@ -1545,6 +1550,7 @@ public sealed partial class MigrationService : IMigrationService
                      || ext.Equals(".csv", StringComparison.OrdinalIgnoreCase)
                      || ext.Equals(".dbc", StringComparison.OrdinalIgnoreCase),
             "mpq" => ext.Equals(".mpq", StringComparison.OrdinalIgnoreCase),
+            "config" => ext.Equals(".json", StringComparison.OrdinalIgnoreCase),
             "sql/world" or "sql/auth" or "sql/characters" => ext.Equals(".sql", StringComparison.OrdinalIgnoreCase),
             "map" => true,
             _ => false
@@ -1667,6 +1673,7 @@ public sealed partial class MigrationService : IMigrationService
         AddCategoryFiles(files, MigrationLayout.DbcDir(stackRoot, patchKey), "dbc");
         AddCategoryFiles(files, MigrationLayout.MapDir(stackRoot, patchKey), "map");
         AddCategoryFiles(files, MigrationLayout.MpqDir(stackRoot, patchKey), "mpq");
+        AddCategoryFiles(files, MigrationLayout.ConfigDir(stackRoot, patchKey), "config");
 
         return files;
     }
@@ -1786,6 +1793,7 @@ public sealed partial class MigrationService : IMigrationService
             "dbc" => MigrationLayout.DbcDir(stackRoot, patchKey),
             "map" => MigrationLayout.MapDir(stackRoot, patchKey),
             "mpq" => MigrationLayout.MpqDir(stackRoot, patchKey),
+            "config" => MigrationLayout.ConfigDir(stackRoot, patchKey),
             "sql/world" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "world"),
             "sql/auth" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "auth"),
             "sql/characters" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "characters"),

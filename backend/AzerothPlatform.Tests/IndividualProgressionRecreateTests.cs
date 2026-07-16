@@ -132,6 +132,7 @@ public sealed class IndividualProgressionRecreateTests
     private static IndividualProgressionSyncService CreateSyncService(AzerothCoreDbContext db, string buildsPath)
     {
         var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
+        var migrations = Options.Create(new MigrationOptions());
         var serverConfig = new Mock<IServerConfigService>();
         const string moduleConf = """
             IndividualProgression.StartingProgression = 1
@@ -157,6 +158,7 @@ public sealed class IndividualProgressionRecreateTests
             serverConfig.Object,
             httpClientFactory.Object,
             docker,
+            migrations,
             NullLogger<IndividualProgressionSyncService>.Instance);
     }
 

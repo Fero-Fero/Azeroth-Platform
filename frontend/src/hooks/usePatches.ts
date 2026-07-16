@@ -2,8 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { patchApi } from '@/services/api'
 import { stackKeys } from '@/hooks/useStacks'
 import type { CreatePatchRequest, ImportPatchCollectionMode } from '@/types/patch.types'
-import type { IndividualProgressionSettings } from '@/types/individual-progression.types'
-
 export const patchKeys = {
   all: ['patches'] as const,
   overview: (stackId: string) => [...patchKeys.all, 'overview', stackId] as const,
@@ -12,8 +10,6 @@ export const patchKeys = {
   applyStatus: (stackId: string) => [...patchKeys.all, 'apply-status', stackId] as const,
   browse: (stackId: string) => [...patchKeys.all, 'browse', stackId] as const,
   publishedMpqs: (stackId: string) => [...patchKeys.all, 'published-mpqs', stackId] as const,
-  individualProgressionSettings: (stackId: string) =>
-    [...patchKeys.all, 'individual-progression-settings', stackId] as const,
 }
 
 export function usePatchOverview(stackId: string) {
@@ -238,36 +234,6 @@ export function useSavePatchDescription(stackId: string) {
   })
 }
 
-export function useIndividualProgressionSettings(stackId: string, enabled = true) {
-  return useQuery({
-    queryKey: patchKeys.individualProgressionSettings(stackId),
-    queryFn: async () => (await patchApi.individualProgressionSettings(stackId)).data,
-    enabled: !!stackId && enabled,
-  })
-}
-
-export function useSaveIndividualProgressionSettings(stackId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (settings: IndividualProgressionSettings) =>
-      patchApi.saveIndividualProgressionSettings(stackId, settings),
-    onSuccess: (res) => {
-      queryClient.setQueryData(patchKeys.individualProgressionSettings(stackId), res.data)
-      queryClient.invalidateQueries({ queryKey: patchKeys.overview(stackId) })
-    },
-  })
-}
-
-export function useDiscoverIndividualProgressionKeys(stackId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => patchApi.discoverIndividualProgressionKeys(stackId),
-    onSuccess: (res) => {
-      queryClient.setQueryData(patchKeys.individualProgressionSettings(stackId), res.data)
-    },
-  })
-}
-
 export function useBootstrapIndividualProgression(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -301,29 +267,14 @@ export function useRecreateMissingProgressionPatches(stackId: string) {
   })
 }
 
-export function useMergePatchImport(stackId: string) {
-  const invalidate = useInvalidatePatches(stackId)
-  return useMutation({
-    mutationFn: ({
-      targetPatchKey,
-      sqlArchive,
-      clientArchive,
-    }: {
-      targetPatchKey: string
-      sqlArchive?: File | null
-      clientArchive?: File | null
-    }) => patchApi.mergeImport(stackId, targetPatchKey, sqlArchive, clientArchive),
-    onSuccess: invalidate,
-  })
-}
-
 // ===== Progression Sync Hooks =====
 
-export function useProgressionSyncStatus(stackId: string, enabled = true) {
+export function useProgressionSyncStatus(stackId: string, poll = false) {
   return useQuery({
     queryKey: [...patchKeys.all, 'progression-sync-status', stackId] as const,
     queryFn: async () => (await patchApi.progressionSyncStatus(stackId)).data,
-    enabled: !!stackId && enabled,
+    enabled: !!stackId,
+    refetchInterval: poll ? 1000 : false,
   })
 }
 

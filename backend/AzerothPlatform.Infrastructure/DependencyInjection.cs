@@ -67,10 +67,6 @@ public static class DependencyInjection
             .AddOptions<ServerTypeCatalogOptions>()
             .Bind(configuration.GetSection(ServerTypeCatalogOptions.SectionName));
 
-        services
-            .AddOptions<IndividualProgressionReleaseOptions>()
-            .Bind(configuration.GetSection(IndividualProgressionReleaseOptions.SectionName));
-
         services.AddDbContext<AzerothCoreDbContext>(options => options.UseSqlite(connectionString));
         services.AddHttpClient();
         services.AddHttpClient("GitHubApi"); // Dedicated client for GitHub API

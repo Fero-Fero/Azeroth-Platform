@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, Eye, CheckCircle2, AlertTriangle, FileQuestion } from 'lucide-react'
 import {
   useProgressionSyncStatus,
@@ -13,7 +13,6 @@ interface ProgressionSyncPanelProps {
 }
 
 export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelProps) {
-  const { data: syncStatus, isLoading } = useProgressionSyncStatus(stackId)
   const syncMutation = useRunProgressionSync(stackId)
   const resolveMutation = useResolveProgressionOptionalFiles(stackId)
 
@@ -23,12 +22,37 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
   const [syncLog, setSyncLog] = useState<string[]>([])
   const [syncError, setSyncError] = useState<string | null>(null)
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null)
+  const [showInitialSyncConfirm, setShowInitialSyncConfirm] = useState(false)
+  const [pollSync, setPollSync] = useState(false)
 
-  const handleSync = async () => {
+  const { data: syncStatus, isLoading } = useProgressionSyncStatus(
+    stackId,
+    pollSync || syncMutation.isPending
+  )
+
+  useEffect(() => {
+    if (syncStatus?.isRunning) {
+      setPollSync(true)
+    } else if (!syncMutation.isPending) {
+      setPollSync(false)
+    }
+  }, [syncStatus?.isRunning, syncMutation.isPending])
+
+  const isInitialSync = !syncStatus?.hasCompletedInitialSync && !syncStatus?.lastSyncAt
+  const showProgressBar =
+    syncMutation.isPending || pollSync || (syncStatus?.isRunning ?? false)
+  const progressPercent = syncStatus?.progressPercent ?? (syncMutation.isPending ? 5 : 0)
+  const progressMessage =
+    syncStatus?.message ?? (syncMutation.isPending ? 'Starting progression sync…' : '')
+  const liveLog =
+    showProgressBar && (syncStatus?.log?.length ?? 0) > 0 ? syncStatus!.log : syncLog
+
+  const runSync = async () => {
     setSyncError(null)
     setSyncSuccess(null)
     setPendingFiles([])
     setSyncLog([])
+    setPollSync(true)
 
     try {
       const res = await syncMutation.mutateAsync()
@@ -54,6 +78,21 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Sync failed.')
     }
+  }
+
+  const handleSyncClick = () => {
+    setSyncError(null)
+    setSyncSuccess(null)
+    if (isInitialSync) {
+      setShowInitialSyncConfirm(true)
+      return
+    }
+    void runSync()
+  }
+
+  const handleConfirmInitialSync = () => {
+    setShowInitialSyncConfirm(false)
+    void runSync()
   }
 
   const handleResolveOptional = async () => {
@@ -99,7 +138,8 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
             <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>{' '}
             module and the{' '}
             <code className="rounded bg-indigo-100 px-1 text-xs">Azeroth-Platform-Progression</code>{' '}
-            repository using the configured mapping rules.
+            repository using the configured mapping rules. Subsequent updates only modify managed
+            progression patches; custom patches are left unchanged.
           </p>
           {syncStatus?.lastSyncAt && (
             <p className="mt-1 text-xs text-indigo-700">
@@ -123,11 +163,11 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
           )}
           <button
             type="button"
-            onClick={handleSync}
-            disabled={syncMutation.isPending || syncStatus?.isRunning}
+            onClick={handleSyncClick}
+            disabled={showProgressBar}
             className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            {syncMutation.isPending || syncStatus?.isRunning ? (
+            {showProgressBar ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
@@ -137,6 +177,77 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
         </div>
       </div>
 
+      {showInitialSyncConfirm && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-950">Overwrite existing patch content?</p>
+              <p className="mt-1 text-sm text-amber-900">
+                This is the first sync. It will replace content in all progression patch folders with
+                files from mod-individual-progression and Azeroth-Platform-Progression. Any existing SQL,
+                DBC, MPQ, or config files in those folders may be overwritten.
+              </p>
+              <p className="mt-2 text-sm text-amber-800">
+                Later syncs only update managed progression patches and leave custom patches unchanged.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleConfirmInitialSync}
+              disabled={syncMutation.isPending}
+              className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {syncMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Continue sync
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInitialSyncConfirm(false)}
+              disabled={syncMutation.isPending}
+              className="rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showProgressBar && (
+        <div className="rounded-md border border-indigo-200 bg-white px-4 py-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div className="flex min-w-0 items-center gap-2 font-medium text-indigo-900">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              <span className="truncate">{progressMessage || 'Syncing…'}</span>
+            </div>
+            <span className="shrink-0 tabular-nums text-indigo-700">{progressPercent}%</span>
+          </div>
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-indigo-100"
+            role="progressbar"
+            aria-valuenow={progressPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Progression sync progress"
+          >
+            <div
+              className="h-full bg-indigo-600 transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          {syncStatus?.phase && (
+            <p className="text-xs text-indigo-700">Phase: {syncStatus.phase}</p>
+          )}
+          {(liveLog?.length ?? 0) > 0 && (
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md border border-gray-200 bg-gray-50/80 p-2 text-xs font-mono text-gray-700">
+              {liveLog.join('\n')}
+            </pre>
+          )}
+        </div>
+      )}
+
       {syncError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -144,14 +255,14 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
         </div>
       )}
 
-      {syncSuccess && (
+      {syncSuccess && !showProgressBar && (
         <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {syncSuccess}
         </div>
       )}
 
-      {syncLog.length > 0 && (
+      {syncLog.length > 0 && !showProgressBar && (
         <pre className="rounded-md border border-gray-200 bg-gray-50/80 p-3 text-xs font-mono text-gray-700 max-h-40 overflow-auto whitespace-pre-wrap">
           {syncLog.join('\n')}
         </pre>

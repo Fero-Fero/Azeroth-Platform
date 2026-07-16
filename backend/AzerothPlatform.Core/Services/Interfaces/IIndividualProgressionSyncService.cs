@@ -12,16 +12,6 @@ public interface IIndividualProgressionSyncService
 
     Task<IndividualProgressionSettingsDto> GetSettingsAsync(string stackId, CancellationToken cancellationToken = default);
 
-    Task<IndividualProgressionSettingsDto> SaveSettingsAsync(
-        string stackId,
-        IndividualProgressionSettingsDto settings,
-        CancellationToken cancellationToken = default);
-
-    Task<IndividualProgressionSettingsDto> DiscoverAndMergeSettingsAsync(
-        string stackId,
-        IndividualProgressionSettingsDto? existing = null,
-        CancellationToken cancellationToken = default);
-
     Task<IndividualProgressionBootstrapResultDto> BootstrapAsync(string stackId, CancellationToken cancellationToken = default);
 
     /// <summary>Creates any missing Individual Progression patch template folders (safe after patches are applied).</summary>

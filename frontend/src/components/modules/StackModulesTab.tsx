@@ -12,7 +12,6 @@ import {
   mergeRequiredModuleIds,
 } from '@/lib/server-type-modules'
 import type { ModuleDto, StackConfigurationDto, StackDetailsDto } from '@/types/stack.types'
-import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
 import ModuleCatalogPage from '@/pages/ModuleCatalogPage'
 
 const WORLDSERVER = 'worldserver'
@@ -150,23 +149,6 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
 
   return (
     <div className="space-y-6">
-      {selectedIds.includes(INDIVIDUAL_PROGRESSION_MODULE_ID) && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 text-sm text-violet-900">
-          <p className="font-semibold">Individual Progression</p>
-          <p className="mt-1 text-violet-800">
-            Server-wide progression patches are managed under{' '}
-            <button
-              type="button"
-              onClick={() => navigate(`/stacks/${stack.stackId}?tab=patches`)}
-              className="font-medium text-violet-700 underline hover:text-violet-900"
-            >
-              Game → Patches
-            </button>
-            . Bootstrap progression there and apply content releases manually.
-          </p>
-        </div>
-      )}
-
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

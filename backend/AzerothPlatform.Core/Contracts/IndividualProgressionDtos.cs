@@ -64,19 +64,6 @@ public sealed class PatchProgressionMetadataDto
     public bool IncrementsProgression { get; set; } = true;
 }
 
-public sealed class MergePatchImportResultDto
-{
-    public string TargetPatchKey { get; set; } = string.Empty;
-
-    public int SqlFiles { get; set; }
-
-    public int MpqFiles { get; set; }
-
-    public int DbcFiles { get; set; }
-
-    public int MapFiles { get; set; }
-}
-
 public sealed class IndividualProgressionKeyCheckDto
 {
     public string Key { get; set; } = string.Empty;
@@ -111,24 +98,6 @@ public sealed class IndividualProgressionValidationResultDto
     public IReadOnlyList<string> Errors { get; set; } = [];
 
     public IReadOnlyList<IndividualProgressionKeyCheckDto> KeyChecks { get; set; } = [];
-}
-
-public sealed class IndividualProgressionReleaseEntryOptions
-{
-    public int State { get; set; }
-
-    public string Slug { get; set; } = string.Empty;
-
-    public string? SqlUrl { get; set; }
-
-    public string? MpqUrl { get; set; }
-}
-
-public sealed class IndividualProgressionReleaseOptions
-{
-    public const string SectionName = "IndividualProgressionReleases";
-
-    public List<IndividualProgressionReleaseEntryOptions> Patches { get; set; } = new();
 }
 
 // ===== Progression Sync (mod-individual-progression + Azeroth-Platform-Progression) =====
@@ -205,6 +174,20 @@ public sealed class ProgressionSyncStatusDto
     public bool HasOptionalFilesLog { get; set; }
     public int IgnoredFilesCount { get; set; }
     public DateTimeOffset? LastSyncAt { get; set; }
+
+    /// <summary>True after the first successful progression sync has completed.</summary>
+    public bool HasCompletedInitialSync { get; set; }
+
+    public string? Phase { get; set; }
+
+    public int ProgressPercent { get; set; }
+
+    public string? Message { get; set; }
+
+    public DateTimeOffset? StartedAt { get; set; }
+
+    public DateTimeOffset? CompletedAt { get; set; }
+
     public string? Error { get; set; }
     public List<string> Log { get; set; } = new();
 }

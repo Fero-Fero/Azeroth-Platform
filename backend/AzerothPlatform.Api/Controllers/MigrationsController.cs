@@ -121,62 +121,6 @@ public class MigrationsController : ControllerBase
             return await _migrations.ImportPatchCollectionAsync(stackId, stream, mode, cancellationToken);
         });
 
-    /// <summary>Merges SQL and/or client release archives into an existing unapplied patch folder.</summary>
-    [HttpPost("import-merge")]
-    [RequestSizeLimit(8L * 1024 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 8L * 1024 * 1024 * 1024)]
-    public Task<IActionResult> MergeImport(
-        string stackId,
-        [FromForm] string targetPatchKey,
-        [FromForm] IFormFile? sqlArchive,
-        [FromForm] IFormFile? clientArchive,
-        CancellationToken cancellationToken)
-        => Execute(async () =>
-        {
-            if (string.IsNullOrWhiteSpace(targetPatchKey))
-            {
-                throw new ArgumentException("targetPatchKey is required.");
-            }
-
-            Stream? sqlStream = null;
-            Stream? clientStream = null;
-            try
-            {
-                if (sqlArchive is { Length: > 0 })
-                {
-                    sqlStream = sqlArchive.OpenReadStream();
-                }
-
-                if (clientArchive is { Length: > 0 })
-                {
-                    clientStream = clientArchive.OpenReadStream();
-                }
-
-                return await _migrations.MergePatchImportAsync(
-                    stackId, targetPatchKey, sqlStream, clientStream, cancellationToken);
-            }
-            finally
-            {
-                if (sqlStream is not null) await sqlStream.DisposeAsync();
-                if (clientStream is not null) await clientStream.DisposeAsync();
-            }
-        });
-
-    [HttpGet("individual-progression/settings")]
-    public Task<IActionResult> GetIndividualProgressionSettings(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.GetSettingsAsync(stackId, cancellationToken));
-
-    [HttpPut("individual-progression/settings")]
-    public Task<IActionResult> SaveIndividualProgressionSettings(
-        string stackId,
-        [FromBody] IndividualProgressionSettingsDto settings,
-        CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.SaveSettingsAsync(stackId, settings, cancellationToken));
-
-    [HttpPost("individual-progression/discover-keys")]
-    public Task<IActionResult> DiscoverIndividualProgressionKeys(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.DiscoverAndMergeSettingsAsync(stackId, cancellationToken: cancellationToken));
-
     [HttpPost("individual-progression/bootstrap")]
     public Task<IActionResult> BootstrapIndividualProgression(string stackId, CancellationToken cancellationToken)
         => Execute(() => _individualProgression.BootstrapAsync(stackId, cancellationToken));
@@ -193,11 +137,6 @@ public class MigrationsController : ControllerBase
     [HttpPost("individual-progression/validate-patches")]
     public Task<IActionResult> ValidateIndividualProgressionPatches(string stackId, CancellationToken cancellationToken)
         => Execute(() => _individualProgression.ValidatePatchesAsync(stackId, cancellationToken));
-
-    /// <summary>Stub: downloads configured release archives when URLs are populated in appsettings.</summary>
-    [HttpPost("individual-progression/download-releases")]
-    public Task<IActionResult> DownloadIndividualProgressionReleases(string stackId, CancellationToken cancellationToken)
-        => Execute(async () => new { downloaded = 0, skipped = 0, message = "Release URLs are not configured yet." });
 
     /// <summary>Captures the server_dbc baseline from the running stack's data volume.</summary>
     [HttpPost("init-baseline")]

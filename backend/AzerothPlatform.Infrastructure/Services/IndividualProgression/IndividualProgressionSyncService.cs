@@ -29,6 +29,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     private readonly IServerConfigService _serverConfig;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly DockerOptions _dockerOptions;
+    private readonly MigrationOptions _migrationOptions;
     private readonly ILogger<IndividualProgressionSyncService> _logger;
 
     public IndividualProgressionSyncService(
@@ -36,12 +37,14 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         IServerConfigService serverConfig,
         IHttpClientFactory httpClientFactory,
         IOptions<DockerOptions> dockerOptions,
+        IOptions<MigrationOptions> migrationOptions,
         ILogger<IndividualProgressionSyncService> logger)
     {
         _dbContext = dbContext;
         _serverConfig = serverConfig;
         _httpClientFactory = httpClientFactory;
         _dockerOptions = dockerOptions.Value;
+        _migrationOptions = migrationOptions.Value;
         _logger = logger;
     }
 
@@ -54,18 +57,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     {
         await EnsureModuleInstalledAsync(stackId, cancellationToken);
         return await LoadSettingsAsync(GetStackRoot(stackId), cancellationToken);
-    }
-
-    public async Task<IndividualProgressionSettingsDto> SaveSettingsAsync(
-        string stackId,
-        IndividualProgressionSettingsDto settings,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureModuleInstalledAsync(stackId, cancellationToken);
-        var stackRoot = GetStackRoot(stackId);
-        await PersistSettingsAsync(stackRoot, settings, cancellationToken);
-        await WriteConfigFromSettingsAsync(stackId, settings, cancellationToken);
-        return settings;
     }
 
     public async Task<IndividualProgressionSettingsDto> DiscoverAndMergeSettingsAsync(
@@ -264,6 +255,8 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             errors.Add($"Missing progression patch folder: {PatchFolderNames.Format(index, definition.Slug)}");
         }
 
+        ValidateProgressionRepoStructure(stackRoot, errors);
+
         await DiscoverKeysAsync(stackId, settings, cancellationToken);
         await RefreshValuesAsync(stackId, settings, cancellationToken);
 
@@ -355,6 +348,22 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         return (false,
             "Individual Progression patch validation is required. Import your patch content, rebuild the server if needed, then click Perform patch validation check.");
+    }
+
+    private void ValidateProgressionRepoStructure(string stackRoot, List<string> errors)
+    {
+        var repoPath = ProgressionRepoStructureValidator.ResolveLocalRepoPath(_migrationOptions.ProgressionRepoPath);
+        if (repoPath is null)
+        {
+            var hint = string.IsNullOrWhiteSpace(_migrationOptions.ProgressionRepoPath)
+                ? "../Azeroth-Platform-Progression (sibling to the platform repository)"
+                : _migrationOptions.ProgressionRepoPath;
+            errors.Add(
+                $"Azeroth-Platform-Progression repository not found at {hint}. Clone the repo or set Migrations:ProgressionRepoPath.");
+            return;
+        }
+
+        ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
     }
 
     private static bool ProgressionPatchExists(string stackRoot, ProgressionPatchDefinition definition)
@@ -699,23 +708,76 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             status.HasOptionalFilesLog = true;
             var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
             status.IgnoredFilesCount = log.Entries.Count(e => !e.Accepted);
-            status.LastSyncAt = log.LastSyncAt;
+            status.LastSyncAt = log.LastSyncAt == default ? null : log.LastSyncAt;
+            status.HasCompletedInitialSync = log.LastSyncAt != default;
+        }
+
+        var progress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
+        if (progress is not null)
+        {
+            ApplyProgressToStatus(status, progress);
         }
 
         return status;
+    }
+
+    private static void ApplyProgressToStatus(ProgressionSyncStatusDto status, ProgressionSyncProgressState progress)
+    {
+        var staleAfter = TimeSpan.FromHours(2);
+        if (progress.IsRunning
+            && progress.StartedAt.HasValue
+            && DateTimeOffset.UtcNow - progress.StartedAt.Value > staleAfter)
+        {
+            status.IsRunning = false;
+            status.Phase = "Failed";
+            status.ProgressPercent = 0;
+            status.Message = "Progression sync timed out or was interrupted.";
+            status.Error = status.Message;
+            status.Log = progress.Log;
+            return;
+        }
+
+        status.IsRunning = progress.IsRunning;
+        status.Phase = progress.Phase;
+        status.ProgressPercent = progress.ProgressPercent;
+        status.Message = progress.Message;
+        status.StartedAt = progress.StartedAt;
+        status.CompletedAt = progress.CompletedAt;
+        status.Error = progress.Error;
+        if (progress.Log.Count > 0)
+        {
+            status.Log = progress.Log;
+        }
     }
 
     public async Task<ProgressionSyncResultDto> RunSyncAsync(
         string stackId,
         CancellationToken cancellationToken = default)
     {
+        await EnsureModuleInstalledAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         var result = new ProgressionSyncResultDto();
         var tempDir = Path.Combine(Path.GetTempPath(), $"azeroth-progression-sync-{Guid.NewGuid():N}");
+        var progressStore = new ProgressionSyncProgressStore(stackRoot);
+
+        var existingProgress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
+        if (existingProgress?.IsRunning == true)
+        {
+            result.Error = "A progression sync is already running for this stack.";
+            return result;
+        }
+
+        await progressStore.StartAsync(cancellationToken);
 
         try
         {
             Directory.CreateDirectory(tempDir);
+
+            await progressStore.ReportAsync(
+                "Cloning repository",
+                10,
+                "Cloning Azeroth-Platform-Progression repository…",
+                cancellationToken);
 
             var (exitCode, _, gitError) = await RunGitAsync(
                 $"clone --depth 1 {ProgressionRepoUrl} .",
@@ -724,15 +786,22 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             if (exitCode != 0)
             {
                 result.Error = $"Failed to clone progression repo: {gitError}";
+                await progressStore.CompleteAsync(false, result.Error, result.Error, cancellationToken);
                 return result;
             }
 
             result.Log.Add("Cloned Azeroth-Platform-Progression repository.");
+            await progressStore.ReportAsync(
+                "Loading mapping",
+                35,
+                "Cloned Azeroth-Platform-Progression repository.",
+                cancellationToken);
 
             var mappingPath = Path.Combine(tempDir, MappingFileName);
             if (!File.Exists(mappingPath))
             {
                 result.Error = "mapping.json not found in Azeroth-Platform-Progression repository.";
+                await progressStore.CompleteAsync(false, result.Error, result.Error, cancellationToken);
                 return result;
             }
 
@@ -742,17 +811,59 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
             var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
             var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+            var initialSync = ProgressionSyncTargetPolicy.IsInitialSync(log);
 
-            foreach (var entry in mapping.Mappings)
+            await progressStore.ReportAsync(
+                "Preparing patches",
+                40,
+                initialSync ? "Preparing progression patch templates…" : "Ensuring progression patch templates exist…",
+                cancellationToken);
+
+            if (initialSync)
             {
-                ProcessMappingEntry(entry, moduleRoot, stackRoot, log, result);
+                var templatesPrepared = SeedProgressionPatches(stackRoot, onlyMissing: false);
+                var message =
+                    $"Initial sync: prepared {templatesPrepared} progression patch template(s); existing patch content in sync targets will be overwritten.";
+                result.Log.Add(message);
+                await progressStore.ReportAsync("Preparing patches", 45, message, cancellationToken);
+            }
+            else
+            {
+                RemovePlaceholderPatches(stackRoot);
+                var templatesEnsured = SeedProgressionPatches(stackRoot, onlyMissing: true);
+                if (templatesEnsured > 0)
+                {
+                    var message = $"Ensured {templatesEnsured} missing progression patch template(s).";
+                    result.Log.Add(message);
+                    await progressStore.ReportAsync("Preparing patches", 45, message, cancellationToken);
+                }
+
+                result.Log.Add("Update sync: only managed progression patches are updated; custom patches are left unchanged.");
             }
 
-            CopyRepoPatches(tempDir, stackRoot, result);
+            var mappingCount = Math.Max(1, mapping.Mappings.Count);
+            for (var i = 0; i < mapping.Mappings.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ProcessMappingEntry(mapping.Mappings[i], moduleRoot, stackRoot, log, result, initialSync);
+                var percent = 45 + (int)(20.0 * (i + 1) / mappingCount);
+                await progressStore.ReportAsync(
+                    "Applying module mappings",
+                    percent,
+                    $"Applied module mapping {i + 1} of {mapping.Mappings.Count}.",
+                    cancellationToken);
+            }
+
+            await CopyRepoPatchesAsync(tempDir, stackRoot, result, initialSync, progressStore, cancellationToken);
 
             log.LastSyncAt = DateTimeOffset.UtcNow;
             await PersistSyncLogAsync(stackRoot, log, cancellationToken);
             result.Success = true;
+
+            var successMessage =
+                $"Sync complete: {result.CopiedFiles} file(s) copied, {result.PendingOptionalFiles.Count} optional file(s) pending.";
+            result.Log.Add(successMessage);
+            await progressStore.CompleteAsync(true, successMessage, null, cancellationToken);
 
             _logger.LogInformation(
                 "Progression sync completed for stack {StackId}: {Copied} files copied, {Pending} pending optional files.",
@@ -761,6 +872,8 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         catch (Exception ex)
         {
             result.Error = ex.Message;
+            result.Log.Add(ex.Message);
+            await progressStore.CompleteAsync(false, "Progression sync failed.", ex.Message, cancellationToken);
             _logger.LogError(ex, "Progression sync failed for stack {StackId}.", stackId);
         }
         finally
@@ -994,12 +1107,18 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         string moduleRoot,
         string stackRoot,
         ProgressionOptionalFilesLogDto log,
-        ProgressionSyncResultDto result)
+        ProgressionSyncResultDto result,
+        bool initialSync)
     {
         var resolvedDestDir = ResolvePatchFolder(stackRoot, entry.Destination);
         if (resolvedDestDir is null)
         {
             result.Log.Add($"Skipped {entry.Source}: could not resolve destination '{entry.Destination}'.");
+            return;
+        }
+
+        if (!ProgressionSyncTargetPolicy.ShouldApplySyncToPath(stackRoot, resolvedDestDir, initialSync, result.Log))
+        {
             return;
         }
 
@@ -1097,8 +1216,16 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         result.SkippedOptional++;
     }
 
-    private static void CopyRepoPatches(string repoDir, string stackRoot, ProgressionSyncResultDto result)
+    private static async Task CopyRepoPatchesAsync(
+        string repoDir,
+        string stackRoot,
+        ProgressionSyncResultDto result,
+        bool initialSync,
+        ProgressionSyncProgressStore progressStore,
+        CancellationToken cancellationToken)
     {
+        var filesToCopy = new List<(string SourcePath, string DestDir, string FileName, string RelativePath)>();
+
         foreach (var expansionName in MigrationLayout.ExpansionRoots.Keys)
         {
             var expansionDir = Directory.EnumerateDirectories(repoDir)
@@ -1117,8 +1244,8 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                 foreach (var file in Directory.EnumerateFiles(patchDir, "*", SearchOption.AllDirectories))
                 {
                     var relativeToPatch = Path.GetRelativePath(patchDir, file);
-                    var categoryPath = Path.GetDirectoryName(relativeToPatch)
-                        ?.Replace(Path.DirectorySeparatorChar, '/');
+                    var categoryPath = ProgressionRepoStructureValidator.NormalizeRepoCategoryPath(
+                        Path.GetDirectoryName(relativeToPatch)?.Replace(Path.DirectorySeparatorChar, '/'));
 
                     var destination = string.IsNullOrEmpty(categoryPath)
                         ? $"{Path.GetFileName(expansionDir)}/{patchName}/"
@@ -1132,11 +1259,46 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                         continue;
                     }
 
-                    Directory.CreateDirectory(resolvedDir);
-                    File.Copy(file, Path.Combine(resolvedDir, Path.GetFileName(file)), overwrite: true);
-                    result.CopiedFiles++;
+                    if (!ProgressionSyncTargetPolicy.ShouldApplySyncToPath(stackRoot, resolvedDir, initialSync, result.Log))
+                    {
+                        continue;
+                    }
+
+                    filesToCopy.Add((file, resolvedDir, Path.GetFileName(file), relativeToPatch));
                 }
             }
         }
+
+        await progressStore.ReportAsync(
+            "Copying progression repository",
+            65,
+            $"Copying {filesToCopy.Count} file(s) from Azeroth-Platform-Progression…",
+            cancellationToken);
+
+        var total = Math.Max(1, filesToCopy.Count);
+        for (var i = 0; i < filesToCopy.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (sourcePath, destDir, fileName, _) = filesToCopy[i];
+            Directory.CreateDirectory(destDir);
+            File.Copy(sourcePath, Path.Combine(destDir, fileName), overwrite: true);
+            result.CopiedFiles++;
+
+            if (i == filesToCopy.Count - 1 || (i + 1) % 25 == 0)
+            {
+                var percent = 65 + (int)(30.0 * (i + 1) / total);
+                await progressStore.ReportAsync(
+                    "Copying progression repository",
+                    percent,
+                    $"Copied {i + 1} of {filesToCopy.Count} repository file(s).",
+                    cancellationToken);
+            }
+        }
+
+        await progressStore.ReportAsync(
+            "Finalizing",
+            95,
+            "Finalizing progression sync…",
+            cancellationToken);
     }
 }

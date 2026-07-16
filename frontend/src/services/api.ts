@@ -440,42 +440,6 @@ export const patchApi = {
       { fileNames }
     ),
 
-  mergeImport: (
-    stackId: string,
-    targetPatchKey: string,
-    sqlArchive?: File | null,
-    clientArchive?: File | null
-  ) => {
-    const form = new FormData()
-    form.append('targetPatchKey', targetPatchKey)
-    if (sqlArchive) form.append('sqlArchive', sqlArchive)
-    if (clientArchive) form.append('clientArchive', clientArchive)
-    return apiClient.post<import('@/types/individual-progression.types').MergePatchImportResult>(
-      `/stacks/${stackId}/migrations/import-merge`,
-      form,
-      { headers: { 'Content-Type': 'multipart/form-data' } }
-    )
-  },
-
-  individualProgressionSettings: (stackId: string) =>
-    apiClient.get<import('@/types/individual-progression.types').IndividualProgressionSettings>(
-      `/stacks/${stackId}/migrations/individual-progression/settings`
-    ),
-
-  saveIndividualProgressionSettings: (
-    stackId: string,
-    settings: import('@/types/individual-progression.types').IndividualProgressionSettings
-  ) =>
-    apiClient.put<import('@/types/individual-progression.types').IndividualProgressionSettings>(
-      `/stacks/${stackId}/migrations/individual-progression/settings`,
-      settings
-    ),
-
-  discoverIndividualProgressionKeys: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionSettings>(
-      `/stacks/${stackId}/migrations/individual-progression/discover-keys`
-    ),
-
   bootstrapIndividualProgression: (stackId: string) =>
     apiClient.post<import('@/types/individual-progression.types').IndividualProgressionBootstrapResult>(
       `/stacks/${stackId}/migrations/individual-progression/bootstrap`

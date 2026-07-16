@@ -85,10 +85,9 @@ export function ModulesStep({ form }: ModulesStepProps) {
 
       {selectedIds.includes(INDIVIDUAL_PROGRESSION_MODULE_ID) && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">
-          <p className="font-medium">Individual Progression selected</p>
-          <p className="mt-1 text-violet-800">
-            This unlocks server-wide progression patches. After creating the stack, open{' '}
-            <strong>Game → Patches</strong> to prepare progression and apply content releases.
+          <p className="text-violet-800">
+            After creating the stack, use <strong>Sync with mod-individual-progression</strong> on the{' '}
+            <strong>Patches</strong> tab to simulate progression.
           </p>
         </div>
       )}
