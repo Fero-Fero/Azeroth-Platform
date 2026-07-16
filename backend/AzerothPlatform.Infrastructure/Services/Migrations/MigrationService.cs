@@ -51,6 +51,7 @@ public sealed partial class MigrationService : IMigrationService
     private readonly IMigrationImageService _imageService;
     private readonly IRemoteEngineService _remoteEngine;
     private readonly IIndividualProgressionSyncService _individualProgression;
+    private readonly IServerConfigService _serverConfig;
     private readonly ClientServerOptions _clientServerOptions;
     private readonly ILogger<MigrationService> _logger;
 
@@ -62,6 +63,7 @@ public sealed partial class MigrationService : IMigrationService
         IMigrationImageService imageService,
         IRemoteEngineService remoteEngine,
         IIndividualProgressionSyncService individualProgression,
+        IServerConfigService serverConfig,
         IOptions<ClientServerOptions> clientServerOptions,
         ILogger<MigrationService> logger)
     {
@@ -72,6 +74,7 @@ public sealed partial class MigrationService : IMigrationService
         _imageService = imageService;
         _remoteEngine = remoteEngine;
         _individualProgression = individualProgression;
+        _serverConfig = serverConfig;
         _clientServerOptions = clientServerOptions.Value;
         _logger = logger;
     }
@@ -200,6 +203,23 @@ public sealed partial class MigrationService : IMigrationService
             Progression = metadata,
             ConfigOverrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patch.Key),
         };
+    }
+
+    public async Task<List<PatchConfigOverrideDto>> GetPatchConfigOverridesPreviewAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+
+        var overrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patchKey);
+        return await PatchConfigOverrideReader.EnrichWithCurrentValuesAsync(
+            stackId,
+            overrides,
+            _serverConfig,
+            cancellationToken);
     }
 
     public async Task<PatchDetailsDto> SavePatchDescriptionAsync(
@@ -789,6 +809,7 @@ public sealed partial class MigrationService : IMigrationService
                 "dbc" => "dbc",
                 "map" or "maps" => "map",
                 "mpq" => "mpq",
+                "lua" => "lua",
                 _ => throw new ArgumentException($"Unknown patch content folder: {segments[categoryIndex]}")
             };
             fileStart = categoryIndex + 1;
@@ -1592,7 +1613,7 @@ public sealed partial class MigrationService : IMigrationService
 
     /// <summary>Categories that support one level of organizational "container" sub-folders.</summary>
     private static readonly string[] ContainerCategories =
-        { "dbc", "map", "sql/world", "sql/auth", "sql/characters" };
+        { "dbc", "map", "lua", "sql/world", "sql/auth", "sql/characters" };
 
     private static bool AllowsContainers(string normalizedCategory) =>
         ContainerCategories.Contains(normalizedCategory, StringComparer.OrdinalIgnoreCase);
@@ -1609,6 +1630,8 @@ public sealed partial class MigrationService : IMigrationService
                      || ext.Equals(".dbc", StringComparison.OrdinalIgnoreCase),
             "mpq" => ext.Equals(".mpq", StringComparison.OrdinalIgnoreCase),
             "config" => ext.Equals(".json", StringComparison.OrdinalIgnoreCase),
+            "lua" => ext.Equals(".lua", StringComparison.OrdinalIgnoreCase)
+                     || ext.Equals(".ext", StringComparison.OrdinalIgnoreCase),
             "sql/world" or "sql/auth" or "sql/characters" => ext.Equals(".sql", StringComparison.OrdinalIgnoreCase),
             "map" => true,
             _ => false
@@ -1732,8 +1755,39 @@ public sealed partial class MigrationService : IMigrationService
         AddCategoryFiles(files, MigrationLayout.MapDir(stackRoot, patchKey), "map");
         AddCategoryFiles(files, MigrationLayout.MpqDir(stackRoot, patchKey), "mpq", stackRoot, patchKey);
         AddCategoryFiles(files, MigrationLayout.ConfigDir(stackRoot, patchKey), "config");
+        AddLuaCategoryFiles(files, MigrationLayout.PatchLuaDir(stackRoot, patchKey));
 
         return files;
+    }
+
+    private static void AddLuaCategoryFiles(List<PatchFileDto> target, string luaDir)
+    {
+        foreach (var path in EnumerateLuaPatchFiles(luaDir).OrderBy(p => p, StringComparer.Ordinal))
+        {
+            var info = new FileInfo(path);
+            target.Add(new PatchFileDto
+            {
+                Category = "lua",
+                Name = Path.GetRelativePath(luaDir, path).Replace('\\', '/'),
+                Size = info.Length,
+            });
+        }
+    }
+
+    internal static IEnumerable<string> EnumerateLuaPatchFiles(string luaDir)
+    {
+        if (!Directory.Exists(luaDir))
+        {
+            yield break;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(luaDir, "*", SearchOption.AllDirectories))
+        {
+            if (CategoryAccepts("lua", Path.GetFileName(file)))
+            {
+                yield return file;
+            }
+        }
     }
 
     private static void AddCategoryFiles(
@@ -1859,6 +1913,7 @@ public sealed partial class MigrationService : IMigrationService
             "map" => MigrationLayout.MapDir(stackRoot, patchKey),
             "mpq" => MigrationLayout.MpqDir(stackRoot, patchKey),
             "config" => MigrationLayout.ConfigDir(stackRoot, patchKey),
+            "lua" => MigrationLayout.PatchLuaDir(stackRoot, patchKey),
             "sql/world" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "world"),
             "sql/auth" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "auth"),
             "sql/characters" => MigrationLayout.SqlDatabaseDir(stackRoot, patchKey, "characters"),

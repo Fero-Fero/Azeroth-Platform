@@ -161,6 +161,7 @@ public sealed class PatchDeleteTests
         var remoteEngine = new Mock<IRemoteEngineService>();
         var ipSync = new Mock<IIndividualProgressionSyncService>();
         ipSync.Setup(s => s.StackHasModule(It.IsAny<IReadOnlyList<string>>())).Returns(false);
+        var serverConfig = new Mock<IServerConfigService>();
 
         return new MigrationService(
             db,
@@ -170,6 +171,7 @@ public sealed class PatchDeleteTests
             imageService.Object,
             remoteEngine.Object,
             ipSync.Object,
+            serverConfig.Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

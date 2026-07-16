@@ -17,6 +17,15 @@ public interface IMigrationService
     /// <summary>Returns detailed file listing for a single patch.</summary>
     Task<PatchDetailsDto> GetPatchAsync(string stackId, string patchKey, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns config overrides for a patch enriched with current values from the stack's live
+    /// server <c>.conf</c> files.
+    /// </summary>
+    Task<List<PatchConfigOverrideDto>> GetPatchConfigOverridesPreviewAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Saves description.md / description.txt for a patch.</summary>
     Task<PatchDetailsDto> SavePatchDescriptionAsync(string stackId, string patchKey, string content, CancellationToken cancellationToken = default);
 

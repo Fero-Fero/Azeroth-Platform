@@ -111,6 +111,10 @@ public static class MigrationLayout
     public static string ConfigDir(string stackRoot, string patchKey) =>
         Path.Combine(PatchDir(stackRoot, patchKey), "config");
 
+    /// <summary>Lua scripts staged in a patch before apply copies them to <see cref="LuaScriptsDir"/>.</summary>
+    public static string PatchLuaDir(string stackRoot, string patchKey) =>
+        Path.Combine(PatchDir(stackRoot, patchKey), "lua");
+
     /// <summary>
     /// Per-stack checkout of Azeroth-Platform-Progression (cloned/updated by progression sync).
     /// </summary>
@@ -235,6 +239,7 @@ public static class MigrationLayout
         Directory.CreateDirectory(MapDir(stackRoot, patchKey));
         Directory.CreateDirectory(MpqDir(stackRoot, patchKey));
         Directory.CreateDirectory(ConfigDir(stackRoot, patchKey));
+        Directory.CreateDirectory(PatchLuaDir(stackRoot, patchKey));
         SeedPatchDescriptionIfMissing(stackRoot, patchKey);
     }
 

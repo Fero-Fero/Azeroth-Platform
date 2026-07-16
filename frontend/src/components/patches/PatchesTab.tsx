@@ -359,6 +359,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     return map
   }, [detail])
 
+  const sectionCollapseKey = (category: string) =>
+    selectedKey ? `patch-section:${stackId}:${selectedKey}:${category}` : undefined
+
   const patchReleaseOptions = useMemo(() => {
     const root = EXPANSION_ROOT[newExpansion]
     return (overview?.patches ?? [])
@@ -1685,6 +1688,7 @@ Flat layout also works:
                 title="Config overrides"
                 category="config"
                 accept=".json"
+                collapseStorageKey={sectionCollapseKey('config')}
                 files={filesByCategory['config'] ?? []}
                 uploading={uploadingCategory === 'config'}
                 error={errorFor('config')}
@@ -1705,8 +1709,25 @@ Flat layout also works:
                 onDelete={handleDelete}
               />
               <ContainerFileCategory
+                title="Lua scripts"
+                accept=".lua,.ext"
+                collapseStorageKey={sectionCollapseKey('lua')}
+                files={filesByCategory['lua'] ?? []}
+                uploading={uploadingCategory === 'lua'}
+                error={errorFor('lua')}
+                notice={
+                  <span>
+                    Scripts are copied to the stack&apos;s <span className="font-mono">lua_scripts/</span>{' '}
+                    folder on apply and loaded by the worldserver (Eluna / mod-ale).
+                  </span>
+                }
+                onUploadItems={(items) => handleContainerUpload('lua', items)}
+                onDelete={(fileName) => handleDelete('lua', fileName)}
+              />
+              <ContainerFileCategory
                 title="SQL — world"
                 accept=".sql"
+                collapseStorageKey={sectionCollapseKey('sql/world')}
                 files={filesByCategory['sql/world'] ?? []}
                 uploading={uploadingCategory === 'sql/world'}
                 error={errorFor('sql/world')}
@@ -1716,6 +1737,7 @@ Flat layout also works:
               <ContainerFileCategory
                 title="SQL — auth"
                 accept=".sql"
+                collapseStorageKey={sectionCollapseKey('sql/auth')}
                 files={filesByCategory['sql/auth'] ?? []}
                 uploading={uploadingCategory === 'sql/auth'}
                 error={errorFor('sql/auth')}
@@ -1725,6 +1747,7 @@ Flat layout also works:
               <ContainerFileCategory
                 title="SQL — characters"
                 accept=".sql"
+                collapseStorageKey={sectionCollapseKey('sql/characters')}
                 files={filesByCategory['sql/characters'] ?? []}
                 uploading={uploadingCategory === 'sql/characters'}
                 error={errorFor('sql/characters')}
@@ -1734,6 +1757,7 @@ Flat layout also works:
               <ContainerFileCategory
                 title="DBC (CSV / .txt / .dbc)"
                 accept=".txt,.csv,.dbc"
+                collapseStorageKey={sectionCollapseKey('dbc')}
                 files={filesByCategory['dbc'] ?? []}
                 uploading={uploadingCategory === 'dbc'}
                 error={errorFor('dbc')}
@@ -1743,6 +1767,7 @@ Flat layout also works:
               />
               <ContainerFileCategory
                 title="Maps"
+                collapseStorageKey={sectionCollapseKey('map')}
                 files={filesByCategory['map'] ?? []}
                 uploading={uploadingCategory === 'map'}
                 error={errorFor('map')}
@@ -1754,6 +1779,7 @@ Flat layout also works:
                   title="MPQ (client patches)"
                   category="mpq"
                   accept=".mpq"
+                  collapseStorageKey={sectionCollapseKey('mpq')}
                   files={filesByCategory['mpq'] ?? []}
                   uploading={uploadingCategory === 'mpq'}
                   requireDescription
@@ -1839,6 +1865,8 @@ Flat layout also works:
       )}
 
       <PatchConfigOverridesPreview
+        stackId={stackId}
+        patchKey={selectedKey}
         overrides={configOverrides}
         open={showConfigOverridesPreview}
         onClose={() => setShowConfigOverridesPreview(false)}
@@ -1942,7 +1970,7 @@ Flat layout also works:
                 <h3 className="text-lg font-semibold text-gray-900">Drop all patches?</h3>
                 <p className="mt-1 text-sm text-gray-600">
                   This permanently deletes all {totalPatchCount} patch folder
-                  {totalPatchCount === 1 ? '' : 's'} and their contents (SQL, DBC, maps, MPQ, config).
+                  {totalPatchCount === 1 ? '' : 's'} and their contents (SQL, DBC, maps, MPQ, config, lua).
                   This cannot be undone.
                 </p>
               </div>

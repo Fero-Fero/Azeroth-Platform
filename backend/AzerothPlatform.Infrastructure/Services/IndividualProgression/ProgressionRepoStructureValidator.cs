@@ -9,7 +9,7 @@ public static class ProgressionRepoStructureValidator
 {
     private static readonly HashSet<string> ReferencePatchCategories = new(StringComparer.OrdinalIgnoreCase)
     {
-        "config", "script", "sql", "dbc", "map", "mpq",
+        "config", "script", "lua", "sql", "dbc", "map", "mpq",
     };
 
     /// <summary>

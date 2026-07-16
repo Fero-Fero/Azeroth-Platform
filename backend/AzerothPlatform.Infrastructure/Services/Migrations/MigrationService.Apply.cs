@@ -417,8 +417,11 @@ public sealed partial class MigrationService
             // 11.5) Apply config overrides from the patch's config/ directory (worldserver.json, etc.).
             var configApplied = await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
 
-            // 12) Restart the stack (bring world/auth back up) only if we stopped them or config changed.
-            if (needsServerStop || configApplied)
+            // 11.6) Deploy Lua scripts from the patch's lua/ directory to the stack lua_scripts root.
+            var luaApplied = await ApplyPatchLuaScriptsAsync(stackRoot, patch.Key, result, cancellationToken);
+
+            // 12) Restart the stack (bring world/auth back up) only if we stopped them or config/lua changed.
+            if (needsServerStop || configApplied || luaApplied)
             {
                 await RunStageAsync("restart", result, async () =>
                 {
@@ -766,6 +769,12 @@ public sealed partial class MigrationService
             foreach (var plan in plans)
             {
                 await ApplyPatchConfigOverridesAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
+            }
+
+            // 5d) Deploy Lua scripts from each patch's lua/ directory in order.
+            foreach (var plan in plans)
+            {
+                await ApplyPatchLuaScriptsAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
             }
 
             // 6) Restart the stack so the worldserver reloads the pushed DBCs and the client-server is up.
@@ -1351,6 +1360,70 @@ public sealed partial class MigrationService
         }, cancellationToken);
 
         return applied;
+    }
+
+    /// <summary>
+    /// Copies Lua scripts from a patch's lua/ directory into the stack's live lua_scripts folder
+    /// (bind-mounted into the worldserver). Relative paths are preserved; later applies overwrite.
+    /// </summary>
+    private async Task<bool> ApplyPatchLuaScriptsAsync(
+        string stackRoot, string patchKey, ApplyPatchResultDto result, CancellationToken cancellationToken)
+    {
+        var patchLuaDir = MigrationLayout.PatchLuaDir(stackRoot, patchKey);
+        var files = MigrationService.EnumerateLuaPatchFiles(patchLuaDir).OrderBy(path => path, StringComparer.Ordinal).ToList();
+        if (files.Count == 0)
+        {
+            return false;
+        }
+
+        var stackLuaDir = MigrationLayout.LuaScriptsDir(stackRoot);
+        Directory.CreateDirectory(stackLuaDir);
+        var applied = false;
+
+        await RunStageAsync("lua", result, () =>
+        {
+            foreach (var source in files)
+            {
+                var relative = Path.GetRelativePath(patchLuaDir, source).Replace('\\', '/');
+                var destination = ResolveSafeLuaPath(stackLuaDir, relative);
+                var destinationDir = Path.GetDirectoryName(destination);
+                if (!string.IsNullOrEmpty(destinationDir))
+                {
+                    Directory.CreateDirectory(destinationDir);
+                }
+
+                File.Copy(source, destination, overwrite: true);
+                applied = true;
+                AddLog(result, $"Deployed lua/{relative} to server lua_scripts.");
+            }
+
+            return Task.CompletedTask;
+        }, cancellationToken);
+
+        return applied;
+    }
+
+    private static string ResolveSafeLuaPath(string root, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            throw new ArgumentException("A Lua script path is required.");
+        }
+
+        var normalized = relativePath.Replace('\\', '/').TrimStart('/');
+        var rootFull = Path.GetFullPath(root);
+        var candidate = Path.GetFullPath(Path.Combine(rootFull, normalized));
+        var rootWithSep = rootFull.EndsWith(Path.DirectorySeparatorChar)
+            ? rootFull
+            : rootFull + Path.DirectorySeparatorChar;
+
+        if (!candidate.StartsWith(rootWithSep, StringComparison.Ordinal)
+            && !candidate.Equals(rootFull, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Lua script path escapes lua_scripts: {relativePath}");
+        }
+
+        return candidate;
     }
 
     /// <summary>

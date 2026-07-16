@@ -301,6 +301,11 @@ export const patchApi = {
       `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}`
     ),
 
+  configOverridesPreview: (stackId: string, patchKey: string) =>
+    apiClient.get<import('@/types/patch.types').PatchConfigOverrideDto[]>(
+      `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/config-overrides-preview`
+    ),
+
   saveDescription: (stackId: string, patchKey: string, content: string) =>
     apiClient.put<import('@/types/patch.types').PatchDetailsDto>(
       `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/description`,

@@ -102,6 +102,7 @@ public sealed class MpqRemovalImportTests
         var imageService = new Mock<IMigrationImageService>();
         var remoteEngine = new Mock<IRemoteEngineService>();
         var ipSync = new Mock<IIndividualProgressionSyncService>();
+        var serverConfig = new Mock<IServerConfigService>();
 
         return new MigrationService(
             db,
@@ -111,6 +112,7 @@ public sealed class MpqRemovalImportTests
             imageService.Object,
             remoteEngine.Object,
             ipSync.Object,
+            serverConfig.Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

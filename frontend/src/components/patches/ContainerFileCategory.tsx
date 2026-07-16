@@ -1,22 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Upload, Loader2, FolderPlus, Folder } from 'lucide-react'
 import type { PatchFileDto } from '@/types/patch.types'
 import PatchFileListRow from './PatchFileListRow'
+import CollapsiblePatchSection, { patchFileListClassName } from './CollapsiblePatchSection'
 
 interface ContainerFileCategoryProps {
   title: string
-  /** Accept filter for file inputs (e.g. ".sql", ".txt,.csv"); omit for any file (maps). */
   accept?: string
   files: PatchFileDto[]
   disabled?: boolean
   uploading?: boolean
-  /** Inline error shown right by the upload field (e.g. a failed upload). */
   error?: string | null
-  /** Upload files, each with a relative path (optionally one container sub-folder). */
+  notice?: ReactNode
+  collapseStorageKey?: string
   onUploadItems: (items: { file: File; path: string }[]) => void | Promise<void>
-  /** Delete by relative name (e.g. "gems/Item.csv" or "Spell.csv"). */
   onDelete: (fileName: string) => void
-  /** Optional inline editor (DBC only). */
   onEdit?: (fileName: string) => void
 }
 
@@ -100,6 +98,8 @@ export default function ContainerFileCategory({
   disabled,
   uploading,
   error,
+  notice,
+  collapseStorageKey,
   onUploadItems,
   onDelete,
   onEdit,
@@ -167,23 +167,32 @@ export default function ContainerFileCategory({
       .map((f) => ({ file: f, path: pathFor(f) }))
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="font-semibold text-gray-800">
-          {title} <span className="text-gray-400 font-normal">({files.length})</span>
-        </h4>
+    <CollapsiblePatchSection
+      title={title}
+      count={files.length}
+      storageKey={collapseStorageKey}
+      defaultCollapsed={files.length > 20}
+      uploading={uploading}
+      error={error}
+      headerActions={
         <button
           type="button"
           disabled={disabled}
           onClick={() => folderInputRef.current?.click()}
           className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 disabled:opacity-40"
         >
-          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderPlus className="w-4 h-4" />}
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
           Upload folder
         </button>
-      </div>
+      }
+    >
+      {notice && (
+        <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {notice}
+        </div>
+      )}
 
-      <p className="text-xs text-gray-500 mb-3">
+      <p className="mb-3 text-xs text-gray-500">
         Files can sit at the root or inside a single container folder. Upload a folder (or drop
         folders) to create containers; nested sub-folders aren't allowed.
       </p>
@@ -264,7 +273,7 @@ export default function ContainerFileCategory({
 
       {/* Root files */}
       {rootFiles.length > 0 && (
-        <ul className="mt-3 space-y-2">
+        <ul className={patchFileListClassName(rootFiles.length)}>
           {rootFiles.map((file) => (
             <PatchFileListRow
               key={file.name}
@@ -327,7 +336,7 @@ export default function ContainerFileCategory({
                 <Upload className="w-3.5 h-3.5" /> Add files
               </button>
             </div>
-            <ul className="space-y-2 p-3">
+            <ul className={`space-y-2 p-3 ${subFiles.length > 12 ? 'max-h-64 overflow-y-auto' : ''}`}>
               {subFiles.map((file) => (
                 <PatchFileListRow
                   key={file.name}
@@ -344,6 +353,6 @@ export default function ContainerFileCategory({
             <p className="px-3 pb-2 text-[11px] text-gray-500">Drop files here to add to this container.</p>
           </div>
         ))}
-    </div>
+    </CollapsiblePatchSection>
   )
 }

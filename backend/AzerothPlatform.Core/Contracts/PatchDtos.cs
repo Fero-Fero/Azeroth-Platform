@@ -16,7 +16,7 @@ public enum PatchStatus
 /// <summary>A single file inside a patch.</summary>
 public sealed class PatchFileDto
 {
-    /// <summary>Category: "sql/world", "sql/auth", "sql/characters", "dbc", "map", "mpq", or "config".</summary>
+    /// <summary>Category: "sql/world", "sql/auth", "sql/characters", "dbc", "map", "mpq", "config", or "lua".</summary>
     public string Category { get; set; } = string.Empty;
 
     public string Name { get; set; } = string.Empty;
@@ -106,6 +106,15 @@ public sealed class PatchConfigOverrideDto
     public string Key { get; set; } = string.Empty;
 
     public string Value { get; set; } = string.Empty;
+
+    /// <summary>Populated when previewing against live server configs.</summary>
+    public bool ConfFound { get; set; }
+
+    /// <summary>Populated when previewing against live server configs.</summary>
+    public bool KeyFound { get; set; }
+
+    /// <summary>Current value from the live server config, when available.</summary>
+    public string? CurrentValue { get; set; }
 }
 
 /// <summary>A client MPQ file currently published to a stack's client overlay (served to players).</summary>

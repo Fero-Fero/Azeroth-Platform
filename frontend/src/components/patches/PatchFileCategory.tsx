@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Upload, Loader2, X } from 'lucide-react'
 import type { PatchFileDto } from '@/types/patch.types'
 import PatchFileListRow, { formatBytes } from './PatchFileListRow'
+import CollapsiblePatchSection, { patchFileListClassName } from './CollapsiblePatchSection'
 
 interface PatchFileCategoryProps {
   title: string
@@ -12,12 +13,8 @@ interface PatchFileCategoryProps {
   disabled?: boolean
   uploading?: boolean
   notice?: ReactNode
-  /**
-   * When true, the user is prompted for a per-file description after selecting files, before the
-   * upload proceeds. Each entry in the descriptions array matches the file at the same index.
-   */
+  collapseStorageKey?: string
   requireDescription?: boolean
-  /** Inline error shown right by the upload field (e.g. a failed upload). */
   error?: string | null
   onUpload: (category: string, files: File[], descriptions?: string[]) => void | Promise<void>
   onDelete: (category: string, fileName: string) => void
@@ -33,6 +30,7 @@ export default function PatchFileCategory({
   disabled,
   uploading,
   notice,
+  collapseStorageKey,
   requireDescription,
   error,
   onUpload,
@@ -42,7 +40,6 @@ export default function PatchFileCategory({
 }: PatchFileCategoryProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
-  // Files awaiting a per-file description before upload (when requireDescription is set).
   const [pending, setPending] = useState<{ file: File; description: string }[] | null>(null)
 
   const uploadBlocked = disabled || uploading
@@ -51,7 +48,6 @@ export default function PatchFileCategory({
     const arr = Array.from(fileList)
     if (arr.length === 0) return
     if (requireDescription) {
-      // Prompt for each file's description before uploading anything.
       setPending(arr.map((file) => ({ file, description: '' })))
       return
     }
@@ -60,10 +56,10 @@ export default function PatchFileCategory({
 
   const confirmPending = () => {
     if (!pending) return
-    const files = pending.map((p) => p.file)
+    const uploadFiles = pending.map((p) => p.file)
     const descriptions = pending.map((p) => p.description.trim())
     setPending(null)
-    onUpload(category, files, descriptions)
+    onUpload(category, uploadFiles, descriptions)
   }
 
   const pendingReady = !!pending && pending.every((p) => p.description.trim().length > 0)
@@ -78,19 +74,15 @@ export default function PatchFileCategory({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-          {title} <span className="text-gray-400 font-normal">({files.length})</span>
-          {uploading && (
-            <span className="inline-flex items-center gap-1 text-xs font-normal text-blue-600">
-              <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
-            </span>
-          )}
-        </h4>
-        {headerActions}
-      </div>
-
+    <CollapsiblePatchSection
+      title={title}
+      count={files.length}
+      storageKey={collapseStorageKey}
+      defaultCollapsed={files.length > 20}
+      uploading={uploading}
+      error={error}
+      headerActions={headerActions}
+    >
       {notice && (
         <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {notice}
@@ -105,15 +97,15 @@ export default function PatchFileCategory({
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => !uploadBlocked && inputRef.current?.click()}
-        className={`flex items-center justify-center gap-2 py-3 rounded-md border-2 border-dashed text-sm transition-colors ${
+        className={`flex items-center justify-center gap-2 rounded-md border-2 border-dashed py-3 text-sm transition-colors ${
           uploadBlocked
-            ? 'border-gray-200 text-gray-300 cursor-not-allowed'
+            ? 'cursor-not-allowed border-gray-200 text-gray-300'
             : dragOver
-            ? 'border-blue-400 bg-blue-50 text-blue-600 cursor-pointer'
-            : 'border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-500 cursor-pointer'
+            ? 'cursor-pointer border-blue-400 bg-blue-50 text-blue-600'
+            : 'cursor-pointer border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-500'
         }`}
       >
-        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
         <span>
           {uploading
             ? 'Uploading, please wait...'
@@ -139,7 +131,7 @@ export default function PatchFileCategory({
       )}
 
       {files.length > 0 && (
-        <ul className="mt-3 space-y-2">
+        <ul className={patchFileListClassName(files.length)}>
           {files.map((file) => (
             <PatchFileListRow
               key={file.name}
@@ -168,11 +160,11 @@ export default function PatchFileCategory({
                 className="text-gray-400 hover:text-gray-600"
                 title="Cancel"
               >
-                <X className="w-5 h-5" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="max-h-[60vh] overflow-y-auto px-4 py-3 space-y-4">
+            <div className="max-h-[60vh] space-y-4 overflow-y-auto px-4 py-3">
               <p className="text-xs text-gray-500">
                 A description is required for each file. It's stored alongside the file and shown in
                 this list.
@@ -180,7 +172,7 @@ export default function PatchFileCategory({
               {pending.map((p, i) => (
                 <div key={`${p.file.name}-${i}`}>
                   <label className="mb-1 flex items-center justify-between text-sm font-medium text-gray-700">
-                    <span className="font-mono truncate mr-2">{p.file.name}</span>
+                    <span className="mr-2 truncate font-mono">{p.file.name}</span>
                     <span className="shrink-0 text-xs font-normal text-gray-400">{formatBytes(p.file.size)}</span>
                   </label>
                   <textarea
@@ -219,6 +211,6 @@ export default function PatchFileCategory({
           </div>
         </div>
       )}
-    </div>
+    </CollapsiblePatchSection>
   )
 }

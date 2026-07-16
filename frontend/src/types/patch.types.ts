@@ -47,6 +47,9 @@ export interface PatchConfigOverrideDto {
   targetConf: string
   key: string
   value: string
+  confFound?: boolean
+  keyFound?: boolean
+  currentValue?: string | null
 }
 
 export interface PublishedMpqDto {

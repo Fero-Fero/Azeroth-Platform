@@ -21,6 +21,9 @@ function iconForExtension(ext: string) {
   if (ext === 'json') {
     return { Icon: FileJson, className: 'text-amber-600 bg-amber-50 border-amber-100' }
   }
+  if (ext === 'lua' || ext === 'ext') {
+    return { Icon: FileText, className: 'text-sky-600 bg-sky-50 border-sky-100' }
+  }
   if (ext === 'sql') {
     return { Icon: FileText, className: 'text-violet-600 bg-violet-50 border-violet-100' }
   }

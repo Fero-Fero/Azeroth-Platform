@@ -94,6 +94,16 @@ public class MigrationsController : ControllerBase
     public Task<IActionResult> GetPatch(string stackId, string patchKey, CancellationToken cancellationToken)
         => Execute(() => _migrations.GetPatchAsync(stackId, patchKey, cancellationToken));
 
+    /// <summary>
+    /// Config overrides for a patch compared against the stack's live server <c>.conf</c> values.
+    /// </summary>
+    [HttpGet("{patchKey}/config-overrides-preview")]
+    public Task<IActionResult> GetPatchConfigOverridesPreview(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken)
+        => Execute(() => _migrations.GetPatchConfigOverridesPreviewAsync(stackId, patchKey, cancellationToken));
+
     /// <summary>Saves description.md / description.txt for a single patch.</summary>
     [HttpPut("{patchKey}/description")]
     public Task<IActionResult> SavePatchDescription(
