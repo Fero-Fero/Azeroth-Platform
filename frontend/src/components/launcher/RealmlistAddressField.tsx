@@ -4,7 +4,7 @@ import { useLauncherProfile } from '@/hooks/useLauncher'
 import { useSetRealmAddress } from '@/hooks/useRealms'
 import { systemApi } from '@/services/api'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
-import { browserLanHost, detectBrowserLanIp, detectManagerLanHost } from '@/lib/network'
+import { browserLanHost, detectBrowserLanIp, detectManagerLanHost, isPrivateIPv4 } from '@/lib/network'
 
 /**
  * Shared realmlist host editor used by both the stack Overview and the Client → Realms tab so the two
@@ -45,19 +45,27 @@ export default function RealmlistAddressField({ stackId }: { stackId: string }) 
     setErr(null)
     setDetecting(true)
     try {
+      // Prefer the manager API first: in Docker it reads HOST_LAN_IP; on bare metal it scans NICs.
+      const res = await systemApi.network()
+      const apiHost = res.data.suggestedRealmlistHost?.trim()
+      if (apiHost) {
+        setValue(apiHost)
+        return
+      }
+
       const browserHost = browserLanHost() || await detectBrowserLanIp() || await detectManagerLanHost()
       if (browserHost) {
         setValue(browserHost)
         return
       }
 
-      const res = await systemApi.network()
-      const host = res.data.suggestedRealmlistHost?.trim()
-      if (host) {
-        setValue(host)
-      } else {
-        setErr('Could not detect a usable LAN IP. Enter it manually.')
+      const effective = data.effectiveRealmlistHost?.trim()
+      if (effective && isPrivateIPv4(effective)) {
+        setValue(effective)
+        return
       }
+
+      setErr('Could not detect a usable LAN IP. Enter it manually.')
     } catch {
       setErr('Failed to detect this computer\u2019s IP address.')
     } finally {

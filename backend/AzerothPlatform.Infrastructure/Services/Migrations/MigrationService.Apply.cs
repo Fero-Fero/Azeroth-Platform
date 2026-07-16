@@ -236,7 +236,7 @@ public sealed partial class MigrationService
         var hasMpq = PatchHasMpq(stackRoot, patch.Key);
         // Published MPQs this patch removes from the client overlay. Removal runs in the mpq stage,
         // before any new MPQ files are published, and (like an upload) bumps the client manifest.
-        var mpqRemovals = ReadMpqRemovals(stackRoot, patch.Key);
+        var mpqRemovals = CollectMpqRemovals(stackRoot, patch.Key);
         var hasMpqRemovals = mpqRemovals.Count > 0;
         // Anything that touches the server DB / data volume requires the DB up (for SQL) and the
         // world/auth servers stopped (for DBC/map data-volume writes and SQL).
@@ -366,15 +366,10 @@ public sealed partial class MigrationService
                         }
                         await BuildMpqFromContentAsync(stack, stackRoot, patch.Key, mpqName, result, cancellationToken);
                     }
-                    if (manifest.Remove.Count > 0)
-                    {
-                        mpqRemovals = mpqRemovals.Concat(manifest.Remove).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    }
                 }, cancellationToken);
 
-                // Re-check since construction may have produced new .mpq files and merged manifest removals
+                // Re-check since construction may have produced new .mpq files
                 hasMpq = PatchHasMpq(stackRoot, patch.Key);
-                hasMpqRemovals = mpqRemovals.Count > 0;
             }
 
             // 7) Update the client overlay: first REMOVE any MPQs this patch retires, then publish the
@@ -616,7 +611,7 @@ public sealed partial class MigrationService
                 HasSql = PatchHasSql(stackRoot, patch.Key),
                 HasMap = PatchHasMap(stackRoot, patch.Key),
                 HasMpq = PatchHasMpq(stackRoot, patch.Key),
-                MpqRemovals = ReadMpqRemovals(stackRoot, patch.Key)
+                MpqRemovals = CollectMpqRemovals(stackRoot, patch.Key)
             };
         }).ToList();
 
@@ -759,13 +754,6 @@ public sealed partial class MigrationService
             foreach (var plan in plans)
             {
                 var patchMpqRemovals = plan.MpqRemovals;
-                var patchManifest = ReadMpqManifest(stackRoot, plan.Patch.Key);
-                if (patchManifest?.Remove.Count > 0)
-                {
-                    patchMpqRemovals = patchMpqRemovals.Concat(patchManifest.Remove)
-                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                }
-
                 var patchHasMpq = PatchHasMpq(stackRoot, plan.Patch.Key);
                 if (patchHasMpq || patchMpqRemovals.Count > 0)
                 {

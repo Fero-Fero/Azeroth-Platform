@@ -62,11 +62,37 @@ export async function detectBrowserLanIp(timeoutMs = 1000): Promise<string> {
   })
 }
 
-async function probeManagerHost(host: string, port: string, timeoutMs: number): Promise<string> {
+type ManagerProbeTarget = { port: string; protocol: 'http' | 'https' }
+
+function managerProbeTargets(): ManagerProbeTarget[] {
+  const hostname = window.location.hostname.trim()
+  const locPort = window.location.port
+
+  // When the UI is on localhost the manager is usually on :8080 (direct) or :443 (Caddy TLS). HTTPS pages
+  // cannot probe LAN IPs over HTTP (mixed content), so only include HTTP targets when the page is HTTP.
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const targets: ManagerProbeTarget[] = []
+    if (window.location.protocol === 'http:') {
+      targets.push({ port: '8080', protocol: 'http' })
+    }
+    targets.push({ port: locPort || '443', protocol: 'https' })
+    return targets
+  }
+
+  const port = locPort || (window.location.protocol === 'https:' ? '443' : '80')
+  return [{ port, protocol: window.location.protocol === 'https:' ? 'https' : 'http' }]
+}
+
+async function probeManagerHost(
+  host: string,
+  port: string,
+  protocol: 'http' | 'https',
+  timeoutMs: number,
+): Promise<string> {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(`http://${host}:${port}/api/system/lan-probe`, {
+    const res = await fetch(`${protocol}://${host}:${port}/api/system/lan-probe`, {
       cache: 'no-store',
       signal: controller.signal,
     })
@@ -82,22 +108,30 @@ async function probeManagerHost(host: string, port: string, timeoutMs: number): 
   }
 }
 
-async function probeChunk(candidates: string[], port: string, timeoutMs: number): Promise<string> {
-  const results = await Promise.all(candidates.map((host) => probeManagerHost(host, port, timeoutMs)))
+async function probeChunk(
+  candidates: string[],
+  target: ManagerProbeTarget,
+  timeoutMs: number,
+): Promise<string> {
+  const results = await Promise.all(
+    candidates.map((host) => probeManagerHost(host, target.port, target.protocol, timeoutMs)),
+  )
   return results.find(Boolean) || ''
 }
 
 export async function detectManagerLanHost(): Promise<string> {
-  const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
   const ranges = ['192.168.1', '192.168.0', '10.0.0']
   const chunkSize = 32
+  const targets = managerProbeTargets()
 
-  for (const range of ranges) {
-    const candidates = Array.from({ length: 254 }, (_, i) => `${range}.${i + 1}`)
-    for (let i = 0; i < candidates.length; i += chunkSize) {
-      const found = await probeChunk(candidates.slice(i, i + chunkSize), port, 450)
-      if (found) {
-        return found
+  for (const target of targets) {
+    for (const range of ranges) {
+      const candidates = Array.from({ length: 254 }, (_, i) => `${range}.${i + 1}`)
+      for (let i = 0; i < candidates.length; i += chunkSize) {
+        const found = await probeChunk(candidates.slice(i, i + chunkSize), target, 450)
+        if (found) {
+          return found
+        }
       }
     }
   }

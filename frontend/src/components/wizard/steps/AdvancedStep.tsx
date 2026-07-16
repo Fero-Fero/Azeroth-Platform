@@ -43,7 +43,11 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
       .network()
       .then(async (res) => {
         if (cancelled) return
-        const suggested = browserLanHost() || await detectManagerLanHost() || res.data.suggestedRealmlistHost || ''
+        const suggested =
+          res.data.suggestedRealmlistHost?.trim()
+          || browserLanHost()
+          || await detectManagerLanHost()
+          || ''
         if (cancelled) return
         setSuggestedHost(suggested)
         // Prefill only when the field is still empty and we're deploying locally.

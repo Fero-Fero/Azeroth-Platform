@@ -129,6 +129,79 @@ public sealed class MpqRemovalImportTests
     }
 }
 
+public sealed class MpqManifestReaderTests
+{
+    private const string ProgressionTemplate = """
+        // example: { 
+        //   "add": "Patch-W.MPQ", 
+        //   "remove": "Patch-W.MPQ" 
+        //   "description": {
+        //        "Patch-W.MPQ": "This is a description of the patch in English",
+        //    }
+        // }
+        """;
+
+    [Fact]
+    public void Parse_comment_only_template_returns_empty_manifest()
+    {
+        var manifest = MpqManifestReader.Parse(ProgressionTemplate);
+        manifest.Should().NotBeNull();
+        manifest!.Add.Should().BeEmpty();
+        manifest.Remove.Should().BeEmpty();
+        manifest.Description.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_remove_only_manifest()
+    {
+        var manifest = MpqManifestReader.Parse("""{"remove":["patch-w.mpq"]}""");
+        manifest.Should().NotBeNull();
+        manifest!.Remove.Should().ContainSingle("patch-w.mpq");
+        manifest.Add.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_prebuilt_with_description()
+    {
+        var manifest = MpqManifestReader.Parse("""
+            {
+              "add": ["patch-k.mpq"],
+              "description": { "patch-k.mpq": "Onyxia client changes" }
+            }
+            """);
+        manifest.Should().NotBeNull();
+        manifest!.Add.Should().ContainSingle("patch-k.mpq");
+        manifest.Description["patch-k.mpq"].Should().Be("Onyxia client changes");
+    }
+
+    [Fact]
+    public void CollectMpqRemovals_merges_manifest_and_legacy_remove_json()
+    {
+        var stackRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var patchKey = "patch 1.2 TEST";
+        try
+        {
+            MigrationLayout.EnsurePatchDirectories(stackRoot, patchKey);
+            File.WriteAllText(
+                Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "mpq.json"),
+                """{"remove":["patch-w.mpq"]}""");
+            File.WriteAllText(
+                Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), MigrationService.MpqRemovalsFileName),
+                """["patch-x.mpq"]""");
+
+            var removals = MigrationService.CollectMpqRemovals(stackRoot, patchKey);
+            removals.Should().BeEquivalentTo(["patch-w.mpq", "patch-x.mpq"]);
+        }
+        finally
+        {
+            if (Directory.Exists(stackRoot))
+            {
+                Directory.Delete(stackRoot, recursive: true);
+            }
+        }
+    }
+}
+
 public sealed class MpqPackFilterTests
 {
     [Theory]

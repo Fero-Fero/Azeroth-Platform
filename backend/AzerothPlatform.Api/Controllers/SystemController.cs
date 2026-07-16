@@ -2,9 +2,11 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using AzerothPlatform.Core.Contracts;
+using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace AzerothPlatform.Api.Controllers;
 
@@ -18,10 +20,14 @@ namespace AzerothPlatform.Api.Controllers;
 public class SystemController : ControllerBase
 {
     private readonly IRemoteEngineService _remoteEngine;
+    private readonly MigrationOptions _migrationOptions;
 
-    public SystemController(IRemoteEngineService remoteEngine)
+    public SystemController(
+        IRemoteEngineService remoteEngine,
+        IOptions<MigrationOptions> migrationOptions)
     {
         _remoteEngine = remoteEngine;
+        _migrationOptions = migrationOptions.Value;
     }
 
     /// <summary>
@@ -34,8 +40,9 @@ public class SystemController : ControllerBase
     /// <item>the address the admin used to reach the manager (request host) when it's a usable IP;</item>
     /// <item>a scan of local interfaces, preferring true LAN ranges and never a Docker/VM address.</item>
     /// </list>
-    /// The configured realmlist host is intentionally not used here: it can be stale after a laptop changes
-    /// networks, and this endpoint powers a "use this computer's IP" action that must reflect live evidence.
+    /// When the manager runs in Docker, interface scans only see container addresses (filtered out). In that
+    /// case <see cref="MigrationOptions.RealmlistHost"/> (<c>HOST_LAN_IP</c>) is used as a last resort when
+    /// it is a usable private LAN address.
     /// </remarks>
     [HttpGet("network")]
     public ActionResult<NetworkInfoDto> GetNetwork()
@@ -72,6 +79,11 @@ public class SystemController : ControllerBase
         }
 
         var suggested = ResolveSuggestedHost(addresses);
+        if (!string.IsNullOrWhiteSpace(suggested)
+            && !addresses.Contains(suggested, StringComparer.Ordinal))
+        {
+            addresses.Insert(0, suggested);
+        }
 
         return Ok(new NetworkInfoDto
         {
@@ -116,6 +128,14 @@ public class SystemController : ControllerBase
         if (!string.IsNullOrWhiteSpace(scannedHost))
         {
             return scannedHost;
+        }
+
+        // 3. Docker deployments cannot see the host NICs; fall back to the configured realmlist host
+        //    (HOST_LAN_IP) when it is a usable private LAN address.
+        var configuredHost = _migrationOptions.RealmlistHost?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredHost) && IsUsableLanHost(configuredHost))
+        {
+            return configuredHost;
         }
 
         return string.Empty;

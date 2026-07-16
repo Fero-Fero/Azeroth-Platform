@@ -42,10 +42,12 @@ export default function MpqManifestPanel({ files, mpqRemovals }: MpqManifestPane
       </h5>
 
       <p className="text-xs text-violet-700">
-        This patch has an <span className="font-mono">mpq.json</span> manifest. Each name in{' '}
-        <span className="font-mono">add</span> is either a pre-built <span className="font-mono">.mpq</span>{' '}
-        already in this folder, or an archive built automatically from the raw content files below
-        when the patch is applied.
+        This patch has an <span className="font-mono">mpq.json</span> manifest (comment-only templates are
+        treated as empty). Each name in <span className="font-mono">add</span> is either a pre-built{' '}
+        <span className="font-mono">.mpq</span> already in this folder, or an archive built automatically
+        from the raw content files below when the patch is applied. Names in{' '}
+        <span className="font-mono">remove</span> are deleted from the client overlay on apply —{' '}
+        <span className="font-mono">add</span> is not required for removals alone.
       </p>
 
       {preBuiltMpqs.length > 0 && (

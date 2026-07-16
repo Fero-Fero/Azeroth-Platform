@@ -1281,15 +1281,41 @@ public sealed partial class MigrationService : IMigrationService
         if (!File.Exists(path))
             return null;
 
-        try
+        return MpqManifestReader.Parse(File.ReadAllText(path));
+    }
+
+    /// <summary>Merges legacy remove.json entries with <c>remove</c> names from mpq.json.</summary>
+    internal static List<string> CollectMpqRemovals(string stackRoot, string patchKey)
+    {
+        var removals = ReadMpqRemovals(stackRoot, patchKey);
+        var manifest = ReadMpqManifest(stackRoot, patchKey);
+        if (manifest is null || manifest.Remove.Count == 0)
         {
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<MpqManifestDto>(json, JsonOptions);
+            return removals;
         }
-        catch
+
+        return removals.Concat(manifest.Remove)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ResolveMpqFileDescription(string stackRoot, string patchKey, string mpqFilePath)
+    {
+        var sidecar = ReadMpqDescription(mpqFilePath);
+        if (!string.IsNullOrWhiteSpace(sidecar))
         {
-            return null;
+            return sidecar;
         }
+
+        var fileName = Path.GetFileName(mpqFilePath);
+        var manifest = ReadMpqManifest(stackRoot, patchKey);
+        if (manifest?.Description.TryGetValue(fileName, out var desc) == true
+            && !string.IsNullOrWhiteSpace(desc))
+        {
+            return desc.Trim();
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1672,13 +1698,18 @@ public sealed partial class MigrationService : IMigrationService
 
         AddCategoryFiles(files, MigrationLayout.DbcDir(stackRoot, patchKey), "dbc");
         AddCategoryFiles(files, MigrationLayout.MapDir(stackRoot, patchKey), "map");
-        AddCategoryFiles(files, MigrationLayout.MpqDir(stackRoot, patchKey), "mpq");
+        AddCategoryFiles(files, MigrationLayout.MpqDir(stackRoot, patchKey), "mpq", stackRoot, patchKey);
         AddCategoryFiles(files, MigrationLayout.ConfigDir(stackRoot, patchKey), "config");
 
         return files;
     }
 
-    private static void AddCategoryFiles(List<PatchFileDto> target, string dir, string category)
+    private static void AddCategoryFiles(
+        List<PatchFileDto> target,
+        string dir,
+        string category,
+        string? stackRoot = null,
+        string? patchKey = null)
     {
         var isMpq = string.Equals(category, "mpq", StringComparison.OrdinalIgnoreCase);
         foreach (var path in EnumerateCategoryFiles(dir, category).OrderBy(p => p, StringComparer.Ordinal))
@@ -1690,7 +1721,9 @@ public sealed partial class MigrationService : IMigrationService
                 // Relative to the category dir so container sub-folders are preserved (e.g. "gems/Item.csv").
                 Name = Path.GetRelativePath(dir, path).Replace('\\', '/'),
                 Size = info.Length,
-                Description = isMpq ? ReadMpqDescription(path) : null
+                Description = isMpq && stackRoot is not null && patchKey is not null
+                    ? ResolveMpqFileDescription(stackRoot, patchKey, path)
+                    : null
             });
         }
     }
