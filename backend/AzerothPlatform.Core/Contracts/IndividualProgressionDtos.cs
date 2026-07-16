@@ -204,13 +204,16 @@ public sealed class ResolveOptionalFilesRequest
 /// <summary>The mpq.json manifest defining MPQ construction/removal rules for a patch.</summary>
 public sealed class MpqManifestDto
 {
-    /// <summary>MPQ files to be constructed from raw content within the MPQ directory.</summary>
+    /// <summary>MPQ file names to construct from raw content in this patch's mpq directory.</summary>
     public List<string> Add { get; set; } = new();
 
     /// <summary>MPQ files to be removed from the client overlay when the patch is applied.</summary>
     public List<string> Remove { get; set; } = new();
 
-    /// <summary>Human-readable descriptions for each constructed MPQ.</summary>
+    /// <summary>
+    /// Human-readable descriptions keyed by archive file name (for example <c>patch-k.mpq</c>).
+    /// Required for every shipped archive — pre-built uploads and names listed in <see cref="Add"/>.
+    /// </summary>
     public Dictionary<string, string> Description { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

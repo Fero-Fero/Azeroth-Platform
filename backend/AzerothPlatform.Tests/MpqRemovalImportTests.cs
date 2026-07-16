@@ -161,7 +161,20 @@ public sealed class MpqManifestReaderTests
     }
 
     [Fact]
-    public void Parse_prebuilt_with_description()
+    public void Parse_prebuilt_description_only_manifest()
+    {
+        var manifest = MpqManifestReader.Parse("""
+            {
+              "description": { "patch-k.mpq": "Onyxia client changes" }
+            }
+            """);
+        manifest.Should().NotBeNull();
+        manifest!.Add.Should().BeEmpty();
+        manifest.Description["patch-k.mpq"].Should().Be("Onyxia client changes");
+    }
+
+    [Fact]
+    public void Parse_prebuilt_with_description_and_add_for_construction()
     {
         var manifest = MpqManifestReader.Parse("""
             {
