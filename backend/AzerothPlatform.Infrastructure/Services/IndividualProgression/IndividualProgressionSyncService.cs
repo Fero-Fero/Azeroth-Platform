@@ -125,10 +125,16 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             throw new InvalidOperationException("Prepare server-wide progression before recreating patch templates.");
         }
 
-        var missingBefore = IndividualProgressionPatchCatalog.All.Count(definition =>
-            !ProgressionPatchExists(stackRoot, definition));
+        var missingBefore = ComputeMissingProgressionPatchCount(stackRoot);
         RemovePlaceholderPatches(stackRoot);
-        var templatesCreated = SeedProgressionPatches(stackRoot, onlyMissing: true);
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        if (!Directory.Exists(repoPath))
+        {
+            throw new InvalidOperationException(
+                $"Azeroth-Platform-Progression is not on the stack yet. Run progression sync first (expected at {repoPath}).");
+        }
+
+        var templatesCreated = ProgressionRepoPatchSeeder.Seed(repoPath, stackRoot, onlyMissing: true);
 
         settings.ValidationBuildFingerprint = null;
         settings.ValidationPassedAt = null;
@@ -216,7 +222,15 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     }
 
     public int CountProgressionPatches(string stackRoot) =>
-        IndividualProgressionPatchCatalog.All.Count(definition => ProgressionPatchExists(stackRoot, definition));
+        ProgressionRepoStructureValidator.CountManagedProgressionPatches(stackRoot);
+
+    public int GetExpectedProgressionPatchCount(string stackId)
+    {
+        var repoPath = ResolveProgressionRepoDirectory(GetStackRoot(stackId));
+        return Directory.Exists(repoPath)
+            ? ProgressionRepoStructureValidator.CountReferencePatches(repoPath)
+            : 0;
+    }
 
     public async Task<IndividualProgressionValidationResultDto> ValidatePatchesAsync(
         string stackId,
@@ -232,30 +246,35 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         var errors = new List<string>();
         var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        var expectedPatchCount = Directory.Exists(repoPath)
+            ? ProgressionRepoStructureValidator.CountReferencePatches(repoPath)
+            : 0;
         var patchCount = CountProgressionPatches(stackRoot);
-        if (patchCount != IndividualProgressionPatchCatalog.ExpectedPatchCount)
+
+        if (!Directory.Exists(repoPath))
         {
             errors.Add(
-                $"Expected {IndividualProgressionPatchCatalog.ExpectedPatchCount} Individual Progression patches, found {patchCount}.");
+                $"Azeroth-Platform-Progression is not on the stack yet. Run progression sync first (expected at {repoPath}).");
         }
-
-        foreach (var definition in IndividualProgressionPatchCatalog.All)
+        else if (expectedPatchCount > 0 && patchCount != expectedPatchCount)
         {
-            if (ProgressionPatchExists(stackRoot, definition))
-            {
-                continue;
-            }
-
-            if (!PatchIndex.TryParse(definition.Index, out var index, explicitSub1: true))
-            {
-                errors.Add($"Invalid patch index in catalog: {definition.Index}");
-                continue;
-            }
-
-            errors.Add($"Missing progression patch folder: {PatchFolderNames.Format(index, definition.Slug)}");
+            errors.Add(
+                $"Expected {expectedPatchCount} progression patch folders from Azeroth-Platform-Progression, found {patchCount} on the stack.");
         }
 
-        ValidateProgressionRepoStructure(stackRoot, errors);
+        if (Directory.Exists(repoPath))
+        {
+            ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
+        }
+
+        await PatchConfigValidator.ValidateAsync(
+            stackId,
+            stackRoot,
+            _serverConfig,
+            errors,
+            keyChecks,
+            cancellationToken);
 
         await DiscoverKeysAsync(stackId, settings, cancellationToken);
         await RefreshValuesAsync(stackId, settings, cancellationToken);
@@ -285,7 +304,10 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             stackId, worldPath, worldContent, settings.ExpansionKey, errors, cancellationToken));
 
         var buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
-        var passed = errors.Count == 0 && keyChecks.All(check => check.Exists && check.CanRead && check.CanUpdate);
+        var passed = errors.Count == 0 && keyChecks.All(check =>
+            check.Exists
+            && check.CanRead
+            && (check.PatchKey is not null || check.CanUpdate));
         if (passed && buildFingerprint is null)
         {
             passed = false;
@@ -312,7 +334,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             ValidatedAt = settings.ValidationPassedAt,
             BuildFingerprint = settings.ValidationBuildFingerprint,
             PatchCount = patchCount,
-            ExpectedPatchCount = IndividualProgressionPatchCatalog.ExpectedPatchCount,
+            ExpectedPatchCount = expectedPatchCount,
             Errors = errors,
             KeyChecks = keyChecks,
         };
@@ -347,23 +369,20 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         }
 
         return (false,
-            "Individual Progression patch validation is required. Import your patch content, rebuild the server if needed, then click Perform patch validation check.");
+            "Individual Progression patch validation is required. Run progression sync, rebuild the server if needed, then click Validate patches.");
     }
 
-    private void ValidateProgressionRepoStructure(string stackRoot, List<string> errors)
+    private int ComputeMissingProgressionPatchCount(string stackRoot)
     {
-        var repoPath = ProgressionRepoStructureValidator.ResolveLocalRepoPath(_migrationOptions.ProgressionRepoPath);
-        if (repoPath is null)
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        if (!Directory.Exists(repoPath))
         {
-            var hint = string.IsNullOrWhiteSpace(_migrationOptions.ProgressionRepoPath)
-                ? "../Azeroth-Platform-Progression (sibling to the platform repository)"
-                : _migrationOptions.ProgressionRepoPath;
-            errors.Add(
-                $"Azeroth-Platform-Progression repository not found at {hint}. Clone the repo or set Migrations:ProgressionRepoPath.");
-            return;
+            return 0;
         }
 
-        ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
+        return Math.Max(
+            0,
+            ProgressionRepoStructureValidator.CountReferencePatches(repoPath) - CountProgressionPatches(stackRoot));
     }
 
     private static bool ProgressionPatchExists(string stackRoot, ProgressionPatchDefinition definition)
@@ -757,7 +776,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         await EnsureModuleInstalledAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         var result = new ProgressionSyncResultDto();
-        var tempDir = Path.Combine(Path.GetTempPath(), $"azeroth-progression-sync-{Guid.NewGuid():N}");
         var progressStore = new ProgressionSyncProgressStore(stackRoot);
 
         var existingProgress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
@@ -771,33 +789,32 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         try
         {
-            Directory.CreateDirectory(tempDir);
-
-            await progressStore.ReportAsync(
-                "Cloning repository",
-                10,
-                "Cloning Azeroth-Platform-Progression repository…",
+            var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", IIndividualProgressionSyncService.ModuleId);
+            var moduleError = await EnsureIndividualProgressionModuleAsync(
+                moduleRoot,
+                progressStore,
+                result,
                 cancellationToken);
-
-            var (exitCode, _, gitError) = await RunGitAsync(
-                $"clone --depth 1 {ProgressionRepoUrl} .",
-                tempDir, cancellationToken);
-
-            if (exitCode != 0)
+            if (moduleError is not null)
             {
-                result.Error = $"Failed to clone progression repo: {gitError}";
+                result.Error = moduleError;
                 await progressStore.CompleteAsync(false, result.Error, result.Error, cancellationToken);
                 return result;
             }
 
-            result.Log.Add("Cloned Azeroth-Platform-Progression repository.");
-            await progressStore.ReportAsync(
-                "Loading mapping",
-                35,
-                "Cloned Azeroth-Platform-Progression repository.",
+            var (repoDir, repoError) = await EnsureProgressionRepoAsync(
+                stackRoot,
+                progressStore,
+                result,
                 cancellationToken);
+            if (repoError is not null)
+            {
+                result.Error = repoError;
+                await progressStore.CompleteAsync(false, result.Error, result.Error, cancellationToken);
+                return result;
+            }
 
-            var mappingPath = Path.Combine(tempDir, MappingFileName);
+            var mappingPath = Path.Combine(repoDir, MappingFileName);
             if (!File.Exists(mappingPath))
             {
                 result.Error = "mapping.json not found in Azeroth-Platform-Progression repository.";
@@ -809,52 +826,60 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             var mapping = JsonSerializer.Deserialize<ProgressionSyncMappingDto>(mappingJson, JsonOptions)
                 ?? new ProgressionSyncMappingDto();
 
-            var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
             var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
             var initialSync = ProgressionSyncTargetPolicy.IsInitialSync(log);
 
             await progressStore.ReportAsync(
                 "Preparing patches",
                 40,
-                initialSync ? "Preparing progression patch templates…" : "Ensuring progression patch templates exist…",
+                initialSync
+                    ? "Creating progression patch folders from Azeroth-Platform-Progression…"
+                    : "Ensuring progression patch folders exist from Azeroth-Platform-Progression…",
                 cancellationToken);
 
             if (initialSync)
             {
-                var templatesPrepared = SeedProgressionPatches(stackRoot, onlyMissing: false);
+                RemovePlaceholderPatches(stackRoot);
+            }
+
+            var templatesPrepared = ProgressionRepoPatchSeeder.Seed(
+                repoDir,
+                stackRoot,
+                onlyMissing: !initialSync);
+
+            if (initialSync)
+            {
                 var message =
-                    $"Initial sync: prepared {templatesPrepared} progression patch template(s); existing patch content in sync targets will be overwritten.";
+                    $"Initial sync: prepared {templatesPrepared} progression patch folder(s) from Azeroth-Platform-Progression; existing patch content in sync targets will be overwritten.";
                 result.Log.Add(message);
                 await progressStore.ReportAsync("Preparing patches", 45, message, cancellationToken);
             }
-            else
+            else if (templatesPrepared > 0)
             {
-                RemovePlaceholderPatches(stackRoot);
-                var templatesEnsured = SeedProgressionPatches(stackRoot, onlyMissing: true);
-                if (templatesEnsured > 0)
-                {
-                    var message = $"Ensured {templatesEnsured} missing progression patch template(s).";
-                    result.Log.Add(message);
-                    await progressStore.ReportAsync("Preparing patches", 45, message, cancellationToken);
-                }
-
+                var message = $"Ensured {templatesPrepared} missing progression patch folder(s) from Azeroth-Platform-Progression.";
+                result.Log.Add(message);
+                await progressStore.ReportAsync("Preparing patches", 45, message, cancellationToken);
                 result.Log.Add("Update sync: only managed progression patches are updated; custom patches are left unchanged.");
             }
+            else
+            {
+                result.Log.Add("Update sync: only managed progression patches are updated; custom patches are left unchanged.");
+            }
+
+            await CopyRepoPatchesAsync(repoDir, stackRoot, result, initialSync, progressStore, cancellationToken);
 
             var mappingCount = Math.Max(1, mapping.Mappings.Count);
             for (var i = 0; i < mapping.Mappings.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ProcessMappingEntry(mapping.Mappings[i], moduleRoot, stackRoot, log, result, initialSync);
-                var percent = 45 + (int)(20.0 * (i + 1) / mappingCount);
+                var percent = 70 + (int)(20.0 * (i + 1) / mappingCount);
                 await progressStore.ReportAsync(
                     "Applying module mappings",
                     percent,
-                    $"Applied module mapping {i + 1} of {mapping.Mappings.Count}.",
+                    $"Imported mod-individual-progression mapping {i + 1} of {mapping.Mappings.Count}.",
                     cancellationToken);
             }
-
-            await CopyRepoPatchesAsync(tempDir, stackRoot, result, initialSync, progressStore, cancellationToken);
 
             log.LastSyncAt = DateTimeOffset.UtcNow;
             await PersistSyncLogAsync(stackRoot, log, cancellationToken);
@@ -875,14 +900,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             result.Log.Add(ex.Message);
             await progressStore.CompleteAsync(false, "Progression sync failed.", ex.Message, cancellationToken);
             _logger.LogError(ex, "Progression sync failed for stack {StackId}.", stackId);
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                try { Directory.Delete(tempDir, recursive: true); }
-                catch { /* best-effort cleanup */ }
-            }
         }
 
         return result;
@@ -914,8 +931,10 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
             if (accepted)
             {
-                var sourceFile = Path.Combine(moduleRoot, source);
-                var resolvedDir = ResolvePatchFolder(stackRoot, entry.Destination);
+                var sourceFile = Path.Combine(
+                    moduleRoot,
+                    ProgressionPatchFolderResolver.NormalizeModuleSourcePath(source));
+                var resolvedDir = ProgressionPatchFolderResolver.Resolve(stackRoot, entry.Destination);
 
                 if (resolvedDir is not null && File.Exists(sourceFile))
                 {
@@ -982,8 +1001,10 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         entry.DecidedAt = DateTimeOffset.UtcNow;
 
         var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
-        var sourceFile = Path.Combine(moduleRoot, source);
-        var resolvedDir = ResolvePatchFolder(stackRoot, entry.Destination);
+        var sourceFile = Path.Combine(
+            moduleRoot,
+            ProgressionPatchFolderResolver.NormalizeModuleSourcePath(source));
+        var resolvedDir = ProgressionPatchFolderResolver.Resolve(stackRoot, entry.Destination);
 
         if (resolvedDir is not null && File.Exists(sourceFile))
         {
@@ -1003,6 +1024,103 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     }
 
     // ===== Progression Sync Helpers =====
+
+    private static string ResolveProgressionRepoDirectory(string stackRoot) =>
+        ProgressionRepoPathResolver.Resolve(stackRoot);
+
+    private static bool IsGitRepository(string directory) =>
+        Directory.Exists(Path.Combine(directory, ".git"));
+
+    private async Task<string?> EnsureIndividualProgressionModuleAsync(
+        string moduleRoot,
+        ProgressionSyncProgressStore progressStore,
+        ProgressionSyncResultDto result,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(moduleRoot))
+        {
+            return "mod-individual-progression is not present in the stack build. Rebuild the stack first.";
+        }
+
+        if (!IsGitRepository(moduleRoot))
+        {
+            result.Log.Add("mod-individual-progression checkout is not a git repository; using existing module files.");
+            return null;
+        }
+
+        await progressStore.ReportAsync(
+            "Updating module",
+            5,
+            "Pulling latest mod-individual-progression changes…",
+            cancellationToken);
+
+        var (exitCode, _, gitError) = await RunGitAsync("pull", moduleRoot, cancellationToken);
+        if (exitCode != 0)
+        {
+            return $"Failed to update mod-individual-progression: {gitError}";
+        }
+
+        result.Log.Add("Updated mod-individual-progression (git pull).");
+        return null;
+    }
+
+    private async Task<(string RepoDir, string? Error)> EnsureProgressionRepoAsync(
+        string stackRoot,
+        ProgressionSyncProgressStore progressStore,
+        ProgressionSyncResultDto result,
+        CancellationToken cancellationToken)
+    {
+        var repoDir = ResolveProgressionRepoDirectory(stackRoot);
+
+        if (IsGitRepository(repoDir))
+        {
+            await progressStore.ReportAsync(
+                "Updating repository",
+                15,
+                "Pulling latest Azeroth-Platform-Progression changes…",
+                cancellationToken);
+
+            var (exitCode, _, gitError) = await RunGitAsync("pull", repoDir, cancellationToken);
+            if (exitCode != 0)
+            {
+                return (repoDir, $"Failed to update progression repo: {gitError}");
+            }
+
+            result.Log.Add("Updated Azeroth-Platform-Progression repository (git pull).");
+            await progressStore.ReportAsync(
+                "Loading mapping",
+                30,
+                "Updated Azeroth-Platform-Progression repository.",
+                cancellationToken);
+            return (repoDir, null);
+        }
+
+        await progressStore.ReportAsync(
+            "Cloning repository",
+            15,
+            "Cloning Azeroth-Platform-Progression repository…",
+            cancellationToken);
+
+        Directory.CreateDirectory(repoDir);
+
+        var (cloneExit, _, cloneError) = await RunGitAsync(
+            $"clone {ProgressionRepoUrl} .",
+            repoDir,
+            cancellationToken);
+
+        if (cloneExit != 0)
+        {
+            return (repoDir, $"Failed to clone progression repo: {cloneError}");
+        }
+
+        result.Log.Add("Cloned Azeroth-Platform-Progression repository.");
+        await progressStore.ReportAsync(
+            "Loading mapping",
+            30,
+            "Cloned Azeroth-Platform-Progression repository.",
+            cancellationToken);
+        return (repoDir, null);
+    }
 
     private static string SyncLogPath(string stackRoot) =>
         Path.Combine(stackRoot, SyncLogFileName);
@@ -1058,50 +1176,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         return (process.ExitCode, await outputTask, await errorTask);
     }
 
-    /// <summary>
-    /// Maps a destination path like "Classic/1.0 Start/sql/world/" to an absolute directory
-    /// by finding the existing patch folder in migrations/ whose index matches.
-    /// </summary>
-    private static string? ResolvePatchFolder(string stackRoot, string destinationPath)
-    {
-        var parts = destinationPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
-        {
-            return null;
-        }
-
-        var patchSegment = parts[1];
-        var spaceIdx = patchSegment.IndexOf(' ');
-        var indexPart = spaceIdx >= 0 ? patchSegment[..spaceIdx] : patchSegment;
-
-        if (!PatchIndex.TryParse(indexPart, out var targetIndex, explicitSub1: true))
-        {
-            return null;
-        }
-
-        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
-        if (!Directory.Exists(migrationsRoot))
-        {
-            return null;
-        }
-
-        foreach (var dir in Directory.EnumerateDirectories(migrationsRoot))
-        {
-            var folderName = Path.GetFileName(dir);
-            if (PatchFolderNames.TryParse(folderName, out var folderIndex, out _) && folderIndex.Equals(targetIndex))
-            {
-                if (parts.Length > 2)
-                {
-                    return Path.Combine(dir, Path.Combine(parts[2..]));
-                }
-
-                return dir;
-            }
-        }
-
-        return null;
-    }
-
     private static void ProcessMappingEntry(
         ProgressionSyncMappingEntryDto entry,
         string moduleRoot,
@@ -1110,10 +1184,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         ProgressionSyncResultDto result,
         bool initialSync)
     {
-        var resolvedDestDir = ResolvePatchFolder(stackRoot, entry.Destination);
+        var resolvedDestDir = ProgressionPatchFolderResolver.Resolve(stackRoot, entry.Destination);
         if (resolvedDestDir is null)
         {
-            result.Log.Add($"Skipped {entry.Source}: could not resolve destination '{entry.Destination}'.");
             return;
         }
 
@@ -1124,19 +1197,20 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         Directory.CreateDirectory(resolvedDestDir);
 
-        if (entry.Source.Contains('*'))
+        var sourcePath = ProgressionPatchFolderResolver.NormalizeModuleSourcePath(entry.Source);
+
+        if (sourcePath.Contains('*'))
         {
-            var sourceDir = Path.Combine(moduleRoot, Path.GetDirectoryName(entry.Source) ?? string.Empty);
+            var sourceDir = Path.Combine(moduleRoot, Path.GetDirectoryName(sourcePath) ?? string.Empty);
             if (!Directory.Exists(sourceDir))
             {
-                result.Log.Add($"Source directory not found: {entry.Source}");
                 return;
             }
 
             foreach (var file in Directory.EnumerateFiles(sourceDir))
             {
                 var fileName = Path.GetFileName(file);
-                var dirPart = Path.GetDirectoryName(entry.Source)?.Replace(Path.DirectorySeparatorChar, '/') ?? "";
+                var dirPart = Path.GetDirectoryName(sourcePath)?.Replace(Path.DirectorySeparatorChar, '/') ?? "";
                 var fileSourcePath = string.IsNullOrEmpty(dirPart) ? fileName : $"{dirPart}/{fileName}";
                 var destFile = Path.Combine(resolvedDestDir, fileName);
                 CopySyncFile(file, destFile, fileSourcePath, entry.Destination, fileName, entry.Optional, log, result);
@@ -1144,16 +1218,15 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         }
         else
         {
-            var sourceFile = Path.Combine(moduleRoot, entry.Source);
+            var sourceFile = Path.Combine(moduleRoot, sourcePath);
             if (!File.Exists(sourceFile))
             {
-                result.Log.Add($"Source file not found: {entry.Source}");
                 return;
             }
 
             var fileName = Path.GetFileName(sourceFile);
             var destFile = Path.Combine(resolvedDestDir, fileName);
-            CopySyncFile(sourceFile, destFile, entry.Source, entry.Destination, fileName, entry.Optional, log, result);
+            CopySyncFile(sourceFile, destFile, sourcePath, entry.Destination, fileName, entry.Optional, log, result);
         }
     }
 
@@ -1251,11 +1324,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                         ? $"{Path.GetFileName(expansionDir)}/{patchName}/"
                         : $"{Path.GetFileName(expansionDir)}/{patchName}/{categoryPath}/";
 
-                    var resolvedDir = ResolvePatchFolder(stackRoot, destination);
+                    var resolvedDir = ProgressionPatchFolderResolver.Resolve(stackRoot, destination);
                     if (resolvedDir is null)
                     {
-                        result.Log.Add(
-                            $"Skipped repo file {relativeToPatch}: could not resolve destination '{destination}'.");
                         continue;
                     }
 
@@ -1271,7 +1342,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         await progressStore.ReportAsync(
             "Copying progression repository",
-            65,
+            55,
             $"Copying {filesToCopy.Count} file(s) from Azeroth-Platform-Progression…",
             cancellationToken);
 

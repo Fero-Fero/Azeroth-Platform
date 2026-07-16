@@ -37,14 +37,17 @@ public interface IIndividualProgressionSyncService
 
     int CountProgressionPatches(string stackRoot);
 
+    int GetExpectedProgressionPatchCount(string stackId);
+
     // ===== Progression Sync (mod-individual-progression + Azeroth-Platform-Progression) =====
 
     /// <summary>Returns the current sync status including whether an optional files log exists.</summary>
     Task<ProgressionSyncStatusDto> GetSyncStatusAsync(string stackId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Triggers a full progression sync: fetches latest mod-individual-progression and
-    /// Azeroth-Platform-Progression content, applies mappings, and returns any pending optional files.
+    /// Triggers a full progression sync: pulls mod-individual-progression and Azeroth-Platform-Progression,
+    /// creates stack patch folders from the progression repository, copies repository content, imports mapped
+    /// module files, and returns any pending optional files.
     /// </summary>
     Task<ProgressionSyncResultDto> RunSyncAsync(string stackId, CancellationToken cancellationToken = default);
 

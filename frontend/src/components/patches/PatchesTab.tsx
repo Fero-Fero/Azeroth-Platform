@@ -15,6 +15,7 @@ import {
   useUploadContainerFiles,
   useDeletePatchFile,
   useDeletePatchEntry,
+  useDropAllPatches,
   downloadApplyLog,
   downloadPatchTemplate,
   useSavePatchDescription,
@@ -33,7 +34,6 @@ import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
 import type { IndividualProgressionValidationResult } from '@/types/individual-progression.types'
-import { INDIVIDUAL_PROGRESSION_EXPECTED_PATCH_COUNT } from '@/types/individual-progression.types'
 
 interface PatchesTabProps {
   stackId: string
@@ -205,6 +205,8 @@ function patchRowTitle(patch: PatchSummaryDto): string {
   return patch.key
 }
 
+const DROP_ALL_PATCHES_CONFIRMATION = 'i am sure'
+
 const STATUS_BADGE: Record<PatchStatus, { label: string; className: string; icon: ReactNode }> = {
   Applied: {
     label: 'Applied',
@@ -238,6 +240,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const uploadContainerMutation = useUploadContainerFiles(stackId)
   const deleteMutation = useDeletePatchFile(stackId)
   const deletePatchMutation = useDeletePatchEntry(stackId)
+  const dropAllPatchesMutation = useDropAllPatches(stackId)
   const saveDescriptionMutation = useSavePatchDescription(stackId)
   const bootstrapMutation = useBootstrapIndividualProgression(stackId)
   const validateMutation = useValidateIndividualProgressionPatches(stackId)
@@ -250,6 +253,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const [showBrowser, setShowBrowser] = useState(false)
   const [confirmReapply, setConfirmReapply] = useState(false)
   const [confirmApply, setConfirmApply] = useState(false)
+  const [confirmDropAll, setConfirmDropAll] = useState(false)
+  const [dropAllConfirmText, setDropAllConfirmText] = useState('')
   const [newExpansion, setNewExpansion] = useState<Expansion>('classic')
   const [newKind, setNewKind] = useState<PatchKind>('patch')
   const [newParentIndex, setNewParentIndex] = useState('')
@@ -663,6 +668,31 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     }
   }
 
+  const handleDropAllPatches = async () => {
+    setActionError(null)
+    try {
+      await dropAllPatchesMutation.mutateAsync()
+      setConfirmDropAll(false)
+      setDropAllConfirmText('')
+      setSelectedKey(null)
+    } catch (err) {
+      setActionError(extractError(err))
+    }
+  }
+
+  const openDropAllConfirm = () => {
+    setDropAllConfirmText('')
+    setConfirmDropAll(true)
+  }
+
+  const closeDropAllConfirm = () => {
+    setConfirmDropAll(false)
+    setDropAllConfirmText('')
+  }
+
+  const dropAllConfirmMatches =
+    dropAllConfirmText.trim().toLowerCase() === DROP_ALL_PATCHES_CONFIRMATION
+
   const handleBaseline = async () => {
     setActionError(null)
     try {
@@ -710,8 +740,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const ipValidationRequired = overview?.individualProgressionValidationRequired ?? false
   const ipValidationCurrent = overview?.individualProgressionValidationCurrent ?? false
   const patchApplyBlocked = ipValidationRequired && !ipValidationCurrent
-  const expectedProgressionPatchCount =
-    overview?.individualProgressionExpectedPatchCount ?? INDIVIDUAL_PROGRESSION_EXPECTED_PATCH_COUNT
+  const expectedProgressionPatchCount = overview?.individualProgressionExpectedPatchCount ?? 0
 
   const patchIsApplyable =
     selectedSummary?.status === 'Next' && !isApplying && !patchApplyBlocked
@@ -829,8 +858,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     !overview?.individualProgressionBootstrapped
   const showValidationPanel = ipBootstrapped
   const progressionPatchCountMismatch =
+    expectedProgressionPatchCount > 0 &&
     (validationResult?.patchCount ?? overview?.individualProgressionPatchCount ?? 0) !==
-    expectedProgressionPatchCount
+      expectedProgressionPatchCount
 
   const applyProgressionPreview = (() => {
     const meta = detail?.progression
@@ -888,6 +918,28 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
               <FolderOpen className="h-4 w-4" />
               Browse
             </button>
+            <button
+              type="button"
+              onClick={openDropAllConfirm}
+              disabled={
+                hasAppliedPatches || isApplying || totalPatchCount === 0 || dropAllPatchesMutation.isPending
+              }
+              title={
+                hasAppliedPatches
+                  ? 'Unavailable after any patch has been applied'
+                  : totalPatchCount === 0
+                  ? 'No patch folders to remove'
+                  : 'Delete every patch folder on this stack'
+              }
+              className="flex items-center gap-2 rounded-md border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {dropAllPatchesMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Drop all patches
+            </button>
           </div>
         </div>
         <div className="grid gap-px border-t border-gray-100 bg-gray-100 sm:grid-cols-2 lg:grid-cols-4">
@@ -943,7 +995,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 title={
                   patchApplyBlocked
-                    ? 'Run patch validation for the current server build first'
+                    ? 'Validate patches for the current server build first'
                     : 'Reapply all applied patches on top of standard AzerothCore updates'
                 }
               >
@@ -965,8 +1017,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             <div>
               <p className="text-sm font-semibold text-violet-900">Individual Progression</p>
               <p className="mt-1 max-w-2xl text-sm text-violet-800">
-                Prepare progression patch templates, then use <strong>Sync with mod-individual-progression</strong>{' '}
-                below to pull content before applying patches.
+                Prepare server-wide progression settings, then use{' '}
+                <strong>Sync with mod-individual-progression</strong> below to pull both repositories,
+                create patch folders from Azeroth-Platform-Progression, and import mapped module files.
               </p>
             </div>
             <button
@@ -996,10 +1049,14 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900">Patch validation</p>
               <p className="mt-1 max-w-2xl text-sm text-gray-700">
-                After importing progression patch content, run validation before applying any patch. Checks
-                patch folders against the local Azeroth-Platform-Progression repository structure, progression
-                patch count, and server config keys. Re-run validation after every server recompile — a new
-                build invalidates the previous check.
+                After running progression sync, validate patches before applying any patch. Compares{' '}
+                <code className="rounded bg-gray-100 px-1 text-xs">migrations/</code> against the stack&apos;s{' '}
+                <code className="rounded bg-gray-100 px-1 text-xs">azeroth-platform-progression/</code>{' '}
+                checkout (absolute path under the stack data directory — run sync first if missing), verifies
+                each patch <code className="rounded bg-gray-100 px-1 text-xs">config/*.json</code> override
+                maps to a server config file with all referenced keys present, and confirms progression
+                module settings. Re-run validation after every server recompile — a new build invalidates
+                the previous check.
               </p>
               {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-green-800">
@@ -1012,11 +1069,12 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Patch apply is blocked until validation passes.
-                  {(overview?.individualProgressionPatchCount ?? 0) !== expectedProgressionPatchCount && (
+                  {progressionPatchCountMismatch && (
                     <>
                       {' '}
-                      Found {overview?.individualProgressionPatchCount ?? 0} of {expectedProgressionPatchCount}{' '}
-                      expected progression patches.
+                      Found {overview?.individualProgressionPatchCount ?? 0} of{' '}
+                      {expectedProgressionPatchCount} expected progression patches from
+                      Azeroth-Platform-Progression.
                     </>
                   )}
                 </p>
@@ -1034,14 +1092,14 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 ) : (
                   <ShieldCheck className="h-4 w-4" />
                 )}
-                Perform patch validation check
+                Validate patches
               </button>
               {progressionPatchCountMismatch && (
                 <button
                   type="button"
                   onClick={handleRecreateMissingPatches}
                   disabled={recreatePatchesMutation.isPending}
-                  title="Create empty template folders for any missing progression patches. Patches already applied stay marked Applied."
+                  title="Create missing progression patch folders from Azeroth-Platform-Progression"
                   className="inline-flex shrink-0 items-center gap-2 rounded-md border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-50"
                 >
                   {recreatePatchesMutation.isPending ? (
@@ -1049,7 +1107,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                   ) : (
                     <RefreshCw className="h-4 w-4" />
                   )}
-                  Recreate missing patches
+                  Recreate from progression repo
                 </button>
               )}
             </div>
@@ -1064,16 +1122,19 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
               }`}
             >
               <p className="font-medium">
-                {validationResult.passed ? 'Validation passed' : 'Validation failed'} —{' '}
-                {validationResult.patchCount} / {validationResult.expectedPatchCount} progression patches
+                {validationResult.passed ? 'Validation passed' : 'Validation failed'}
+                {validationResult.expectedPatchCount > 0
+                  ? ` — ${validationResult.patchCount} / ${validationResult.expectedPatchCount} progression patches`
+                  : validationResult.patchCount > 0
+                  ? ` — ${validationResult.patchCount} progression patch${validationResult.patchCount === 1 ? '' : 'es'}`
+                  : ''}
               </p>
-              {!validationResult.passed &&
-                validationResult.patchCount < validationResult.expectedPatchCount && (
-                  <p className="mt-2 text-sm text-red-800">
-                    Missing template folders can be recreated with the button above. Patches at or before
-                    your current applied level will show as <span className="font-medium">Applied</span>.
-                  </p>
-                )}
+              {!validationResult.passed && progressionPatchCountMismatch && (
+                <p className="mt-2 text-sm text-red-800">
+                  Missing patch folders can be recreated from Azeroth-Platform-Progression with the button
+                  above, or by running progression sync again.
+                </p>
+              )}
               {validationResult.errors.length > 0 && (
                 <ul className="mt-2 list-disc space-y-1 pl-5">
                   {validationResult.errors.map((entry) => (
@@ -1086,20 +1147,27 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                   <table className="min-w-full text-xs">
                     <thead>
                       <tr className="text-left text-gray-500">
-                        <th className="py-1 pr-4">Config key</th>
-                        <th className="py-1 pr-4">Exists</th>
-                        <th className="py-1 pr-4">Readable</th>
-                        <th className="py-1 pr-4">Writable</th>
+                        <th className="py-1 pr-4">Patch</th>
+                        <th className="py-1 pr-4">Source</th>
+                        <th className="py-1 pr-4">Server config</th>
+                        <th className="py-1 pr-4">Key</th>
+                        <th className="py-1 pr-4">Available</th>
                         <th className="py-1">Details</th>
                       </tr>
                     </thead>
                     <tbody>
                       {validationResult.keyChecks.map((check) => (
-                        <tr key={`${check.configPath}:${check.key}`} className="border-t border-gray-100">
+                        <tr
+                          key={`${check.patchKey ?? 'module'}:${check.configSource ?? check.configPath}:${check.key}`}
+                          className="border-t border-gray-100"
+                        >
+                          <td className="py-1 pr-4 font-mono">{check.patchKey ?? '—'}</td>
+                          <td className="py-1 pr-4 font-mono">{check.configSource ?? 'module settings'}</td>
+                          <td className="py-1 pr-4 font-mono">{check.configPath}</td>
                           <td className="py-1 pr-4 font-mono">{check.key}</td>
-                          <td className="py-1 pr-4">{check.exists ? 'Yes' : 'No'}</td>
-                          <td className="py-1 pr-4">{check.canRead ? 'Yes' : 'No'}</td>
-                          <td className="py-1 pr-4">{check.canUpdate ? 'Yes' : 'No'}</td>
+                          <td className="py-1 pr-4">
+                            {check.exists && check.canRead ? 'Yes' : 'No'}
+                          </td>
                           <td className="py-1 text-gray-600">{check.error ?? check.value ?? ''}</td>
                         </tr>
                       ))}
@@ -1606,7 +1674,7 @@ Flat layout also works:
                     disabled={!patchIsApplyable || applyMutation.isPending}
                     title={
                       patchApplyBlocked
-                        ? 'Run patch validation for the current server build before applying'
+                        ? 'Validate patches for the current server build before applying'
                         : isApplying
                         ? 'An apply is already in progress for this stack'
                         : patchIsApplyable
@@ -1887,6 +1955,57 @@ Flat layout also works:
               >
                 {reapplyMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
                 Start reapply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDropAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-6 w-6 shrink-0 text-red-600" />
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Drop all patches?</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  This permanently deletes all {totalPatchCount} patch folder
+                  {totalPatchCount === 1 ? '' : 's'} and their contents (SQL, DBC, maps, MPQ, config).
+                  This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div>
+              <label htmlFor="drop-all-confirm" className="block text-sm font-medium text-gray-700">
+                Type <span className="font-mono text-red-700">{DROP_ALL_PATCHES_CONFIRMATION}</span> to confirm
+              </label>
+              <input
+                id="drop-all-confirm"
+                type="text"
+                autoComplete="off"
+                value={dropAllConfirmText}
+                onChange={(e) => setDropAllConfirmText(e.target.value)}
+                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder={DROP_ALL_PATCHES_CONFIRMATION}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDropAllConfirm}
+                disabled={dropAllPatchesMutation.isPending}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDropAllPatches}
+                disabled={!dropAllConfirmMatches || dropAllPatchesMutation.isPending}
+                className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {dropAllPatchesMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Drop all patches
               </button>
             </div>
           </div>

@@ -365,6 +365,11 @@ export const patchApi = {
       params: { path },
     }),
 
+  dropAllPatches: (stackId: string) =>
+    apiClient.delete<{ success: boolean; deletedCount: number }>(
+      `/stacks/${stackId}/migrations/patches`
+    ),
+
   downloadApplyLog: (stackId: string, runId?: string | null) =>
     apiClient.get<Blob>(
       `/stacks/${stackId}/migrations/apply/log${runId ? `/${encodeURIComponent(runId)}` : ''}`,

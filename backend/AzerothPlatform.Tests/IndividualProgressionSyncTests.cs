@@ -1,8 +1,16 @@
 using System.IO.Compression;
 using System.Text;
 using AzerothPlatform.Core.Contracts;
+using AzerothPlatform.Core.Services.Interfaces;
+using AzerothPlatform.Infrastructure.Configuration;
+using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.Migrations;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 namespace AzerothPlatform.Tests;
@@ -38,6 +46,27 @@ public sealed class IndividualProgressionHeaderParserTests
 
 public sealed class IndividualProgressionSyncLogicTests
 {
+    [Fact]
+    public void ResolveProgressionRepoDirectory_uses_stack_absolute_path()
+    {
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-ip-repo-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, "my-stack");
+        try
+        {
+            var service = CreateSyncServiceForRepoResolution(buildsPath);
+            InvokeResolveProgressionRepoDirectory(service, stackRoot)
+                .Should()
+                .Be(Path.GetFullPath(Path.Combine(stackRoot, MigrationLayout.ProgressionRepoDirName)));
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(0, "classic", false, "0")]
     [InlineData(1, "classic", true, null)]
@@ -76,6 +105,40 @@ public sealed class IndividualProgressionSyncLogicTests
         return (string?)method!.Invoke(null, [metadata]);
     }
 
+    private static string InvokeResolveProgressionRepoDirectory(IndividualProgressionSyncService service, string stackRoot)
+    {
+        var method = typeof(IndividualProgressionSyncService)
+            .GetMethod("ResolveProgressionRepoDirectory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        return (string)method!.Invoke(null, [stackRoot])!;
+    }
+
+    private static IndividualProgressionSyncService CreateSyncServiceForRepoResolution(string buildsPath)
+    {
+        var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
+        var migrations = Options.Create(new MigrationOptions());
+        var serverConfig = new Mock<IServerConfigService>();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+
+        return new IndividualProgressionSyncService(
+            CreateInMemoryDbContext(),
+            serverConfig.Object,
+            httpClientFactory.Object,
+            docker,
+            migrations,
+            NullLogger<IndividualProgressionSyncService>.Instance);
+    }
+
+    private static AzerothCoreDbContext CreateInMemoryDbContext()
+    {
+        var options = new DbContextOptionsBuilder<AzerothCoreDbContext>()
+            .UseSqlite("Data Source=:memory:")
+            .Options;
+        var db = new AzerothCoreDbContext(options);
+        db.Database.OpenConnection();
+        db.Database.EnsureCreated();
+        return db;
+    }
+
     private static string InvokeIncrement(IndividualProgressionSettingsDto settings, string key)
     {
         var method = typeof(IndividualProgressionSyncService)
@@ -104,12 +167,11 @@ public sealed class ProgressionRepoStructureValidatorTests
 
         EnsureExpansionRoots(repo.Path);
         CreateReferencePatch(repo.Path, "Classic", "1.0 Start");
-        CreateStackPatch(stack.Path, "patch 1.0 START", includeConfig: false);
 
         var errors = new List<string>();
         ProgressionRepoStructureValidator.Validate(stack.Path, repo.Path, errors);
 
-        errors.Should().Contain(error => error.Contains("missing 'config/'"));
+        errors.Should().Contain(error => error.Contains("Missing stack patch folder"));
     }
 
     [Fact]
@@ -193,6 +255,152 @@ public sealed class ProgressionRepoStructureValidatorTests
     }
 }
 
+public sealed class PatchConfigValidatorTests
+{
+    [Fact]
+    public async Task ValidateAsync_reports_missing_server_config_and_keys()
+    {
+        var stackId = "patch-config-validate";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-patch-config-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, stackId);
+        try
+        {
+            var patchKey = "patch 1.0 START";
+            var patchDir = MigrationLayout.PatchDir(stackRoot, patchKey);
+            Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+            File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+            File.WriteAllText(
+                Path.Combine(patchDir, "config", "worldserver.json"),
+                """{"Expansion":"2","MissingKey":"1"}""");
+
+            var etcDir = MigrationLayout.EtcDir(stackRoot);
+            Directory.CreateDirectory(etcDir);
+            File.WriteAllText(Path.Combine(etcDir, "worldserver.conf"), "Expansion = 0\n");
+
+            var serverConfig = new Mock<IServerConfigService>();
+            serverConfig
+                .Setup(s => s.ReadAsync(stackId, "worldserver.conf", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ServerConfigContentDto
+                {
+                    Path = "worldserver.conf",
+                    Content = "Expansion = 0\n",
+                });
+
+            var errors = new List<string>();
+            var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+            await PatchConfigValidator.ValidateAsync(
+                stackId,
+                stackRoot,
+                serverConfig.Object,
+                errors,
+                keyChecks,
+                CancellationToken.None);
+
+            errors.Should().Contain(error => error.Contains("MissingKey"));
+            keyChecks.Should().Contain(check =>
+                check.PatchKey == patchKey
+                && check.Key == "Expansion"
+                && check.Exists);
+            keyChecks.Should().Contain(check =>
+                check.Key == "MissingKey"
+                && !check.Exists);
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+}
+
+public sealed class ProgressionRepoPatchSeederTests
+{
+    [Fact]
+    public void Seed_creates_stack_patches_from_progression_repository_layout()
+    {
+        using var repo = new TempDirectoryWrapper();
+        using var stack = new TempDirectoryWrapper();
+
+        EnsureExpansionRoots(repo.Path);
+        var referencePatch = Path.Combine(repo.Path, "Classic", "1.0 Start");
+        Directory.CreateDirectory(Path.Combine(referencePatch, "config"));
+        File.WriteAllText(Path.Combine(referencePatch, "description.md"), "# Start");
+
+        var created = ProgressionRepoPatchSeeder.Seed(repo.Path, stack.Path, onlyMissing: false);
+
+        created.Should().Be(1);
+        var stackPatchDir = Path.Combine(stack.Path, "migrations", "patch 1.0 START");
+        Directory.Exists(stackPatchDir).Should().BeTrue();
+        File.Exists(Path.Combine(stackPatchDir, "description.md")).Should().BeTrue();
+        File.Exists(Path.Combine(stackPatchDir, "progression.json")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Seed_onlyMissing_skips_existing_patch_folders()
+    {
+        using var repo = new TempDirectoryWrapper();
+        using var stack = new TempDirectoryWrapper();
+
+        EnsureExpansionRoots(repo.Path);
+        CreateReferencePatch(repo.Path, "Classic", "1.0 Start");
+        CreateReferencePatch(repo.Path, "Classic", "1.1 Molten Core");
+        CreateStackPatch(stack.Path, "patch 1.0 START", includeConfig: true);
+
+        var created = ProgressionRepoPatchSeeder.Seed(repo.Path, stack.Path, onlyMissing: true);
+
+        created.Should().Be(1);
+        Directory.Exists(Path.Combine(stack.Path, "migrations", "patch 1.1 MOLTEN_CORE")).Should().BeTrue();
+    }
+
+    private static void EnsureExpansionRoots(string repoRoot)
+    {
+        Directory.CreateDirectory(Path.Combine(repoRoot, "Classic"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, "Tbc"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, "Wotlk"));
+    }
+
+    private static void CreateReferencePatch(string repoRoot, string expansion, string patchName)
+    {
+        var patchDir = Path.Combine(repoRoot, expansion, patchName);
+        Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+        File.WriteAllText(Path.Combine(patchDir, "description.md"), "Reference patch");
+    }
+
+    private static void CreateStackPatch(string stackRoot, string patchKey, bool includeConfig)
+    {
+        var patchDir = Path.Combine(stackRoot, "migrations", patchKey);
+        Directory.CreateDirectory(patchDir);
+        File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+
+        if (includeConfig)
+        {
+            Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+        }
+    }
+
+    private sealed class TempDirectoryWrapper : IDisposable
+    {
+        public TempDirectoryWrapper()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+            Directory.CreateDirectory(System.IO.Path.Combine(Path, "migrations"));
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+}
+
 public sealed class ProgressionSyncTargetPolicyTests
 {
     [Fact]
@@ -233,6 +441,90 @@ public sealed class ProgressionSyncTargetPolicyTests
         ProgressionSyncTargetPolicy.ShouldApplySyncToPath(stack.Path, patchDir, initialSync: false, log)
             .Should().BeTrue();
         log.Should().BeEmpty();
+    }
+
+    private sealed class TempDirectoryWrapper : IDisposable
+    {
+        public TempDirectoryWrapper()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+            Directory.CreateDirectory(System.IO.Path.Combine(Path, "migrations"));
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+}
+
+public sealed class ProgressionPatchFolderResolverTests
+{
+    [Theory]
+    [InlineData("mod-individual-progression/data/sql/world/base/*", "data/sql/world/base/*")]
+    [InlineData("data/sql/world/base/*", "data/sql/world/base/*")]
+    public void NormalizeModuleSourcePath_strips_redundant_prefix(string source, string expected)
+    {
+        ProgressionPatchFolderResolver.NormalizeModuleSourcePath(source).Should().Be(expected);
+    }
+
+    [Fact]
+    public void MatchDefinition_maps_repo_wotlk_version_to_catalog_index()
+    {
+        var catalog = IndividualProgressionPatchCatalog.All;
+        var match = ProgressionPatchFolderResolver.MatchDefinition("wotlk", "3.5 Ruby Sanctum", catalog);
+        match.Should().NotBeNull();
+        match!.Index.Should().Be("3.3");
+        match.Slug.Should().Be("WOTLK_TIER_4");
+    }
+
+    [Fact]
+    public void Resolve_maps_repo_destination_to_stack_patch_folder()
+    {
+        using var stack = new TempDirectoryWrapper();
+        var patchDir = Path.Combine(stack.Path, "migrations", "patch 3.3 WOTLK_TIER_4");
+        Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+        File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+
+        var resolved = ProgressionPatchFolderResolver.Resolve(
+            stack.Path,
+            "Wotlk/3.5 Ruby Sanctum/config/");
+
+        resolved.Should().Be(Path.Combine(patchDir, "config"));
+    }
+
+    [Fact]
+    public void Resolve_is_case_insensitive_for_expansion_and_destination()
+    {
+        using var stack = new TempDirectoryWrapper();
+        var patchDir = Path.Combine(stack.Path, "migrations", "patch 1.0 START");
+        Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+        File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+
+        var resolved = ProgressionPatchFolderResolver.Resolve(
+            stack.Path,
+            "classic/1.0 Start/config/");
+
+        // Destination ends with a file name; resolver returns the containing directory.
+        resolved.Should().Be(Path.Combine(patchDir, "config"));
+    }
+
+    [Fact]
+    public void Resolve_returns_null_for_repo_patches_without_stack_counterpart()
+    {
+        using var stack = new TempDirectoryWrapper();
+        var patchDir = Path.Combine(stack.Path, "migrations", "patch 1.0 START");
+        Directory.CreateDirectory(patchDir);
+        File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+
+        ProgressionPatchFolderResolver.Resolve(stack.Path, "Classic/1.9 Pre Patch/config/")
+            .Should().BeNull();
     }
 
     private sealed class TempDirectoryWrapper : IDisposable

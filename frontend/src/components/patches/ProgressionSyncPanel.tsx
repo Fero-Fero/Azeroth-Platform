@@ -134,12 +134,25 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
             Sync with mod-individual-progression
           </p>
           <p className="mt-1 max-w-2xl text-sm text-indigo-800">
-            Automatically import patch files from the local{' '}
-            <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>{' '}
-            module and the{' '}
+            Automatically import patch files from{' '}
             <code className="rounded bg-indigo-100 px-1 text-xs">Azeroth-Platform-Progression</code>{' '}
-            repository using the configured mapping rules. Subsequent updates only modify managed
-            progression patches; custom patches are left unchanged.
+            and <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>.
+            Both repositories are updated first (<code className="rounded bg-indigo-100 px-1 text-xs">git pull</code>),
+            patch folders are created from the progression repository layout, its files are copied in, and then
+            optional module mappings are imported. Later syncs only modify managed progression patches; custom
+            patches are left unchanged.
+          </p>
+          <p className="mt-2 max-w-2xl text-xs text-indigo-700 font-mono whitespace-pre-wrap">
+            {`{BuildsPath}/{stackId}/
+├── azeroth-platform-progression/   ← cloned on first sync, git pull after
+├── migrations/                       ← patch folders
+└── azerothcore-wotlk/
+    └── modules/mod-individual-progression/`}
+          </p>
+          <p className="mt-2 max-w-2xl text-xs text-indigo-800">
+            The progression repository lives on the stack only — nothing is cloned beside the platform or
+            onto the host outside the stack data directory. Validation compares{' '}
+            <code className="rounded bg-indigo-100 px-1">migrations/</code> against that on-stack checkout.
           </p>
           {syncStatus?.lastSyncAt && (
             <p className="mt-1 text-xs text-indigo-700">
@@ -184,9 +197,10 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
             <div>
               <p className="text-sm font-semibold text-amber-950">Overwrite existing patch content?</p>
               <p className="mt-1 text-sm text-amber-900">
-                This is the first sync. It will replace content in all progression patch folders with
-                files from mod-individual-progression and Azeroth-Platform-Progression. Any existing SQL,
-                DBC, MPQ, or config files in those folders may be overwritten.
+                This is the first sync. It will create progression patch folders from
+                Azeroth-Platform-Progression and copy in repository content, then import mapped files from
+                mod-individual-progression. Any existing SQL, DBC, MPQ, or config files in those folders may
+                be overwritten.
               </p>
               <p className="mt-2 text-sm text-amber-800">
                 Later syncs only update managed progression patches and leave custom patches unchanged.

@@ -120,6 +120,17 @@ export function useDeletePatchEntry(stackId: string) {
   })
 }
 
+export function useDropAllPatches(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => patchApi.dropAllPatches(stackId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patchKeys.all })
+      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId) })
+    },
+  })
+}
+
 export function useInitBaseline(stackId: string) {
   const invalidate = useInvalidatePatches(stackId)
   return useMutation({

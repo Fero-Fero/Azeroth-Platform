@@ -70,6 +70,12 @@ public sealed class IndividualProgressionKeyCheckDto
 
     public string ConfigPath { get; set; } = string.Empty;
 
+    /// <summary>Stack patch folder when the check comes from a patch config override.</summary>
+    public string? PatchKey { get; set; }
+
+    /// <summary>Patch-local JSON source such as <c>config/worldserver.json</c>.</summary>
+    public string? ConfigSource { get; set; }
+
     public bool Exists { get; set; }
 
     public bool CanRead { get; set; }

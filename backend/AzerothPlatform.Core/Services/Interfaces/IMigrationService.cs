@@ -36,6 +36,9 @@ public interface IMigrationService
     /// <summary>Deletes an unapplied patch file or folder from the stack's patch folder tree.</summary>
     Task DeletePatchEntryAsync(string stackId, string relativePath, CancellationToken cancellationToken = default);
 
+    /// <summary>Deletes every patch folder under migrations/. Refused once any patch has been applied.</summary>
+    Task<int> DeleteAllPatchesAsync(string stackId, CancellationToken cancellationToken = default);
+
     /// <summary>Captures the current DBC set from the running stack's data volume into server_dbc/.</summary>
     Task InitializeBaselineAsync(string stackId, CancellationToken cancellationToken = default);
 

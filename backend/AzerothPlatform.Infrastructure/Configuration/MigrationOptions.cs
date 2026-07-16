@@ -68,10 +68,4 @@ public sealed class MigrationOptions
     /// </summary>
     public string ClientSettingsTemplatePath { get; set; } = "/app/client-example/settings";
 
-    /// <summary>
-    /// Optional path to a local clone of Azeroth-Platform-Progression used for patch structure validation.
-    /// When unset, validation looks for a sibling directory named <c>Azeroth-Platform-Progression</c>
-    /// next to the platform repository root.
-    /// </summary>
-    public string? ProgressionRepoPath { get; set; }
 }

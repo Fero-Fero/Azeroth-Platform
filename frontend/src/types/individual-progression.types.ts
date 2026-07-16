@@ -37,6 +37,8 @@ export interface PatchProgressionMetadata {
 export interface IndividualProgressionKeyCheck {
   key: string
   configPath: string
+  patchKey?: string | null
+  configSource?: string | null
   exists: boolean
   canRead: boolean
   canUpdate: boolean
@@ -54,8 +56,6 @@ export interface IndividualProgressionValidationResult {
   errors: string[]
   keyChecks: IndividualProgressionKeyCheck[]
 }
-
-export const INDIVIDUAL_PROGRESSION_EXPECTED_PATCH_COUNT = 18
 
 export const INDIVIDUAL_PROGRESSION_MODULE_ID = 'mod-individual-progression'
 

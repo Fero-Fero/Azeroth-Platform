@@ -80,6 +80,15 @@ public class MigrationsController : ControllerBase
             return new { success = true };
         });
 
+    /// <summary>Deletes every patch folder. Refused once any patch has been applied.</summary>
+    [HttpDelete("patches")]
+    public Task<IActionResult> DropAllPatches(string stackId, CancellationToken cancellationToken)
+        => Execute(async () =>
+        {
+            var deletedCount = await _migrations.DeleteAllPatchesAsync(stackId, cancellationToken);
+            return new { success = true, deletedCount };
+        });
+
     /// <summary>Detailed file listing for a single patch.</summary>
     [HttpGet("{patchKey}")]
     public Task<IActionResult> GetPatch(string stackId, string patchKey, CancellationToken cancellationToken)

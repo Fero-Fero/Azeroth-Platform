@@ -111,6 +111,14 @@ public static class MigrationLayout
     public static string ConfigDir(string stackRoot, string patchKey) =>
         Path.Combine(PatchDir(stackRoot, patchKey), "config");
 
+    /// <summary>
+    /// Per-stack checkout of Azeroth-Platform-Progression (cloned/updated by progression sync).
+    /// </summary>
+    public static string ProgressionRepoDir(string stackRoot) =>
+        Path.Combine(stackRoot, ProgressionRepoDirName);
+
+    public const string ProgressionRepoDirName = "azeroth-platform-progression";
+
     public static string ServerDbcDir(string stackRoot) => Path.Combine(stackRoot, ServerDbcDirName);
 
     public static string ClientGameDir(string stackRoot) =>

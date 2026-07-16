@@ -1301,7 +1301,7 @@ public sealed partial class MigrationService
             foreach (var jsonFile in jsonFiles)
             {
                 var baseName = Path.GetFileNameWithoutExtension(jsonFile);
-                var confPath = ResolveConfPath(etcDir, baseName);
+                var confPath = PatchServerConfigResolver.ResolveConfPath(etcDir, baseName);
 
                 if (confPath is null)
                 {
@@ -1341,32 +1341,6 @@ public sealed partial class MigrationService
         }, cancellationToken);
 
         return applied;
-    }
-
-    /// <summary>
-    /// Resolves a JSON config file name to its matching .conf path. Server configs (worldserver,
-    /// authserver) live directly in etc/; module configs live in etc/modules/.
-    /// </summary>
-    private static string? ResolveConfPath(string etcDir, string baseName)
-    {
-        var serverPath = Path.Combine(etcDir, $"{baseName}.conf");
-        if (File.Exists(serverPath))
-            return serverPath;
-
-        var modulesDir = Path.Combine(etcDir, "modules");
-        if (!Directory.Exists(modulesDir))
-            return null;
-
-        var modulePath = Path.Combine(modulesDir, $"{baseName}.conf");
-        if (File.Exists(modulePath))
-            return modulePath;
-
-        // Case-insensitive fallback: scan etc/modules/ for a matching conf file name.
-        var match = Directory.EnumerateFiles(modulesDir, "*.conf", SearchOption.TopDirectoryOnly)
-            .FirstOrDefault(f => string.Equals(
-                Path.GetFileNameWithoutExtension(f), baseName, StringComparison.OrdinalIgnoreCase));
-
-        return match;
     }
 
     /// <summary>

@@ -34,6 +34,7 @@ public sealed class IndividualProgressionRecreateTests
             var service = CreateSyncService(db, buildsPath);
 
             await service.BootstrapAsync(stackId);
+            SeedTestProgressionRepo(stackRoot);
             var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "START");
             Directory.Delete(MigrationLayout.PatchDir(stackRoot, startKey), recursive: true);
 
@@ -70,6 +71,7 @@ public sealed class IndividualProgressionRecreateTests
             var service = CreateSyncService(db, buildsPath);
 
             await service.BootstrapAsync(stackId);
+            SeedTestProgressionRepo(stackRoot);
 
             var stack = await db.ManagedStacks.SingleAsync(s => s.Id == stackId);
             stack.AppliedPatchLevel = 1_002_000;
@@ -110,6 +112,7 @@ public sealed class IndividualProgressionRecreateTests
             var service = CreateSyncService(db, buildsPath);
 
             await service.BootstrapAsync(stackId);
+            SeedTestProgressionRepo(stackRoot);
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 1");
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 2");
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 3");
@@ -126,6 +129,22 @@ public sealed class IndividualProgressionRecreateTests
             {
                 Directory.Delete(buildsPath, recursive: true);
             }
+        }
+    }
+
+    private static void SeedTestProgressionRepo(string stackRoot)
+    {
+        foreach (var definition in IndividualProgressionPatchCatalog.All)
+        {
+            var expansion = definition.Expansion switch
+            {
+                "classic" => "Classic",
+                "tbc" => "Tbc",
+                "wotlk" => "Wotlk",
+                _ => "Classic",
+            };
+            var patchFolder = $"{definition.Index} {definition.Title}";
+            Directory.CreateDirectory(Path.Combine(MigrationLayout.ProgressionRepoDir(stackRoot), expansion, patchFolder));
         }
     }
 

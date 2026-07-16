@@ -85,7 +85,6 @@ services:
       # and the global client (Client:Realmlist:Host). Falls back to 127.0.0.1 (localhost-only).
       - Migrations__RealmlistHost=${HOST_LAN_IP:-127.0.0.1}
       - Client__Realmlist__Host=${HOST_LAN_IP:-127.0.0.1}
-      - Migrations__ProgressionRepoPath=${MIGRATIONS_PROGRESSION_REPO_PATH:-}
       - Auth__JwtKey=${AUTH_JWT_KEY:-}
       - MySQL__Host=host.docker.internal
       - SOAP__Host=host.docker.internal

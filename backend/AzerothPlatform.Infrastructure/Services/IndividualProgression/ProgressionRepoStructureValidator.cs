@@ -13,41 +13,8 @@ public static class ProgressionRepoStructureValidator
     };
 
     /// <summary>
-    /// Resolves the local Azeroth-Platform-Progression directory. Uses <paramref name="configuredPath"/>
-    /// when set, otherwise walks up from the current directory to find the platform repo and checks the
-    /// sibling <c>../Azeroth-Platform-Progression</c> folder.
-    /// </summary>
-    public static string? ResolveLocalRepoPath(string? configuredPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath))
-        {
-            var full = Path.GetFullPath(configuredPath.Trim());
-            return Directory.Exists(full) ? full : null;
-        }
-
-        var dir = Directory.GetCurrentDirectory();
-        while (!string.IsNullOrEmpty(dir))
-        {
-            if (IsPlatformRoot(dir))
-            {
-                var parent = Directory.GetParent(dir)?.FullName;
-                if (parent is null)
-                {
-                    return null;
-                }
-
-                var sibling = Path.Combine(parent, "Azeroth-Platform-Progression");
-                return Directory.Exists(sibling) ? sibling : null;
-            }
-
-            dir = Directory.GetParent(dir)?.FullName ?? string.Empty;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Compares each catalog progression patch on the stack to the matching folder in the reference repo.
+    /// Compares each progression patch folder in the reference repo to the matching stack patch.
+    /// The reference repo lives on the stack at <see cref="MigrationLayout.ProgressionRepoDir"/>.
     /// </summary>
     public static void Validate(string stackRoot, string repoRoot, ICollection<string> errors)
     {
@@ -59,27 +26,92 @@ public static class ProgressionRepoStructureValidator
 
         ValidateRepoRootLayout(repoRoot, errors);
 
-        foreach (var definition in IndividualProgressionPatchCatalog.All)
+        var catalog = IndividualProgressionPatchCatalog.All;
+        foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
         {
-            var referencePatchDir = FindReferencePatchDir(repoRoot, definition);
-            if (referencePatchDir is null)
+            var expansionName = Path.GetFileName(expansionDir);
+            var expansionKey = expansionName.ToLowerInvariant() switch
             {
-                errors.Add(
-                    $"Reference patch missing in Azeroth-Platform-Progression: {FormatExpansionFolder(definition.Expansion)}/{definition.Index} ({definition.Title}).");
+                "classic" => "classic",
+                "tbc" => "tbc",
+                "wotlk" => "wotlk",
+                _ => string.Empty,
+            };
+            if (expansionKey.Length == 0)
+            {
                 continue;
             }
 
-            if (!TryFindStackPatchDir(stackRoot, definition, out var stackPatchDir, out var stackPatchKey))
+            foreach (var referencePatchDir in Directory.EnumerateDirectories(expansionDir))
             {
-                continue;
-            }
+                var patchFolderName = Path.GetFileName(referencePatchDir);
+                var definition = ProgressionPatchFolderResolver.MatchDefinition(expansionKey, patchFolderName, catalog);
+                if (definition is null)
+                {
+                    errors.Add(
+                        $"No stack patch matches reference patch {expansionName}/{patchFolderName}. Run progression sync to create patch folders from Azeroth-Platform-Progression.");
+                    continue;
+                }
 
-            ValidatePatchStructure(
-                referencePatchDir,
-                stackPatchDir,
-                stackPatchKey,
-                errors);
+                if (!TryFindStackPatchDir(stackRoot, definition, out var stackPatchDir, out var stackPatchKey))
+                {
+                    if (!PatchIndex.TryParse(definition.Index, out var index, explicitSub1: true))
+                    {
+                        errors.Add($"Invalid patch index for reference patch {expansionName}/{patchFolderName}.");
+                        continue;
+                    }
+
+                    errors.Add(
+                        $"Missing stack patch folder for {expansionName}/{patchFolderName}: {PatchFolderNames.Format(index, definition.Slug)}.");
+                    continue;
+                }
+
+                ValidatePatchStructure(
+                    referencePatchDir,
+                    stackPatchDir,
+                    stackPatchKey,
+                    errors);
+            }
         }
+    }
+
+    /// <summary>Counts patch folders under Classic/Tbc/Wotlk in the reference repository.</summary>
+    public static int CountReferencePatches(string repoRoot)
+    {
+        if (!Directory.Exists(repoRoot))
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
+        {
+            var expansionName = Path.GetFileName(expansionDir);
+            if (FindExpansionDir(repoRoot, expansionName.ToLowerInvariant()) is null)
+            {
+                continue;
+            }
+
+            count += Directory.EnumerateDirectories(expansionDir).Count();
+        }
+
+        return count;
+    }
+
+    /// <summary>Counts stack patch folders that contain progression metadata.</summary>
+    public static int CountManagedProgressionPatches(string stackRoot) =>
+        CountManagedProgressionPatchesInternal(stackRoot);
+
+    private static int CountManagedProgressionPatchesInternal(string stackRoot)
+    {
+        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
+        if (!Directory.Exists(migrationsRoot))
+        {
+            return 0;
+        }
+
+        return Directory.EnumerateDirectories(migrationsRoot)
+            .Count(dir => File.Exists(Path.Combine(dir, "progression.json")));
     }
 
     /// <summary>
@@ -353,8 +385,4 @@ public static class ProgressionRepoStructureValidator
         "wotlk" => "Wotlk",
         _ => expansion,
     };
-
-    private static bool IsPlatformRoot(string dir) =>
-        File.Exists(Path.Combine(dir, "progression_plan.md"))
-        || Directory.Exists(Path.Combine(dir, "backend", "AzerothPlatform.Api"));
 }

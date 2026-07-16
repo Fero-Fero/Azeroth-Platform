@@ -166,7 +166,9 @@ public sealed partial class MigrationService : IMigrationService
             IndividualProgressionValidationCurrent = validationCurrent,
             IndividualProgressionValidationPassedAt = ipSettings?.ValidationPassedAt,
             IndividualProgressionPatchCount = patchCount,
-            IndividualProgressionExpectedPatchCount = IndividualProgressionPatchCatalog.ExpectedPatchCount,
+            IndividualProgressionExpectedPatchCount = hasIpModule
+                ? _individualProgression.GetExpectedProgressionPatchCount(stackId)
+                : 0,
         };
     }
 
@@ -1006,6 +1008,37 @@ public sealed partial class MigrationService : IMigrationService
         }
 
         _logger.LogInformation("Deleted patch entry '{Path}' for stack {StackId}.", normalized, stackId);
+    }
+
+    public async Task<int> DeleteAllPatchesAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        var stack = await GetStackAsync(stackId, cancellationToken);
+        if (IsApplyLockLive(stack))
+        {
+            throw new InvalidOperationException("Patches cannot be deleted while an apply is in progress.");
+        }
+
+        if (HasAppliedPatches(stack))
+        {
+            throw new InvalidOperationException(
+                "Cannot drop all patches after any patch has been applied.");
+        }
+
+        var migrationsRoot = MigrationLayout.MigrationsRoot(GetStackRoot(stackId));
+        if (!Directory.Exists(migrationsRoot))
+        {
+            return 0;
+        }
+
+        var deleted = 0;
+        foreach (var patchDir in Directory.EnumerateDirectories(migrationsRoot).ToList())
+        {
+            Directory.Delete(patchDir, recursive: true);
+            deleted++;
+        }
+
+        _logger.LogInformation("Dropped {Count} patch folder(s) for stack {StackId}.", deleted, stackId);
+        return deleted;
     }
 
     private static bool IsAppliedPatchPath(string stackRoot, int appliedPatchLevel, string relativePath)
