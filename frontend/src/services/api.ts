@@ -490,6 +490,39 @@ export const patchApi = {
     apiClient.post<import('@/types/individual-progression.types').IndividualProgressionRecreatePatchesResult>(
       `/stacks/${stackId}/migrations/individual-progression/recreate-missing-patches`
     ),
+
+  // ===== Progression Sync =====
+
+  progressionSyncStatus: (stackId: string) =>
+    apiClient.get<import('@/types/individual-progression.types').ProgressionSyncStatus>(
+      `/stacks/${stackId}/migrations/individual-progression/sync/status`
+    ),
+
+  runProgressionSync: (stackId: string) =>
+    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/migrations/individual-progression/sync/run`
+    ),
+
+  resolveProgressionOptionalFiles: (
+    stackId: string,
+    decisions: Record<string, boolean>
+  ) =>
+    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/migrations/individual-progression/sync/resolve-optional`,
+      { decisions }
+    ),
+
+  getProgressionIgnoredFiles: (stackId: string) =>
+    apiClient.get<import('@/types/individual-progression.types').ProgressionIgnoredFile[]>(
+      `/stacks/${stackId}/migrations/individual-progression/sync/ignored-files`
+    ),
+
+  repromptProgressionIgnoredFile: (stackId: string, source: string) =>
+    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/migrations/individual-progression/sync/reprompt`,
+      null,
+      { params: { source } }
+    ),
 }
 
 // Encodes each path segment but preserves "/" so catch-all routes see real sub-folders.

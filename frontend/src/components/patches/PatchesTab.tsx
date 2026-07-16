@@ -30,8 +30,10 @@ import PatchFileCategory from './PatchFileCategory'
 import ContainerFileCategory from './ContainerFileCategory'
 import DbcEditorDialog from './DbcEditorDialog'
 import MpqRemovalPanel from './MpqRemovalPanel'
+import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ServerProgressionTab from './ServerProgressionTab'
+import ProgressionSyncPanel from './ProgressionSyncPanel'
 import type { IndividualProgressionValidationResult } from '@/types/individual-progression.types'
 import { INDIVIDUAL_PROGRESSION_EXPECTED_PATCH_COUNT } from '@/types/individual-progression.types'
 
@@ -1254,6 +1256,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
         </section>
       )}
 
+      {ipBootstrapped && patchesPageTab === 'patches' && (
+        <ProgressionSyncPanel stackId={stackId} />
+      )}
+
       {patchesPageTab === 'progression' && hasIpModule ? (
         <ServerProgressionTab
           stackId={stackId}
@@ -2035,6 +2041,10 @@ Flat layout also works:
                   stackId={stackId}
                   patchKey={selectedKey}
                   removals={detail?.mpqRemovals ?? []}
+                />
+                <MpqManifestPanel
+                  files={detail?.files ?? []}
+                  mpqRemovals={detail?.mpqRemovals ?? []}
                 />
               </div>
                 </>

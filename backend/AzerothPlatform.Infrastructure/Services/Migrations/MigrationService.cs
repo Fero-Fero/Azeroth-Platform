@@ -1274,6 +1274,102 @@ public sealed partial class MigrationService : IMigrationService
             : new List<string>();
     }
 
+    /// <summary>Reads and parses an mpq.json manifest from a patch's mpq directory, or null if none exists.</summary>
+    internal static MpqManifestDto? ReadMpqManifest(string stackRoot, string patchKey)
+    {
+        var path = Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "mpq.json");
+        if (!File.Exists(path))
+            return null;
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<MpqManifestDto>(json, JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the final set of MPQ files to construct across all applied patches.
+    /// MPQs that are added by an earlier patch but removed by a later one are skipped.
+    /// </summary>
+    private static MpqConstructionPlanDto ResolveMpqConstructionPlan(string stackRoot, IReadOnlyList<PatchInfo> appliedPatches)
+    {
+        var adds = new List<(string MpqName, string PatchKey, string? Description)>();
+        var removals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var patch in appliedPatches.OrderBy(p => p.Level))
+        {
+            var manifest = ReadMpqManifest(stackRoot, patch.Key);
+            if (manifest is null)
+                continue;
+
+            foreach (var name in manifest.Remove)
+            {
+                removals.Add(name);
+            }
+
+            foreach (var name in manifest.Add)
+            {
+                manifest.Description.TryGetValue(name, out var desc);
+                adds.Add((name, patch.Key, desc));
+            }
+        }
+
+        foreach (var patch in appliedPatches.OrderBy(p => p.Level))
+        {
+            foreach (var removal in ReadMpqRemovals(stackRoot, patch.Key))
+            {
+                removals.Add(removal);
+            }
+        }
+
+        var plan = new MpqConstructionPlanDto();
+
+        var lastAddByName = new Dictionary<string, (string PatchKey, string? Description)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, patchKey, desc) in adds)
+        {
+            lastAddByName[name] = (patchKey, desc);
+        }
+
+        foreach (var (name, (patchKey, desc)) in lastAddByName)
+        {
+            if (removals.Contains(name))
+            {
+                var addPatch = appliedPatches.First(p => p.Key.Equals(patchKey, StringComparison.OrdinalIgnoreCase));
+                var removedByLater = appliedPatches
+                    .Where(p => p.Level > addPatch.Level)
+                    .Any(p =>
+                    {
+                        var m = ReadMpqManifest(stackRoot, p.Key);
+                        var r = ReadMpqRemovals(stackRoot, p.Key);
+                        return (m?.Remove.Contains(name, StringComparer.OrdinalIgnoreCase) ?? false)
+                            || r.Contains(name, StringComparer.OrdinalIgnoreCase);
+                    });
+
+                if (removedByLater)
+                {
+                    plan.Skipped.Add(name);
+                    continue;
+                }
+            }
+
+            var mpqPath = Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), name);
+            plan.ToBuild.Add(new MpqConstructionEntryDto
+            {
+                MpqName = name,
+                PatchKey = patchKey,
+                Description = desc,
+                PreBuilt = File.Exists(mpqPath)
+            });
+        }
+
+        return plan;
+    }
+
     /// <summary>
     /// Parses MPQ removal instructions from JSON. Supports a string array, or an object with a
     /// case-insensitive <c>remove</c> property holding one file name or an array of names.

@@ -246,6 +246,32 @@ public class MigrationsController : ControllerBase
         return File(stream, "text/plain", file.Value.FileName);
     }
 
+    [HttpGet("individual-progression/sync/status")]
+    public Task<IActionResult> GetProgressionSyncStatus(string stackId, CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.GetSyncStatusAsync(stackId, cancellationToken));
+
+    [HttpPost("individual-progression/sync/run")]
+    public Task<IActionResult> RunProgressionSync(string stackId, CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.RunSyncAsync(stackId, cancellationToken));
+
+    [HttpPost("individual-progression/sync/resolve-optional")]
+    public Task<IActionResult> ResolveProgressionOptionalFiles(
+        string stackId,
+        [FromBody] ResolveOptionalFilesRequest request,
+        CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.ResolveOptionalFilesAsync(stackId, request, cancellationToken));
+
+    [HttpGet("individual-progression/sync/ignored-files")]
+    public Task<IActionResult> GetProgressionIgnoredFiles(string stackId, CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.GetIgnoredFilesAsync(stackId, cancellationToken));
+
+    [HttpPost("individual-progression/sync/reprompt")]
+    public Task<IActionResult> RepromptProgressionIgnoredFile(
+        string stackId,
+        [FromQuery] string source,
+        CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.RepromptIgnoredFileAsync(stackId, source, cancellationToken));
+
     // ===== File operations =====
 
     /// <summary>

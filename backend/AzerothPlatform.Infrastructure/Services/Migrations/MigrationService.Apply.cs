@@ -343,6 +343,33 @@ public sealed partial class MigrationService
                     () => ApplyMapsAsync(stack, stackRoot, patch.Key, result, cancellationToken), cancellationToken);
             }
 
+            // 6.5) Build MPQ archives from raw content (mpq.json manifest)
+            var manifest = ReadMpqManifest(stackRoot, patch.Key);
+            if (manifest is not null && manifest.Add.Count > 0)
+            {
+                await RunStageAsync("mpq-build", result, async () =>
+                {
+                    foreach (var mpqName in manifest.Add)
+                    {
+                        var mpqPath = Path.Combine(MigrationLayout.MpqDir(stackRoot, patch.Key), mpqName);
+                        if (File.Exists(mpqPath))
+                        {
+                            AddLog(result, $"Pre-built {mpqName} found; skipping construction.");
+                            continue;
+                        }
+                        await BuildMpqFromContentAsync(stack, stackRoot, patch.Key, mpqName, result, cancellationToken);
+                    }
+                    if (manifest.Remove.Count > 0)
+                    {
+                        mpqRemovals = mpqRemovals.Concat(manifest.Remove).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    }
+                }, cancellationToken);
+
+                // Re-check since construction may have produced new .mpq files and merged manifest removals
+                hasMpq = PatchHasMpq(stackRoot, patch.Key);
+                hasMpqRemovals = mpqRemovals.Count > 0;
+            }
+
             // 7) Update the client overlay: first REMOVE any MPQs this patch retires, then publish the
             //    patch's own uploaded MPQ files. Removal-before-publish lets a patch replace an archive
             //    (drop old-name, add new-name) and guarantees retired content is gone before new content
@@ -585,7 +612,8 @@ public sealed partial class MigrationService
 
         var anyDbcCsv = plans.Any(p => p.DbcCsv.Count > 0);
         var anyDbc = plans.Any(p => p.DbcCsv.Count > 0 || p.DbcBinary.Count > 0);
-        var anyClientContent = anyDbc || plans.Any(p => p.HasMpq || p.MpqRemovals.Count > 0);
+        var anyMpqManifest = appliedPatches.Any(p => ReadMpqManifest(stackRoot, p.Key) is { Add.Count: > 0 } or { Remove.Count: > 0 });
+        var anyClientContent = anyDbc || anyMpqManifest || plans.Any(p => p.HasMpq || p.MpqRemovals.Count > 0);
 
         if (anyDbcCsv && !IsBaselineInitialized(stackRoot))
         {
@@ -692,14 +720,47 @@ public sealed partial class MigrationService
                     () => PushServerDbcToVolumeAsync(stack, stackRoot, updatedDbc, result, cancellationToken), cancellationToken);
             }
 
-            // 5) Publish each patch's MPQ overlay changes in order (removals first, then uploads), so the
-            //    final overlay reflects every applied patch with later patches overriding earlier ones.
+            // 5a) Build MPQ archives from raw content (mpq.json manifests) before publishing.
+            //     Uses the full construction plan so MPQs removed by later patches are skipped.
+            var constructionPlan = ResolveMpqConstructionPlan(stackRoot, appliedPatches);
+            if (constructionPlan.ToBuild.Count > 0)
+            {
+                await RunStageAsync("mpq-build", result, async () =>
+                {
+                    foreach (var skipped in constructionPlan.Skipped)
+                    {
+                        AddLog(result, $"Skipping MPQ '{skipped}' (removed by a later patch).");
+                    }
+
+                    foreach (var entry in constructionPlan.ToBuild)
+                    {
+                        if (entry.PreBuilt)
+                        {
+                            AddLog(result, $"Pre-built {entry.MpqName} found in {entry.PatchKey}; skipping construction.");
+                            continue;
+                        }
+                        await BuildMpqFromContentAsync(stack, stackRoot, entry.PatchKey, entry.MpqName, result, cancellationToken);
+                    }
+                }, cancellationToken);
+            }
+
+            // 5b) Publish each patch's MPQ overlay changes in order (removals first, then uploads), so the
+            //     final overlay reflects every applied patch with later patches overriding earlier ones.
             foreach (var plan in plans)
             {
-                if (plan.HasMpq || plan.MpqRemovals.Count > 0)
+                var patchMpqRemovals = plan.MpqRemovals;
+                var patchManifest = ReadMpqManifest(stackRoot, plan.Patch.Key);
+                if (patchManifest?.Remove.Count > 0)
+                {
+                    patchMpqRemovals = patchMpqRemovals.Concat(patchManifest.Remove)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                }
+
+                var patchHasMpq = PatchHasMpq(stackRoot, plan.Patch.Key);
+                if (patchHasMpq || patchMpqRemovals.Count > 0)
                 {
                     await RunStageAsync($"mpq:{plan.Patch.Key}", result,
-                        () => PublishMpqAsync(stack, stackRoot, plan.Patch.Key, plan.MpqRemovals, result, cancellationToken), cancellationToken);
+                        () => PublishMpqAsync(stack, stackRoot, plan.Patch.Key, patchMpqRemovals, result, cancellationToken), cancellationToken);
                 }
             }
 
@@ -1111,6 +1172,78 @@ public sealed partial class MigrationService
 
         AddLog(result, $"Published {mpqFiles.Count} MPQ file(s) to the client overlay (overwriting same-named files).");
         await PushOverlayToEngineAsync(stack, stackRoot, result, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds an MPQ file from raw content in a patch's mpq directory using the mpqtool.
+    /// Raw content is any non-.mpq file or directory in the mpq directory (the content tree
+    /// forms the internal MPQ path structure).
+    /// </summary>
+    private async Task BuildMpqFromContentAsync(
+        Data.Entities.ManagedStackEntity stack, string stackRoot, string patchKey,
+        string mpqName, ApplyPatchResultDto result, CancellationToken cancellationToken)
+    {
+        var mpqDir = MigrationLayout.MpqDir(stackRoot, patchKey);
+
+        var contentDirName = Path.GetFileNameWithoutExtension(mpqName);
+        var contentDir = Path.Combine(mpqDir, contentDirName);
+
+        if (!Directory.Exists(contentDir))
+        {
+            contentDir = mpqDir;
+        }
+
+        var workDir = Path.Combine(stackRoot, ".migration-tmp", $"mpqbuild-{Guid.NewGuid():N}");
+        var stageDir = Path.Combine(workDir, contentDirName);
+        Directory.CreateDirectory(stageDir);
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(contentDir, "*", SearchOption.AllDirectories))
+            {
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                if (ext is ".mpq" or ".json" or ".desc")
+                    continue;
+
+                var relativePath = Path.GetRelativePath(contentDir, file);
+                var destPath = Path.Combine(stageDir, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                File.Copy(file, destPath, overwrite: true);
+            }
+
+            if (!Directory.EnumerateFiles(stageDir, "*", SearchOption.AllDirectories).Any())
+            {
+                AddLog(result, $"No content files found for MPQ '{mpqName}' in {patchKey}; skipping construction.");
+                return;
+            }
+
+            AddLog(result, $"Building {mpqName} from raw content in {patchKey}...");
+
+            await _imageService.EnsureMpqToolImageAsync(cancellationToken);
+
+            var toolArgs = $"\"{mpqName}\" \"{contentDirName}\"";
+            var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
+                stack, workDir, _migrationOptions.MpqToolImage, toolArgs, cancellationToken);
+
+            if (run.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"MPQ build failed for {mpqName}: {(string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr)}");
+            }
+
+            var producedMpq = Path.Combine(workDir, mpqName);
+            if (!File.Exists(producedMpq))
+            {
+                throw new InvalidOperationException($"MPQ tool did not produce {mpqName}.");
+            }
+
+            File.Copy(producedMpq, Path.Combine(mpqDir, mpqName), overwrite: true);
+            AddLog(result, $"Built {mpqName} successfully.");
+        }
+        finally
+        {
+            TryDeleteDirectory(workDir);
+        }
     }
 
     /// <summary>Whether a patch contains any uploaded MPQ files (case-insensitive extension match).</summary>

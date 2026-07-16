@@ -316,3 +316,53 @@ export function useMergePatchImport(stackId: string) {
     onSuccess: invalidate,
   })
 }
+
+// ===== Progression Sync Hooks =====
+
+export function useProgressionSyncStatus(stackId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...patchKeys.all, 'progression-sync-status', stackId] as const,
+    queryFn: async () => (await patchApi.progressionSyncStatus(stackId)).data,
+    enabled: !!stackId && enabled,
+  })
+}
+
+export function useRunProgressionSync(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => patchApi.runProgressionSync(stackId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patchKeys.all })
+    },
+  })
+}
+
+export function useResolveProgressionOptionalFiles(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (decisions: Record<string, boolean>) =>
+      patchApi.resolveProgressionOptionalFiles(stackId, decisions),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patchKeys.all })
+    },
+  })
+}
+
+export function useProgressionIgnoredFiles(stackId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...patchKeys.all, 'progression-ignored-files', stackId] as const,
+    queryFn: async () => (await patchApi.getProgressionIgnoredFiles(stackId)).data,
+    enabled: !!stackId && enabled,
+  })
+}
+
+export function useRepromptProgressionIgnoredFile(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (source: string) =>
+      patchApi.repromptProgressionIgnoredFile(stackId, source),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: patchKeys.all })
+    },
+  })
+}

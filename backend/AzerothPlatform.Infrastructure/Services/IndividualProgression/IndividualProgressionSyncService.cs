@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
@@ -15,6 +16,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 {
     private const string SettingsFileName = "individual_progression_settings.json";
     private const string ProgressionMetadataFileName = "progression.json";
+    private const string SyncLogFileName = "progression_sync_log.json";
+    private const string ProgressionRepoUrl = "https://github.com/Fero-Fero/Azeroth-Platform-Progression";
+    private const string MappingFileName = "mapping.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -678,5 +682,461 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             ? _dockerOptions.BuildsPath
             : Path.GetFullPath(_dockerOptions.BuildsPath);
         return Path.Combine(baseDir, stackId);
+    }
+
+    // ===== Progression Sync =====
+
+    public async Task<ProgressionSyncStatusDto> GetSyncStatusAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var stackRoot = GetStackRoot(stackId);
+        var logPath = SyncLogPath(stackRoot);
+        var status = new ProgressionSyncStatusDto();
+
+        if (File.Exists(logPath))
+        {
+            status.HasOptionalFilesLog = true;
+            var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+            status.IgnoredFilesCount = log.Entries.Count(e => !e.Accepted);
+            status.LastSyncAt = log.LastSyncAt;
+        }
+
+        return status;
+    }
+
+    public async Task<ProgressionSyncResultDto> RunSyncAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var stackRoot = GetStackRoot(stackId);
+        var result = new ProgressionSyncResultDto();
+        var tempDir = Path.Combine(Path.GetTempPath(), $"azeroth-progression-sync-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(tempDir);
+
+            var (exitCode, _, gitError) = await RunGitAsync(
+                $"clone --depth 1 {ProgressionRepoUrl} .",
+                tempDir, cancellationToken);
+
+            if (exitCode != 0)
+            {
+                result.Error = $"Failed to clone progression repo: {gitError}";
+                return result;
+            }
+
+            result.Log.Add("Cloned Azeroth-Platform-Progression repository.");
+
+            var mappingPath = Path.Combine(tempDir, MappingFileName);
+            if (!File.Exists(mappingPath))
+            {
+                result.Error = "mapping.json not found in Azeroth-Platform-Progression repository.";
+                return result;
+            }
+
+            var mappingJson = await File.ReadAllTextAsync(mappingPath, cancellationToken);
+            var mapping = JsonSerializer.Deserialize<ProgressionSyncMappingDto>(mappingJson, JsonOptions)
+                ?? new ProgressionSyncMappingDto();
+
+            var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
+            var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+
+            foreach (var entry in mapping.Mappings)
+            {
+                ProcessMappingEntry(entry, moduleRoot, stackRoot, log, result);
+            }
+
+            CopyRepoPatches(tempDir, stackRoot, result);
+
+            log.LastSyncAt = DateTimeOffset.UtcNow;
+            await PersistSyncLogAsync(stackRoot, log, cancellationToken);
+            result.Success = true;
+
+            _logger.LogInformation(
+                "Progression sync completed for stack {StackId}: {Copied} files copied, {Pending} pending optional files.",
+                stackId, result.CopiedFiles, result.PendingOptionalFiles.Count);
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+            _logger.LogError(ex, "Progression sync failed for stack {StackId}.", stackId);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); }
+                catch { /* best-effort cleanup */ }
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<ProgressionSyncResultDto> ResolveOptionalFilesAsync(
+        string stackId,
+        ResolveOptionalFilesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var stackRoot = GetStackRoot(stackId);
+        var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+        var result = new ProgressionSyncResultDto();
+        var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
+
+        foreach (var (source, accepted) in request.Decisions)
+        {
+            var entry = log.Entries.FirstOrDefault(e =>
+                string.Equals(e.Source, source, StringComparison.OrdinalIgnoreCase));
+
+            if (entry is null)
+            {
+                result.Log.Add($"Unknown source in sync log: {source}");
+                continue;
+            }
+
+            entry.Accepted = accepted;
+            entry.DecidedAt = DateTimeOffset.UtcNow;
+
+            if (accepted)
+            {
+                var sourceFile = Path.Combine(moduleRoot, source);
+                var resolvedDir = ResolvePatchFolder(stackRoot, entry.Destination);
+
+                if (resolvedDir is not null && File.Exists(sourceFile))
+                {
+                    Directory.CreateDirectory(resolvedDir);
+                    File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
+                    result.CopiedFiles++;
+                    result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
+                }
+                else
+                {
+                    result.Log.Add($"Source file not available: {source}");
+                }
+            }
+            else
+            {
+                result.SkippedOptional++;
+                result.Log.Add($"Ignored {entry.FileName}.");
+            }
+        }
+
+        await PersistSyncLogAsync(stackRoot, log, cancellationToken);
+        result.Success = true;
+        return result;
+    }
+
+    public async Task<IReadOnlyList<ProgressionIgnoredFileDto>> GetIgnoredFilesAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var stackRoot = GetStackRoot(stackId);
+        var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+
+        return log.Entries
+            .Where(e => !e.Accepted)
+            .Select(e => new ProgressionIgnoredFileDto
+            {
+                Source = e.Source,
+                Destination = e.Destination,
+                FileName = e.FileName,
+                DecidedAt = e.DecidedAt,
+            })
+            .ToList();
+    }
+
+    public async Task<ProgressionSyncResultDto> RepromptIgnoredFileAsync(
+        string stackId,
+        string source,
+        CancellationToken cancellationToken = default)
+    {
+        var stackRoot = GetStackRoot(stackId);
+        var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
+        var result = new ProgressionSyncResultDto();
+
+        var entry = log.Entries.FirstOrDefault(e =>
+            string.Equals(e.Source, source, StringComparison.OrdinalIgnoreCase));
+
+        if (entry is null)
+        {
+            result.Error = $"File not found in sync log: {source}";
+            return result;
+        }
+
+        entry.Accepted = true;
+        entry.DecidedAt = DateTimeOffset.UtcNow;
+
+        var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
+        var sourceFile = Path.Combine(moduleRoot, source);
+        var resolvedDir = ResolvePatchFolder(stackRoot, entry.Destination);
+
+        if (resolvedDir is not null && File.Exists(sourceFile))
+        {
+            Directory.CreateDirectory(resolvedDir);
+            File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
+            result.CopiedFiles = 1;
+            result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
+        }
+        else
+        {
+            result.Log.Add("Source file not available on disk; marked as accepted for next sync.");
+        }
+
+        await PersistSyncLogAsync(stackRoot, log, cancellationToken);
+        result.Success = true;
+        return result;
+    }
+
+    // ===== Progression Sync Helpers =====
+
+    private static string SyncLogPath(string stackRoot) =>
+        Path.Combine(stackRoot, SyncLogFileName);
+
+    private static async Task<ProgressionOptionalFilesLogDto> LoadSyncLogAsync(
+        string stackRoot,
+        CancellationToken cancellationToken)
+    {
+        var path = SyncLogPath(stackRoot);
+        if (!File.Exists(path))
+        {
+            return new ProgressionOptionalFilesLogDto();
+        }
+
+        await using var stream = File.OpenRead(path);
+        return await JsonSerializer.DeserializeAsync<ProgressionOptionalFilesLogDto>(stream, JsonOptions, cancellationToken)
+            ?? new ProgressionOptionalFilesLogDto();
+    }
+
+    private static Task PersistSyncLogAsync(
+        string stackRoot,
+        ProgressionOptionalFilesLogDto log,
+        CancellationToken cancellationToken)
+    {
+        var path = SyncLogPath(stackRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        return File.WriteAllTextAsync(path, JsonSerializer.Serialize(log, JsonOptions), cancellationToken);
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunGitAsync(
+        string arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = arguments,
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }
+        };
+
+        process.Start();
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return (process.ExitCode, await outputTask, await errorTask);
+    }
+
+    /// <summary>
+    /// Maps a destination path like "Classic/1.0 Start/sql/world/" to an absolute directory
+    /// by finding the existing patch folder in migrations/ whose index matches.
+    /// </summary>
+    private static string? ResolvePatchFolder(string stackRoot, string destinationPath)
+    {
+        var parts = destinationPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            return null;
+        }
+
+        var patchSegment = parts[1];
+        var spaceIdx = patchSegment.IndexOf(' ');
+        var indexPart = spaceIdx >= 0 ? patchSegment[..spaceIdx] : patchSegment;
+
+        if (!PatchIndex.TryParse(indexPart, out var targetIndex, explicitSub1: true))
+        {
+            return null;
+        }
+
+        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
+        if (!Directory.Exists(migrationsRoot))
+        {
+            return null;
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(migrationsRoot))
+        {
+            var folderName = Path.GetFileName(dir);
+            if (PatchFolderNames.TryParse(folderName, out var folderIndex, out _) && folderIndex.Equals(targetIndex))
+            {
+                if (parts.Length > 2)
+                {
+                    return Path.Combine(dir, Path.Combine(parts[2..]));
+                }
+
+                return dir;
+            }
+        }
+
+        return null;
+    }
+
+    private static void ProcessMappingEntry(
+        ProgressionSyncMappingEntryDto entry,
+        string moduleRoot,
+        string stackRoot,
+        ProgressionOptionalFilesLogDto log,
+        ProgressionSyncResultDto result)
+    {
+        var resolvedDestDir = ResolvePatchFolder(stackRoot, entry.Destination);
+        if (resolvedDestDir is null)
+        {
+            result.Log.Add($"Skipped {entry.Source}: could not resolve destination '{entry.Destination}'.");
+            return;
+        }
+
+        Directory.CreateDirectory(resolvedDestDir);
+
+        if (entry.Source.Contains('*'))
+        {
+            var sourceDir = Path.Combine(moduleRoot, Path.GetDirectoryName(entry.Source) ?? string.Empty);
+            if (!Directory.Exists(sourceDir))
+            {
+                result.Log.Add($"Source directory not found: {entry.Source}");
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(sourceDir))
+            {
+                var fileName = Path.GetFileName(file);
+                var dirPart = Path.GetDirectoryName(entry.Source)?.Replace(Path.DirectorySeparatorChar, '/') ?? "";
+                var fileSourcePath = string.IsNullOrEmpty(dirPart) ? fileName : $"{dirPart}/{fileName}";
+                var destFile = Path.Combine(resolvedDestDir, fileName);
+                CopySyncFile(file, destFile, fileSourcePath, entry.Destination, fileName, entry.Optional, log, result);
+            }
+        }
+        else
+        {
+            var sourceFile = Path.Combine(moduleRoot, entry.Source);
+            if (!File.Exists(sourceFile))
+            {
+                result.Log.Add($"Source file not found: {entry.Source}");
+                return;
+            }
+
+            var fileName = Path.GetFileName(sourceFile);
+            var destFile = Path.Combine(resolvedDestDir, fileName);
+            CopySyncFile(sourceFile, destFile, entry.Source, entry.Destination, fileName, entry.Optional, log, result);
+        }
+    }
+
+    private static void CopySyncFile(
+        string sourceFile,
+        string destFile,
+        string sourcePath,
+        string destination,
+        string fileName,
+        bool optional,
+        ProgressionOptionalFilesLogDto log,
+        ProgressionSyncResultDto result)
+    {
+        if (!optional)
+        {
+            File.Copy(sourceFile, destFile, overwrite: true);
+            result.CopiedFiles++;
+            return;
+        }
+
+        if (File.Exists(destFile))
+        {
+            result.SkippedOptional++;
+            return;
+        }
+
+        var existing = log.Entries.FirstOrDefault(e =>
+            string.Equals(e.Source, sourcePath, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null)
+        {
+            if (existing.Accepted)
+            {
+                File.Copy(sourceFile, destFile, overwrite: true);
+                result.CopiedFiles++;
+            }
+            else
+            {
+                result.SkippedOptional++;
+            }
+
+            return;
+        }
+
+        log.Entries.Add(new ProgressionOptionalFileEntryDto
+        {
+            Source = sourcePath,
+            Destination = destination,
+            FileName = fileName,
+            Accepted = false,
+            DecidedAt = DateTimeOffset.UtcNow,
+        });
+
+        result.PendingOptionalFiles.Add(new ProgressionSyncPendingFileDto
+        {
+            Source = sourcePath,
+            Destination = destination,
+            FileName = fileName,
+        });
+        result.SkippedOptional++;
+    }
+
+    private static void CopyRepoPatches(string repoDir, string stackRoot, ProgressionSyncResultDto result)
+    {
+        foreach (var expansionName in MigrationLayout.ExpansionRoots.Keys)
+        {
+            var expansionDir = Directory.EnumerateDirectories(repoDir)
+                .FirstOrDefault(d => string.Equals(
+                    Path.GetFileName(d), expansionName, StringComparison.OrdinalIgnoreCase));
+
+            if (expansionDir is null)
+            {
+                continue;
+            }
+
+            foreach (var patchDir in Directory.EnumerateDirectories(expansionDir))
+            {
+                var patchName = Path.GetFileName(patchDir);
+
+                foreach (var file in Directory.EnumerateFiles(patchDir, "*", SearchOption.AllDirectories))
+                {
+                    var relativeToPatch = Path.GetRelativePath(patchDir, file);
+                    var categoryPath = Path.GetDirectoryName(relativeToPatch)
+                        ?.Replace(Path.DirectorySeparatorChar, '/');
+
+                    var destination = string.IsNullOrEmpty(categoryPath)
+                        ? $"{Path.GetFileName(expansionDir)}/{patchName}/"
+                        : $"{Path.GetFileName(expansionDir)}/{patchName}/{categoryPath}/";
+
+                    var resolvedDir = ResolvePatchFolder(stackRoot, destination);
+                    if (resolvedDir is null)
+                    {
+                        result.Log.Add(
+                            $"Skipped repo file {relativeToPatch}: could not resolve destination '{destination}'.");
+                        continue;
+                    }
+
+                    Directory.CreateDirectory(resolvedDir);
+                    File.Copy(file, Path.Combine(resolvedDir, Path.GetFileName(file)), overwrite: true);
+                    result.CopiedFiles++;
+                }
+            }
+        }
     }
 }
