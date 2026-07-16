@@ -38,6 +38,22 @@ internal static partial class ProgressionPatchFolderResolver
 
         var expansionSegment = parts[0];
         var patchSegment = parts[1];
+        if (!TryNormalizeExpansion(expansionSegment, out _))
+        {
+            return null;
+        }
+
+        if (ProgressionPatchNaming.TryFormatPatchKey(patchSegment, out var patchKey))
+        {
+            var repoPatchDir = MigrationLayout.PatchDir(stackRoot, patchKey);
+            if (Directory.Exists(repoPatchDir))
+            {
+                return parts.Length <= 2
+                    ? repoPatchDir
+                    : Path.Combine(repoPatchDir, Path.Combine(parts[2..]));
+            }
+        }
+
         if (!TryNormalizeExpansion(expansionSegment, out var expansion))
         {
             return null;
@@ -133,17 +149,8 @@ internal static partial class ProgressionPatchFolderResolver
         return null;
     }
 
-    private static (string IndexPart, string? Label) SplitPatchSegment(string patchSegment)
-    {
-        var trimmed = patchSegment.Trim();
-        var spaceIdx = trimmed.IndexOf(' ');
-        if (spaceIdx < 0)
-        {
-            return (trimmed, null);
-        }
-
-        return (trimmed[..spaceIdx], trimmed[(spaceIdx + 1)..].Trim());
-    }
+    private static (string IndexPart, string? Label) SplitPatchSegment(string patchSegment) =>
+        ProgressionPatchNaming.SplitPatchSegment(patchSegment);
 
     private static bool TryNormalizeExpansion(string expansionSegment, out string expansion)
     {

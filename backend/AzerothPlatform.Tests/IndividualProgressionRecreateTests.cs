@@ -35,7 +35,8 @@ public sealed class IndividualProgressionRecreateTests
 
             await service.BootstrapAsync(stackId);
             SeedTestProgressionRepo(stackRoot);
-            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "START");
+            SeedStackPatchesFromRepo(stackRoot);
+            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "Start");
             Directory.Delete(MigrationLayout.PatchDir(stackRoot, startKey), recursive: true);
 
             var result = await service.RecreateMissingPatchesAsync(stackId);
@@ -77,7 +78,8 @@ public sealed class IndividualProgressionRecreateTests
             stack.AppliedPatchLevel = 1_002_000;
             await db.SaveChangesAsync();
 
-            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "START");
+            SeedStackPatchesFromRepo(stackRoot);
+            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "Start");
             Directory.Delete(MigrationLayout.PatchDir(stackRoot, startKey), recursive: true);
 
             var result = await service.RecreateMissingPatchesAsync(stackId);
@@ -113,6 +115,7 @@ public sealed class IndividualProgressionRecreateTests
 
             await service.BootstrapAsync(stackId);
             SeedTestProgressionRepo(stackRoot);
+            SeedStackPatchesFromRepo(stackRoot);
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 1");
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 2");
             MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 3");
@@ -122,6 +125,51 @@ public sealed class IndividualProgressionRecreateTests
             Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 1")).Should().BeFalse();
             Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 2")).Should().BeFalse();
             Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 3")).Should().BeFalse();
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ValidatePatchesAsync_passes_with_no_patches_and_no_progression_repo()
+    {
+        var stackId = "ip-validate-empty";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-ip-validate-empty-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var db = CreateDbContext(new ManagedStackEntity
+            {
+                Id = stackId,
+                StackName = stackId,
+                AppliedPatchLevel = 0,
+                ModuleIdsJson = """["mod-individual-progression"]""",
+                CoreCommitSha = "abc123",
+                LastBuiltAt = DateTime.UtcNow,
+            });
+            var service = CreateSyncService(db, buildsPath);
+
+            await service.BootstrapAsync(stackId);
+
+            var stackRoot = Path.Combine(buildsPath, stackId);
+            var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
+            if (Directory.Exists(migrationsRoot))
+            {
+                Directory.Delete(migrationsRoot, recursive: true);
+            }
+            Directory.CreateDirectory(migrationsRoot);
+
+            var result = await service.ValidatePatchesAsync(stackId);
+
+            result.Passed.Should().BeTrue();
+            result.Errors.Should().BeEmpty();
+            result.KeyChecks.Should().BeEmpty();
+            result.PatchCount.Should().Be(0);
+            result.ExpectedPatchCount.Should().Be(0);
         }
         finally
         {
@@ -143,9 +191,25 @@ public sealed class IndividualProgressionRecreateTests
                 "wotlk" => "Wotlk",
                 _ => "Classic",
             };
-            var patchFolder = $"{definition.Index} {definition.Title}";
+            var patchFolder = $"{definition.Index} {RepoLabel(definition)}";
             Directory.CreateDirectory(Path.Combine(MigrationLayout.ProgressionRepoDir(stackRoot), expansion, patchFolder));
         }
+    }
+
+    private static string RepoLabel(ProgressionPatchDefinition definition) => definition.Index switch
+    {
+        "1.0" => "Start",
+        "2.1" => "Serpentshrine Cavern",
+        "3.5" => "Ruby Sanctum",
+        _ => definition.Slug.Replace('_', ' '),
+    };
+
+    private static void SeedStackPatchesFromRepo(string stackRoot)
+    {
+        ProgressionRepoPatchSeeder.Seed(
+            MigrationLayout.ProgressionRepoDir(stackRoot),
+            stackRoot,
+            onlyMissing: false);
     }
 
     private static IndividualProgressionSyncService CreateSyncService(AzerothCoreDbContext db, string buildsPath)

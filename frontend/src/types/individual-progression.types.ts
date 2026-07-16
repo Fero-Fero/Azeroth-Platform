@@ -22,11 +22,6 @@ export interface IndividualProgressionBootstrapResult {
   settings: IndividualProgressionSettings
 }
 
-export interface IndividualProgressionRecreatePatchesResult {
-  templatesCreated: number
-  missingBefore: number
-}
-
 export interface PatchProgressionMetadata {
   state: number
   slug: string

@@ -16,7 +16,11 @@ internal static class ProgressionRepoPatchSeeder
         WriteIndented = true,
     };
 
-    public static int Seed(string repoDir, string stackRoot, bool onlyMissing)
+    public static int Seed(
+        string repoDir,
+        string stackRoot,
+        bool onlyMissing,
+        ICollection<string>? createdPatchKeys = null)
     {
         if (!Directory.Exists(repoDir))
         {
@@ -43,15 +47,23 @@ internal static class ProgressionRepoPatchSeeder
                 }
 
                 var stackPatchDir = MigrationLayout.PatchDir(stackRoot, patchKey);
-                if (onlyMissing && Directory.Exists(stackPatchDir))
+                if (onlyMissing
+                    && File.Exists(Path.Combine(stackPatchDir, ProgressionMetadataFileName)))
                 {
                     continue;
                 }
 
                 MigrationLayout.EnsurePatchDirectories(stackRoot, patchKey);
                 CopyDescription(referencePatchDir, stackPatchDir);
-                WriteProgressionMetadata(stackPatchDir, definition, headerStates, expansion, patchKey);
+                WriteProgressionMetadata(
+                    stackPatchDir,
+                    definition,
+                    headerStates,
+                    expansion,
+                    patchFolderName,
+                    patchKey);
                 created++;
+                createdPatchKeys?.Add(patchKey);
             }
         }
 
@@ -65,24 +77,8 @@ internal static class ProgressionRepoPatchSeeder
         out string patchKey,
         out ProgressionPatchDefinition? definition)
     {
-        patchKey = string.Empty;
         definition = ProgressionPatchFolderResolver.MatchDefinition(expansion, patchFolderName, catalog);
-
-        if (definition is not null && PatchIndex.TryParse(definition.Index, out var catalogIndex, explicitSub1: true))
-        {
-            patchKey = PatchFolderNames.Format(catalogIndex, definition.Slug);
-            return true;
-        }
-
-        var (indexPart, label) = SplitPatchSegment(patchFolderName);
-        if (!PatchIndex.TryParse(indexPart, out var repoIndex, explicitSub1: true))
-        {
-            return false;
-        }
-
-        var slug = SlugFromLabel(label ?? patchFolderName);
-        patchKey = PatchFolderNames.Format(repoIndex, slug);
-        return true;
+        return ProgressionPatchNaming.TryFormatPatchKey(patchFolderName, out patchKey);
     }
 
     private static void CopyDescription(string referencePatchDir, string stackPatchDir)
@@ -105,9 +101,13 @@ internal static class ProgressionRepoPatchSeeder
         ProgressionPatchDefinition? definition,
         IReadOnlyList<IndividualProgressionHeaderParser.ParsedState>? headerStates,
         string expansion,
+        string repoPatchFolderName,
         string patchKey)
     {
-        var slug = definition?.Slug ?? ExtractSlugFromPatchKey(patchKey);
+        var slug = definition?.Slug
+            ?? (ProgressionPatchNaming.TryParseRepoFolder(repoPatchFolderName, out _, out var label) && label is not null
+                ? ProgressionPatchNaming.SlugFromLabel(label)
+                : ExtractSlugFromPatchKey(patchKey));
         var metadata = definition is not null
             ? new PatchProgressionMetadataDto
             {
@@ -160,24 +160,6 @@ internal static class ProgressionRepoPatchSeeder
 
         return slug;
     }
-
-    private static (string IndexPart, string? Label) SplitPatchSegment(string patchSegment)
-    {
-        var trimmed = patchSegment.Trim();
-        var spaceIdx = trimmed.IndexOf(' ');
-        if (spaceIdx < 0)
-        {
-            return (trimmed, null);
-        }
-
-        return (trimmed[..spaceIdx], trimmed[(spaceIdx + 1)..].Trim());
-    }
-
-    private static string SlugFromLabel(string label) =>
-        label.Trim()
-            .ToUpperInvariant()
-            .Replace(' ', '_')
-            .Replace('-', '_');
 
     private static bool TryNormalizeExpansion(string expansionSegment, out string expansion)
     {

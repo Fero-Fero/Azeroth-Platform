@@ -39,6 +39,14 @@ export interface PatchDetailsDto {
   files: PatchFileDto[]
   mpqRemovals: string[]
   progression?: PatchProgressionMetadata | null
+  configOverrides?: PatchConfigOverrideDto[]
+}
+
+export interface PatchConfigOverrideDto {
+  sourceJson: string
+  targetConf: string
+  key: string
+  value: string
 }
 
 export interface PublishedMpqDto {

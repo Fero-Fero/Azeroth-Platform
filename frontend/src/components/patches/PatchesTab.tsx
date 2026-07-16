@@ -21,12 +21,14 @@ import {
   useSavePatchDescription,
   useBootstrapIndividualProgression,
   useValidateIndividualProgressionPatches,
-  useRecreateMissingProgressionPatches,
   patchKeys,
 } from '@/hooks/usePatches'
 import { stackKeys } from '@/hooks/useStacks'
 import type { PatchStatus, PatchFileDto, Expansion, ImportPatchCollectionMode, PatchKind, PatchSummaryDto } from '@/types/patch.types'
 import PatchFileCategory from './PatchFileCategory'
+import PatchConfigOverridesPreview, {
+  PatchConfigOverridesPreviewButton,
+} from './PatchConfigOverridesPreview'
 import ContainerFileCategory from './ContainerFileCategory'
 import DbcEditorDialog from './DbcEditorDialog'
 import MpqRemovalPanel from './MpqRemovalPanel'
@@ -193,15 +195,12 @@ function isImportArchive(file: File): boolean {
   return IMPORT_ARCHIVE_EXTENSIONS.some((ext) => lower.endsWith(ext))
 }
 
-/** Primary label for a patch row — avoids repeating folder key + slug badge. */
+/** Primary label for a patch row — uses the name from the patch folder (repo label after index). */
 function patchRowTitle(patch: PatchSummaryDto): string {
-  if (patch.progressionTitle) return patch.progressionTitle
   if (patch.name) {
     return patch.name
-      .split('_')
-      .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
-      .join(' ')
   }
+  if (patch.progressionTitle) return patch.progressionTitle
   return patch.key
 }
 
@@ -244,7 +243,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const saveDescriptionMutation = useSavePatchDescription(stackId)
   const bootstrapMutation = useBootstrapIndividualProgression(stackId)
   const validateMutation = useValidateIndividualProgressionPatches(stackId)
-  const recreatePatchesMutation = useRecreateMissingProgressionPatches(stackId)
   const hasIpModule = overview?.hasIndividualProgressionModule ?? false
   const ipBootstrapped = hasIpModule && (overview?.individualProgressionBootstrapped ?? false)
 
@@ -273,6 +271,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   // Upload errors are shown inline next to the failing section's upload field (not the top banner),
   // so they're visible without scrolling.
   const [uploadError, setUploadError] = useState<{ category: string; message: string } | null>(null)
+  const [showConfigOverridesPreview, setShowConfigOverridesPreview] = useState(false)
   const [patchDetailTab, setPatchDetailTab] = useState<'description' | 'files'>('files')
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null)
   const [descriptionSaved, setDescriptionSaved] = useState(false)
@@ -349,6 +348,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       return next
     })
   }, [selectedKey, overview?.patches])
+
+  const configOverrides = detail?.configOverrides ?? []
 
   const filesByCategory = useMemo(() => {
     const map: Record<string, PatchFileDto[]> = {}
@@ -562,21 +563,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     try {
       const res = await validateMutation.mutateAsync()
       setValidationResult(res.data)
-    } catch (err) {
-      setActionError(extractError(err))
-    }
-  }
-
-  const handleRecreateMissingPatches = async () => {
-    setActionError(null)
-    try {
-      const res = await recreatePatchesMutation.mutateAsync()
-      setValidationResult(null)
-      setImportSummary(
-        res.data.templatesCreated > 0
-          ? `Created ${res.data.templatesCreated} missing progression patch template(s). Re-run validation after importing content.`
-          : 'All progression patch templates are already present.'
-      )
     } catch (err) {
       setActionError(extractError(err))
     }
@@ -1048,16 +1034,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900">Patch validation</p>
-              <p className="mt-1 max-w-2xl text-sm text-gray-700">
-                After running progression sync, validate patches before applying any patch. Compares{' '}
-                <code className="rounded bg-gray-100 px-1 text-xs">migrations/</code> against the stack&apos;s{' '}
-                <code className="rounded bg-gray-100 px-1 text-xs">azeroth-platform-progression/</code>{' '}
-                checkout (absolute path under the stack data directory — run sync first if missing), verifies
-                each patch <code className="rounded bg-gray-100 px-1 text-xs">config/*.json</code> override
-                maps to a server config file with all referenced keys present, and confirms progression
-                module settings. Re-run validation after every server recompile — a new build invalidates
-                the previous check.
-              </p>
               {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-green-800">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -1094,22 +1070,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 )}
                 Validate patches
               </button>
-              {progressionPatchCountMismatch && (
-                <button
-                  type="button"
-                  onClick={handleRecreateMissingPatches}
-                  disabled={recreatePatchesMutation.isPending}
-                  title="Create missing progression patch folders from Azeroth-Platform-Progression"
-                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50 disabled:opacity-50"
-                >
-                  {recreatePatchesMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  Recreate from progression repo
-                </button>
-              )}
             </div>
           </div>
 
@@ -1131,8 +1091,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
               </p>
               {!validationResult.passed && progressionPatchCountMismatch && (
                 <p className="mt-2 text-sm text-red-800">
-                  Missing patch folders can be recreated from Azeroth-Platform-Progression with the button
-                  above, or by running progression sync again.
+                  Missing patch folders can be created by running Update &amp; re-sync in the progression
+                  sync panel below.
                 </p>
               )}
               {validationResult.errors.length > 0 && (
@@ -1158,11 +1118,11 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                     <tbody>
                       {validationResult.keyChecks.map((check) => (
                         <tr
-                          key={`${check.patchKey ?? 'module'}:${check.configSource ?? check.configPath}:${check.key}`}
+                          key={`${check.patchKey ?? 'none'}:${check.configSource ?? check.configPath}:${check.key}`}
                           className="border-t border-gray-100"
                         >
                           <td className="py-1 pr-4 font-mono">{check.patchKey ?? '—'}</td>
-                          <td className="py-1 pr-4 font-mono">{check.configSource ?? 'module settings'}</td>
+                          <td className="py-1 pr-4 font-mono">{check.configSource ?? '—'}</td>
                           <td className="py-1 pr-4 font-mono">{check.configPath}</td>
                           <td className="py-1 pr-4 font-mono">{check.key}</td>
                           <td className="py-1 pr-4">
@@ -1721,6 +1681,29 @@ Flat layout also works:
               <div className="space-y-4 p-5">
               {patchDetailTab === 'files' ? (
                 <>
+              <PatchFileCategory
+                title="Config overrides"
+                category="config"
+                accept=".json"
+                files={filesByCategory['config'] ?? []}
+                uploading={uploadingCategory === 'config'}
+                error={errorFor('config')}
+                headerActions={
+                  <PatchConfigOverridesPreviewButton
+                    overrides={configOverrides}
+                    onOpen={() => setShowConfigOverridesPreview(true)}
+                  />
+                }
+                notice={
+                  <span>
+                    Upload JSON files (e.g.{' '}
+                    <span className="font-mono">worldserver.json</span>) mapping config keys to
+                    values. On apply, each key is written to the matching <span className="font-mono">.conf</span> file.
+                  </span>
+                }
+                onUpload={handleUpload}
+                onDelete={handleDelete}
+              />
               <ContainerFileCategory
                 title="SQL — world"
                 accept=".sql"
@@ -1795,23 +1778,6 @@ Flat layout also works:
                   mpqRemovals={detail?.mpqRemovals ?? []}
                 />
               </div>
-              <PatchFileCategory
-                title="Config overrides"
-                category="config"
-                accept=".json"
-                files={filesByCategory['config'] ?? []}
-                uploading={uploadingCategory === 'config'}
-                error={errorFor('config')}
-                notice={
-                  <span>
-                    Upload JSON files (e.g.{' '}
-                    <span className="font-mono">worldserver.json</span>) mapping config keys to
-                    values. On apply, each key is written to the matching <span className="font-mono">.conf</span> file.
-                  </span>
-                }
-                onUpload={handleUpload}
-                onDelete={handleDelete}
-              />
                 </>
               ) : (
                 <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
@@ -1871,6 +1837,12 @@ Flat layout also works:
           onClose={() => setEditFile(null)}
         />
       )}
+
+      <PatchConfigOverridesPreview
+        overrides={configOverrides}
+        open={showConfigOverridesPreview}
+        onClose={() => setShowConfigOverridesPreview(false)}
+      />
 
       {confirmApply && applyProgressionPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

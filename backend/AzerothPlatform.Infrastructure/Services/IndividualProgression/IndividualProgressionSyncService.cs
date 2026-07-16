@@ -97,15 +97,13 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         await WriteConfigFromSettingsAsync(stackId, settings, cancellationToken);
         await PersistSettingsAsync(stackRoot, settings, cancellationToken);
 
-        var templatesCreated = SeedProgressionPatches(stackRoot, onlyMissing: false);
-
         _logger.LogInformation(
-            "Bootstrapped Individual Progression for stack {StackId}: {Count} patch templates",
-            stackId, templatesCreated);
+            "Bootstrapped Individual Progression for stack {StackId}. Run progression sync to create patch folders from Azeroth-Platform-Progression.",
+            stackId);
 
         return new IndividualProgressionBootstrapResultDto
         {
-            TemplatesCreated = templatesCreated,
+            TemplatesCreated = 0,
             ConfigUpdated = true,
             Expansion = 0,
             KeysDiscovered = true,
@@ -125,8 +123,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             throw new InvalidOperationException("Prepare server-wide progression before recreating patch templates.");
         }
 
-        var missingBefore = ComputeMissingProgressionPatchCount(stackRoot);
-        RemovePlaceholderPatches(stackRoot);
         var repoPath = ResolveProgressionRepoDirectory(stackRoot);
         if (!Directory.Exists(repoPath))
         {
@@ -134,7 +130,28 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                 $"Azeroth-Platform-Progression is not on the stack yet. Run progression sync first (expected at {repoPath}).");
         }
 
-        var templatesCreated = ProgressionRepoPatchSeeder.Seed(repoPath, stackRoot, onlyMissing: true);
+        var missingBefore = ProgressionRepoAlignment.CountMissingPatches(repoPath, stackRoot);
+        RemovePlaceholderPatches(stackRoot);
+        ProgressionRepoAlignment.RemoveOrphanedManagedPatches(repoPath, stackRoot);
+
+        var createdPatchKeys = new List<string>();
+        var templatesCreated = ProgressionRepoPatchSeeder.Seed(
+            repoPath,
+            stackRoot,
+            onlyMissing: true,
+            createdPatchKeys);
+
+        if (createdPatchKeys.Count > 0)
+        {
+            await CopyRepoPatchesAsync(
+                repoPath,
+                stackRoot,
+                new ProgressionSyncResultDto(),
+                initialSync: true,
+                new ProgressionSyncProgressStore(stackRoot),
+                cancellationToken,
+                limitToPatchKeys: createdPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        }
 
         settings.ValidationBuildFingerprint = null;
         settings.ValidationPassedAt = null;
@@ -221,14 +238,19 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         }
     }
 
-    public int CountProgressionPatches(string stackRoot) =>
-        ProgressionRepoStructureValidator.CountManagedProgressionPatches(stackRoot);
+    public int CountProgressionPatches(string stackRoot)
+    {
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        return Directory.Exists(repoPath)
+            ? ProgressionRepoAlignment.CountAlignedPatches(repoPath, stackRoot)
+            : ProgressionRepoStructureValidator.CountManagedProgressionPatches(stackRoot);
+    }
 
     public int GetExpectedProgressionPatchCount(string stackId)
     {
         var repoPath = ResolveProgressionRepoDirectory(GetStackRoot(stackId));
         return Directory.Exists(repoPath)
-            ? ProgressionRepoStructureValidator.CountReferencePatches(repoPath)
+            ? ProgressionRepoAlignment.CountExpectedPatches(repoPath)
             : 0;
     }
 
@@ -247,25 +269,24 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var errors = new List<string>();
         var keyChecks = new List<IndividualProgressionKeyCheckDto>();
         var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        var expectedPatchCount = Directory.Exists(repoPath)
-            ? ProgressionRepoStructureValidator.CountReferencePatches(repoPath)
-            : 0;
         var patchCount = CountProgressionPatches(stackRoot);
-
-        if (!Directory.Exists(repoPath))
-        {
-            errors.Add(
-                $"Azeroth-Platform-Progression is not on the stack yet. Run progression sync first (expected at {repoPath}).");
-        }
-        else if (expectedPatchCount > 0 && patchCount != expectedPatchCount)
-        {
-            errors.Add(
-                $"Expected {expectedPatchCount} progression patch folders from Azeroth-Platform-Progression, found {patchCount} on the stack.");
-        }
+        var expectedPatchCount = Directory.Exists(repoPath)
+            ? ProgressionRepoAlignment.CountExpectedPatches(repoPath)
+            : 0;
 
         if (Directory.Exists(repoPath))
         {
-            ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
+            var missingPatchCount = ProgressionRepoAlignment.CountMissingPatches(repoPath, stackRoot);
+            if (missingPatchCount > 0)
+            {
+                errors.Add(
+                    $"Missing {missingPatchCount} progression patch folder(s) from Azeroth-Platform-Progression ({patchCount} of {expectedPatchCount} present on the stack). Run Update & re-sync.");
+            }
+
+            if (patchCount > 0)
+            {
+                ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
+            }
         }
 
         await PatchConfigValidator.ValidateAsync(
@@ -276,38 +297,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             keyChecks,
             cancellationToken);
 
-        await DiscoverKeysAsync(stackId, settings, cancellationToken);
-        await RefreshValuesAsync(stackId, settings, cancellationToken);
-
-        var modulePath = settings.ModuleConfPath;
-        var moduleContent = await ReadConfigContentAsync(stackId, modulePath, cancellationToken);
-        if (string.IsNullOrWhiteSpace(moduleContent))
-        {
-            errors.Add($"Module config not found or empty: {modulePath}. Rebuild the server first.");
-        }
-
-        foreach (var key in new[]
-                 {
-                     settings.Keys.StartingProgression,
-                     settings.Keys.ProgressionLimit,
-                     settings.Keys.TbcRacesUnlockProgression,
-                     settings.Keys.TbcRacesStartingProgression,
-                 })
-        {
-            keyChecks.Add(await ValidateConfigKeyAsync(stackId, modulePath, moduleContent, key, errors, cancellationToken));
-            moduleContent = await ReadConfigContentAsync(stackId, modulePath, cancellationToken);
-        }
-
-        var worldPath = settings.WorldserverConfPath;
-        var worldContent = await ReadConfigContentAsync(stackId, worldPath, cancellationToken);
-        keyChecks.Add(await ValidateConfigKeyAsync(
-            stackId, worldPath, worldContent, settings.ExpansionKey, errors, cancellationToken));
-
         var buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
-        var passed = errors.Count == 0 && keyChecks.All(check =>
-            check.Exists
-            && check.CanRead
-            && (check.PatchKey is not null || check.CanUpdate));
+        var passed = errors.Count == 0
+            && (keyChecks.Count == 0 || keyChecks.All(check => check.Exists && check.CanRead));
         if (passed && buildFingerprint is null)
         {
             passed = false;
@@ -372,93 +364,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             "Individual Progression patch validation is required. Run progression sync, rebuild the server if needed, then click Validate patches.");
     }
 
-    private int ComputeMissingProgressionPatchCount(string stackRoot)
-    {
-        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        if (!Directory.Exists(repoPath))
-        {
-            return 0;
-        }
-
-        return Math.Max(
-            0,
-            ProgressionRepoStructureValidator.CountReferencePatches(repoPath) - CountProgressionPatches(stackRoot));
-    }
-
-    private static bool ProgressionPatchExists(string stackRoot, ProgressionPatchDefinition definition)
-    {
-        if (!PatchIndex.TryParse(definition.Index, out var index, explicitSub1: true))
-        {
-            return false;
-        }
-
-        var patchKey = PatchFolderNames.Format(index, definition.Slug);
-        var metadataPath = Path.Combine(MigrationLayout.PatchDir(stackRoot, patchKey), ProgressionMetadataFileName);
-        return File.Exists(metadataPath);
-    }
-
-    private async Task<IndividualProgressionKeyCheckDto> ValidateConfigKeyAsync(
-        string stackId,
-        string configPath,
-        string content,
-        string key,
-        ICollection<string> errors,
-        CancellationToken cancellationToken)
-    {
-        var check = new IndividualProgressionKeyCheckDto
-        {
-            Key = key,
-            ConfigPath = configPath,
-        };
-
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            check.Error = "Config file is empty or missing.";
-            errors.Add($"{key}: config file {configPath} is empty or missing.");
-            return check;
-        }
-
-        if (!ServerConfigValueEditor.TryGetValue(content, key, out var value))
-        {
-            check.Error = "Key not found in config.";
-            errors.Add($"{key}: not found in {configPath}.");
-            return check;
-        }
-
-        check.Exists = true;
-        check.CanRead = true;
-        check.Value = value;
-
-        try
-        {
-            var updated = ServerConfigValueEditor.SetValue(content, key, value);
-            if (!ServerConfigValueEditor.TryGetValue(updated, key, out var roundTrip) || roundTrip != value)
-            {
-                check.Error = "Key could not be round-tripped in memory.";
-                errors.Add($"{key}: update simulation failed in {configPath}.");
-                return check;
-            }
-
-            await _serverConfig.SaveAsync(stackId, configPath, updated, cancellationToken);
-            var reread = await ReadConfigContentAsync(stackId, configPath, cancellationToken);
-            if (!ServerConfigValueEditor.TryGetValue(reread, key, out var afterSave) || afterSave != value)
-            {
-                check.Error = "Key could not be written back to config.";
-                errors.Add($"{key}: could not be updated in {configPath}.");
-                return check;
-            }
-
-            check.CanUpdate = true;
-        }
-        catch (Exception ex)
-        {
-            check.Error = ex.Message;
-            errors.Add($"{key}: {ex.Message}");
-        }
-
-        return check;
-    }
-
     private static string? ResolveExpansionForPatch(PatchProgressionMetadataDto metadata) => metadata.Expansion switch
     {
         "classic" when metadata.State == 0 => "0",
@@ -471,68 +376,6 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     {
         var current = settings.Values.TryGetValue(key, out var raw) && int.TryParse(raw, out var parsed) ? parsed : 0;
         return (current + 1).ToString();
-    }
-
-    private int SeedProgressionPatches(string stackRoot, bool onlyMissing)
-    {
-        if (!onlyMissing)
-        {
-            RemovePlaceholderPatches(stackRoot);
-        }
-
-        var definitions = IndividualProgressionPatchCatalog.ResolveDefinitions(stackRoot);
-        var created = 0;
-
-        foreach (var definition in definitions)
-        {
-            if (!PatchIndex.TryParse(definition.Index, out var index, explicitSub1: true))
-            {
-                continue;
-            }
-
-            if (onlyMissing && ProgressionPatchExists(stackRoot, definition))
-            {
-                continue;
-            }
-
-            var patchKey = PatchFolderNames.Format(index, definition.Slug);
-            var patchDir = MigrationLayout.PatchDir(stackRoot, patchKey);
-            var alreadyExists = Directory.Exists(patchDir);
-            MigrationLayout.EnsurePatchDirectories(stackRoot, patchKey);
-
-            var description = $"""
-                # {definition.Title}
-
-                **Progression state:** `PROGRESSION_{definition.Slug}` ({definition.State})
-                **Expansion:** {definition.Expansion} · **Patch index:** {definition.Index}
-
-                {definition.Description}
-
-                ## Content
-                - SQL: import from release archive into `sql/world`, `sql/auth`, or `sql/characters`
-                - Client: import MPQ release into `mpq/`
-                """;
-
-            File.WriteAllText(Path.Combine(patchDir, "description.md"), description);
-
-            var metadata = new PatchProgressionMetadataDto
-            {
-                State = definition.State,
-                Slug = definition.Slug,
-                Expansion = definition.Expansion,
-                IncrementsProgression = definition.IncrementsProgression,
-            };
-            File.WriteAllText(
-                Path.Combine(patchDir, ProgressionMetadataFileName),
-                JsonSerializer.Serialize(metadata, JsonOptions));
-
-            if (!alreadyExists || !onlyMissing)
-            {
-                created++;
-            }
-        }
-
-        return created;
     }
 
     private static void RemovePlaceholderPatches(string stackRoot)
@@ -734,18 +577,32 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var progress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
         if (progress is not null)
         {
-            ApplyProgressToStatus(status, progress);
+            if (ProgressionSyncProgressStore.IsStale(progress, stackRoot))
+            {
+                var progressStore = new ProgressionSyncProgressStore(stackRoot);
+                await progressStore.CompleteAsync(
+                    false,
+                    "Progression sync timed out or was interrupted.",
+                    "Progression sync timed out or was interrupted.",
+                    cancellationToken);
+                progress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
+            }
+
+            if (progress is not null)
+            {
+                ApplyProgressToStatus(status, progress, stackRoot);
+            }
         }
 
         return status;
     }
 
-    private static void ApplyProgressToStatus(ProgressionSyncStatusDto status, ProgressionSyncProgressState progress)
+    private static void ApplyProgressToStatus(
+        ProgressionSyncStatusDto status,
+        ProgressionSyncProgressState progress,
+        string stackRoot)
     {
-        var staleAfter = TimeSpan.FromHours(2);
-        if (progress.IsRunning
-            && progress.StartedAt.HasValue
-            && DateTimeOffset.UtcNow - progress.StartedAt.Value > staleAfter)
+        if (ProgressionSyncProgressStore.IsStale(progress, stackRoot))
         {
             status.IsRunning = false;
             status.Phase = "Failed";
@@ -779,7 +636,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var progressStore = new ProgressionSyncProgressStore(stackRoot);
 
         var existingProgress = await ProgressionSyncProgressStore.TryLoadAsync(stackRoot, cancellationToken);
-        if (existingProgress?.IsRunning == true)
+        if (ProgressionSyncProgressStore.IsActivelyRunning(existingProgress, stackRoot))
         {
             result.Error = "A progression sync is already running for this stack.";
             return result;
@@ -840,6 +697,15 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             if (initialSync)
             {
                 RemovePlaceholderPatches(stackRoot);
+            }
+
+            var removedOrphans = ProgressionRepoAlignment.RemoveOrphanedManagedPatches(repoDir, stackRoot, result.Log);
+            if (removedOrphans > 0)
+            {
+                var orphanMessage =
+                    $"Removed {removedOrphans} orphaned progression patch folder(s) that are not in Azeroth-Platform-Progression.";
+                result.Log.Add(orphanMessage);
+                await progressStore.ReportAsync("Preparing patches", 42, orphanMessage, cancellationToken);
             }
 
             var templatesPrepared = ProgressionRepoPatchSeeder.Seed(
@@ -1295,7 +1161,8 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         ProgressionSyncResultDto result,
         bool initialSync,
         ProgressionSyncProgressStore progressStore,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<string>? limitToPatchKeys = null)
     {
         var filesToCopy = new List<(string SourcePath, string DestDir, string FileName, string RelativePath)>();
 
@@ -1326,6 +1193,12 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
                     var resolvedDir = ProgressionPatchFolderResolver.Resolve(stackRoot, destination);
                     if (resolvedDir is null)
+                    {
+                        continue;
+                    }
+
+                    if (limitToPatchKeys is not null
+                        && !PatchKeyMatchesLimit(stackRoot, resolvedDir, limitToPatchKeys))
                     {
                         continue;
                     }
@@ -1371,5 +1244,16 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             95,
             "Finalizing progression sync…",
             cancellationToken);
+    }
+
+    private static bool PatchKeyMatchesLimit(
+        string stackRoot,
+        string resolvedPath,
+        IReadOnlySet<string> limitToPatchKeys)
+    {
+        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
+        var relative = Path.GetRelativePath(migrationsRoot, resolvedPath);
+        var patchKey = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        return limitToPatchKeys.Contains(patchKey);
     }
 }

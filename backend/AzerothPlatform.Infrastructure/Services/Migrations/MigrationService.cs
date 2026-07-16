@@ -136,9 +136,7 @@ public sealed partial class MigrationService : IMigrationService
                 AppliedAt = appliedAt.TryGetValue(patch.Key, out var at) ? at : null,
                 ProgressionState = metadata?.State,
                 ProgressionSlug = metadata?.Slug,
-                ProgressionTitle = metadata?.State is int state
-                    ? IndividualProgressionPatchCatalog.FindByState(state)?.Title
-                    : null,
+                ProgressionTitle = patch.DisplayName,
                 IncrementsProgression = metadata?.IncrementsProgression,
             });
         }
@@ -200,6 +198,7 @@ public sealed partial class MigrationService : IMigrationService
             Files = ListFiles(stackRoot, patch.Key),
             MpqRemovals = ReadMpqRemovals(stackRoot, patch.Key),
             Progression = metadata,
+            ConfigOverrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patch.Key),
         };
     }
 

@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Upload, Trash2, Pencil, Loader2, X } from 'lucide-react'
+import { Upload, Loader2, X } from 'lucide-react'
 import type { PatchFileDto } from '@/types/patch.types'
+import PatchFileListRow, { formatBytes } from './PatchFileListRow'
 
 interface PatchFileCategoryProps {
   title: string
@@ -21,17 +22,7 @@ interface PatchFileCategoryProps {
   onUpload: (category: string, files: File[], descriptions?: string[]) => void | Promise<void>
   onDelete: (category: string, fileName: string) => void
   onEdit?: (fileName: string) => void
-}
-
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`
+  headerActions?: ReactNode
 }
 
 export default function PatchFileCategory({
@@ -47,6 +38,7 @@ export default function PatchFileCategory({
   onUpload,
   onDelete,
   onEdit,
+  headerActions,
 }: PatchFileCategoryProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -86,8 +78,8 @@ export default function PatchFileCategory({
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-2">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between mb-2 gap-2">
         <h4 className="font-semibold text-gray-800 flex items-center gap-2">
           {title} <span className="text-gray-400 font-normal">({files.length})</span>
           {uploading && (
@@ -96,6 +88,7 @@ export default function PatchFileCategory({
             </span>
           )}
         </h4>
+        {headerActions}
       </div>
 
       {notice && (
@@ -146,36 +139,18 @@ export default function PatchFileCategory({
       )}
 
       {files.length > 0 && (
-        <ul className="mt-3 divide-y divide-gray-100">
+        <ul className="mt-3 space-y-2">
           {files.map((file) => (
-            <li key={file.name} className="flex items-start justify-between py-1.5 text-sm">
-              <div className="min-w-0 mr-2">
-                <span className="font-mono truncate block">{file.name}</span>
-                {file.description && (
-                  <span className="text-xs text-gray-500 block whitespace-pre-wrap">{file.description}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="text-xs text-gray-400">{formatBytes(file.size)}</span>
-                {onEdit && (
-                  <button
-                    onClick={() => onEdit(file.name)}
-                    className="text-gray-400 hover:text-blue-600"
-                    title="Edit"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => onDelete(category, file.name)}
-                  disabled={disabled}
-                  className="text-gray-400 hover:text-red-600 disabled:opacity-30"
-                  title="Delete"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </li>
+            <PatchFileListRow
+              key={file.name}
+              label={file.name}
+              size={file.size}
+              description={file.description}
+              disabled={disabled}
+              showEdit={!!onEdit}
+              onEdit={onEdit ? () => onEdit(file.name) : undefined}
+              onDelete={() => onDelete(category, file.name)}
+            />
           ))}
         </ul>
       )}

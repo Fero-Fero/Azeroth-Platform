@@ -89,6 +89,23 @@ public sealed class PatchDetailsDto
     public List<string> MpqRemovals { get; set; } = new();
 
     public PatchProgressionMetadataDto? Progression { get; set; }
+
+    /// <summary>
+    /// Parsed config overrides from <c>config/*.json</c> that will be applied to server <c>.conf</c> files.
+    /// </summary>
+    public List<PatchConfigOverrideDto> ConfigOverrides { get; set; } = new();
+}
+
+/// <summary>A single key/value override from a patch config JSON file.</summary>
+public sealed class PatchConfigOverrideDto
+{
+    public string SourceJson { get; set; } = string.Empty;
+
+    public string TargetConf { get; set; } = string.Empty;
+
+    public string Key { get; set; } = string.Empty;
+
+    public string Value { get; set; } = string.Empty;
 }
 
 /// <summary>A client MPQ file currently published to a stack's client overlay (served to players).</summary>

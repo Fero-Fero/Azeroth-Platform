@@ -1,4 +1,3 @@
-using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Services.Migrations;
@@ -11,8 +10,6 @@ namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
 internal static class PatchConfigValidator
 {
     private const string ProgressionMetadataFileName = "progression.json";
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static async Task ValidateAsync(
         string stackId,
@@ -50,18 +47,15 @@ internal static class PatchConfigValidator
                 var relativeConf = PatchServerConfigResolver.ResolveRelativeConfPath(stackRoot, baseName);
 
                 Dictionary<string, string>? overrides;
-                try
+                var json = await File.ReadAllTextAsync(jsonFile, cancellationToken);
+                var loadOutcome = PatchConfigJson.TryLoadOverrides(json, out overrides, out var parseError);
+                if (loadOutcome == ConfigOverrideLoadOutcome.Failed)
                 {
-                    var json = await File.ReadAllTextAsync(jsonFile, cancellationToken);
-                    overrides = JsonSerializer.Deserialize<Dictionary<string, string>>(json, JsonOptions);
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"{patchKey}: failed to parse {configSource}: {ex.Message}");
+                    errors.Add($"{patchKey}: failed to parse {configSource}: {parseError}");
                     continue;
                 }
 
-                if (overrides is null || overrides.Count == 0)
+                if (loadOutcome == ConfigOverrideLoadOutcome.Skipped)
                 {
                     continue;
                 }
@@ -98,7 +92,7 @@ internal static class PatchConfigValidator
                     continue;
                 }
 
-                foreach (var key in overrides.Keys)
+                foreach (var key in overrides!.Keys)
                 {
                     var check = new IndividualProgressionKeyCheckDto
                     {

@@ -26,7 +26,6 @@ public static class ProgressionRepoStructureValidator
 
         ValidateRepoRootLayout(repoRoot, errors);
 
-        var catalog = IndividualProgressionPatchCatalog.All;
         foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
         {
             var expansionName = Path.GetFileName(expansionDir);
@@ -45,24 +44,18 @@ public static class ProgressionRepoStructureValidator
             foreach (var referencePatchDir in Directory.EnumerateDirectories(expansionDir))
             {
                 var patchFolderName = Path.GetFileName(referencePatchDir);
-                var definition = ProgressionPatchFolderResolver.MatchDefinition(expansionKey, patchFolderName, catalog);
-                if (definition is null)
+                if (!ProgressionPatchNaming.TryFormatPatchKey(patchFolderName, out var stackPatchKey))
                 {
                     errors.Add(
-                        $"No stack patch matches reference patch {expansionName}/{patchFolderName}. Run progression sync to create patch folders from Azeroth-Platform-Progression.");
+                        $"Reference patch {expansionName}/{patchFolderName} has an invalid folder name (expected '<index> <label>').");
                     continue;
                 }
 
-                if (!TryFindStackPatchDir(stackRoot, definition, out var stackPatchDir, out var stackPatchKey))
+                var stackPatchDir = MigrationLayout.PatchDir(stackRoot, stackPatchKey);
+                if (!Directory.Exists(stackPatchDir))
                 {
-                    if (!PatchIndex.TryParse(definition.Index, out var index, explicitSub1: true))
-                    {
-                        errors.Add($"Invalid patch index for reference patch {expansionName}/{patchFolderName}.");
-                        continue;
-                    }
-
                     errors.Add(
-                        $"Missing stack patch folder for {expansionName}/{patchFolderName}: {PatchFolderNames.Format(index, definition.Slug)}.");
+                        $"No stack patch matches reference patch {expansionName}/{patchFolderName}. Expected {stackPatchKey}. Run progression sync to create patch folders from Azeroth-Platform-Progression.");
                     continue;
                 }
 
@@ -75,28 +68,9 @@ public static class ProgressionRepoStructureValidator
         }
     }
 
-    /// <summary>Counts patch folders under Classic/Tbc/Wotlk in the reference repository.</summary>
-    public static int CountReferencePatches(string repoRoot)
-    {
-        if (!Directory.Exists(repoRoot))
-        {
-            return 0;
-        }
-
-        var count = 0;
-        foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
-        {
-            var expansionName = Path.GetFileName(expansionDir);
-            if (FindExpansionDir(repoRoot, expansionName.ToLowerInvariant()) is null)
-            {
-                continue;
-            }
-
-            count += Directory.EnumerateDirectories(expansionDir).Count();
-        }
-
-        return count;
-    }
+    /// <summary>Counts parseable patch folders under Classic/Tbc/Wotlk in the reference repository.</summary>
+    public static int CountReferencePatches(string repoRoot) =>
+        ProgressionRepoAlignment.CountExpectedPatches(repoRoot);
 
     /// <summary>Counts stack patch folders that contain progression metadata.</summary>
     public static int CountManagedProgressionPatches(string stackRoot) =>
@@ -285,71 +259,6 @@ public static class ProgressionRepoStructureValidator
         return false;
     }
 
-    private static string? FindReferencePatchDir(string repoRoot, ProgressionPatchDefinition definition)
-    {
-        var expansionDir = FindExpansionDir(repoRoot, definition.Expansion);
-        if (expansionDir is null)
-        {
-            return null;
-        }
-
-        foreach (var patchDir in Directory.EnumerateDirectories(expansionDir))
-        {
-            if (!TryParseReferencePatchIndex(Path.GetFileName(patchDir), out var index))
-            {
-                continue;
-            }
-
-            if (index.Equals(definition.Index, StringComparison.OrdinalIgnoreCase))
-            {
-                return patchDir;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TryFindStackPatchDir(
-        string stackRoot,
-        ProgressionPatchDefinition definition,
-        out string stackPatchDir,
-        out string stackPatchKey)
-    {
-        stackPatchDir = string.Empty;
-        stackPatchKey = string.Empty;
-
-        if (!PatchIndex.TryParse(definition.Index, out var targetIndex, explicitSub1: true))
-        {
-            return false;
-        }
-
-        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
-        if (!Directory.Exists(migrationsRoot))
-        {
-            return false;
-        }
-
-        foreach (var dir in Directory.EnumerateDirectories(migrationsRoot))
-        {
-            var folderName = Path.GetFileName(dir);
-            if (!PatchFolderNames.TryParse(folderName, out var folderIndex, out _))
-            {
-                continue;
-            }
-
-            if (!folderIndex.Equals(targetIndex))
-            {
-                continue;
-            }
-
-            stackPatchKey = folderName;
-            stackPatchDir = dir;
-            return true;
-        }
-
-        return false;
-    }
-
     private static string? FindExpansionDir(string repoRoot, string expansion)
     {
         if (!Directory.Exists(repoRoot))
@@ -362,20 +271,6 @@ public static class ProgressionRepoStructureValidator
                 Path.GetFileName(dir),
                 FormatExpansionFolder(expansion),
                 StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool TryParseReferencePatchIndex(string folderName, out string index)
-    {
-        index = string.Empty;
-        var spaceIdx = folderName.IndexOf(' ');
-        var indexPart = spaceIdx >= 0 ? folderName[..spaceIdx] : folderName;
-        if (!PatchIndex.TryParse(indexPart, out _, explicitSub1: true))
-        {
-            return false;
-        }
-
-        index = indexPart;
-        return true;
     }
 
     private static string FormatExpansionFolder(string expansion) => expansion.ToLowerInvariant() switch

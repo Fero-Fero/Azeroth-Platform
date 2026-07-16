@@ -34,6 +34,40 @@ internal sealed class ProgressionSyncProgressStore
         return await JsonSerializer.DeserializeAsync<ProgressionSyncProgressState>(stream, JsonOptions, cancellationToken);
     }
 
+    public static bool IsActivelyRunning(ProgressionSyncProgressState? progress, string stackRoot) =>
+        progress is { IsRunning: true } && !IsStale(progress, stackRoot);
+
+    public static bool IsStale(ProgressionSyncProgressState progress, string stackRoot)
+    {
+        if (!progress.IsRunning)
+        {
+            return false;
+        }
+
+        var lastActivity = progress.StartedAt ?? DateTimeOffset.UtcNow;
+        var path = ProgressPath(stackRoot);
+        if (File.Exists(path))
+        {
+            var fileWrite = File.GetLastWriteTimeUtc(path);
+            if (fileWrite > lastActivity)
+            {
+                lastActivity = fileWrite;
+            }
+        }
+
+        if (DateTimeOffset.UtcNow - lastActivity > InactivityStaleAfter)
+        {
+            return true;
+        }
+
+        return progress.StartedAt.HasValue
+               && DateTimeOffset.UtcNow - progress.StartedAt.Value > AbsoluteStaleAfter;
+    }
+
+    public static TimeSpan InactivityStaleAfter { get; } = TimeSpan.FromMinutes(5);
+
+    public static TimeSpan AbsoluteStaleAfter { get; } = TimeSpan.FromMinutes(30);
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         _log.Clear();

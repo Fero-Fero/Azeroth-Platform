@@ -455,11 +455,6 @@ export const patchApi = {
       `/stacks/${stackId}/migrations/individual-progression/validate-patches`
     ),
 
-  recreateMissingProgressionPatches: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionRecreatePatchesResult>(
-      `/stacks/${stackId}/migrations/individual-progression/recreate-missing-patches`
-    ),
-
   // ===== Progression Sync =====
 
   progressionSyncStatus: (stackId: string) =>

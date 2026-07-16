@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, Trash2, Pencil, Loader2, FolderPlus, Folder, FileText } from 'lucide-react'
+import { Upload, Loader2, FolderPlus, Folder } from 'lucide-react'
 import type { PatchFileDto } from '@/types/patch.types'
+import PatchFileListRow from './PatchFileListRow'
 
 interface ContainerFileCategoryProps {
   title: string
@@ -77,17 +78,6 @@ async function collectDropItems(dataTransfer: DataTransfer): Promise<UploadItem[
   }
 
   return Array.from(dataTransfer.files).map((f) => ({ file: f, path: f.name }))
-}
-
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`
 }
 
 /** Only text DBC sources (CSV/.txt) can be edited inline; a binary .dbc upload cannot. */
@@ -177,7 +167,7 @@ export default function ContainerFileCategory({
       .map((f) => ({ file: f, path: pathFor(f) }))
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between mb-2">
         <h4 className="font-semibold text-gray-800">
           {title} <span className="text-gray-400 font-normal">({files.length})</span>
@@ -274,9 +264,18 @@ export default function ContainerFileCategory({
 
       {/* Root files */}
       {rootFiles.length > 0 && (
-        <ul className="mt-3 divide-y divide-gray-100">
+        <ul className="mt-3 space-y-2">
           {rootFiles.map((file) => (
-            <FileRow key={file.name} file={file} label={file.name} disabled={disabled} onDelete={onDelete} onEdit={onEdit} />
+            <PatchFileListRow
+              key={file.name}
+              label={file.name}
+              size={file.size}
+              description={file.description}
+              disabled={disabled}
+              showEdit={!!onEdit && isTextEditable(file.name)}
+              onEdit={onEdit ? () => onEdit(file.name) : undefined}
+              onDelete={() => onDelete(file.name)}
+            />
           ))}
         </ul>
       )}
@@ -306,15 +305,15 @@ export default function ContainerFileCategory({
                 )
               )
             }}
-            className={`mt-3 rounded-md border bg-gray-50 transition-colors ${
+            className={`mt-3 rounded-md border bg-slate-50/80 transition-colors ${
               dragContainer === sub ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
             }`}
           >
-            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-              <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                <Folder className="w-4 h-4 text-amber-500" />
+            <div className="flex items-center justify-between border-b border-gray-200 bg-white px-3 py-2.5">
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-800">
+                <Folder className="h-4 w-4 text-amber-500" />
                 {sub}
-                <span className="text-gray-400 font-normal">({subFiles.length})</span>
+                <span className="font-normal text-gray-500">({subFiles.length})</span>
               </span>
               <button
                 type="button"
@@ -328,60 +327,23 @@ export default function ContainerFileCategory({
                 <Upload className="w-3.5 h-3.5" /> Add files
               </button>
             </div>
-            <ul className="divide-y divide-gray-100 px-3">
+            <ul className="space-y-2 p-3">
               {subFiles.map((file) => (
-                <FileRow
+                <PatchFileListRow
                   key={file.name}
-                  file={file}
                   label={file.name.slice(sub.length + 1)}
+                  size={file.size}
+                  description={file.description}
                   disabled={disabled}
-                  onDelete={onDelete}
-                  onEdit={onEdit}
+                  showEdit={!!onEdit && isTextEditable(file.name)}
+                  onEdit={onEdit ? () => onEdit(file.name) : undefined}
+                  onDelete={() => onDelete(file.name)}
                 />
               ))}
             </ul>
-            <p className="px-3 py-1.5 text-[11px] text-gray-400">Drop files here to add to this container.</p>
+            <p className="px-3 pb-2 text-[11px] text-gray-500">Drop files here to add to this container.</p>
           </div>
         ))}
     </div>
-  )
-}
-
-function FileRow({
-  file,
-  label,
-  disabled,
-  onDelete,
-  onEdit,
-}: {
-  file: PatchFileDto
-  label: string
-  disabled?: boolean
-  onDelete: (fileName: string) => void
-  onEdit?: (fileName: string) => void
-}) {
-  return (
-    <li className="flex items-center justify-between py-1.5 text-sm">
-      <span className="inline-flex items-center gap-1.5 font-mono truncate mr-2">
-        <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        {label}
-      </span>
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-xs text-gray-400">{formatBytes(file.size)}</span>
-        {onEdit && isTextEditable(file.name) && (
-          <button onClick={() => onEdit(file.name)} className="text-gray-400 hover:text-blue-600" title="Edit">
-            <Pencil className="w-4 h-4" />
-          </button>
-        )}
-        <button
-          onClick={() => onDelete(file.name)}
-          disabled={disabled}
-          className="text-gray-400 hover:text-red-600 disabled:opacity-30"
-          title="Delete"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-    </li>
   )
 }

@@ -267,17 +267,6 @@ export function useValidateIndividualProgressionPatches(stackId: string) {
   })
 }
 
-export function useRecreateMissingProgressionPatches(stackId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => patchApi.recreateMissingProgressionPatches(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: patchKeys.all })
-      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId) })
-    },
-  })
-}
-
 // ===== Progression Sync Hooks =====
 
 export function useProgressionSyncStatus(stackId: string, poll = false) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Eye, CheckCircle2, AlertTriangle, FileQuestion } from 'lucide-react'
+import { Loader2, RefreshCw, Eye, CheckCircle2, AlertTriangle, FileQuestion, ChevronDown } from 'lucide-react'
 import {
   useProgressionSyncStatus,
   useRunProgressionSync,
@@ -10,6 +10,16 @@ import IgnoredFilesDialog from './IgnoredFilesDialog'
 
 interface ProgressionSyncPanelProps {
   stackId: string
+}
+
+const DESCRIPTION_EXPANDED_KEY = 'progression-sync-description-expanded-v2'
+
+function readDescriptionExpanded(): boolean {
+  try {
+    return localStorage.getItem(DESCRIPTION_EXPANDED_KEY) === 'true'
+  } catch {
+    return false
+  }
 }
 
 export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelProps) {
@@ -24,6 +34,15 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null)
   const [showInitialSyncConfirm, setShowInitialSyncConfirm] = useState(false)
   const [pollSync, setPollSync] = useState(false)
+  const [descriptionExpanded, setDescriptionExpanded] = useState(readDescriptionExpanded)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DESCRIPTION_EXPANDED_KEY, String(descriptionExpanded))
+    } catch {
+      // ignore storage errors
+    }
+  }, [descriptionExpanded])
 
   const { data: syncStatus, isLoading } = useProgressionSyncStatus(
     stackId,
@@ -129,33 +148,52 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
   return (
     <section className="rounded-lg border border-indigo-200 bg-indigo-50/30 px-5 py-4 shadow-sm space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold text-indigo-900">
-            Sync with mod-individual-progression
-          </p>
-          <p className="mt-1 max-w-2xl text-sm text-indigo-800">
-            Automatically import patch files from{' '}
-            <code className="rounded bg-indigo-100 px-1 text-xs">Azeroth-Platform-Progression</code>{' '}
-            and <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>.
-            Both repositories are updated first (<code className="rounded bg-indigo-100 px-1 text-xs">git pull</code>),
-            patch folders are created from the progression repository layout, its files are copied in, and then
-            optional module mappings are imported. Later syncs only modify managed progression patches; custom
-            patches are left unchanged.
-          </p>
-          <p className="mt-2 max-w-2xl text-xs text-indigo-700 font-mono whitespace-pre-wrap">
-            {`{BuildsPath}/{stackId}/
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={() => setDescriptionExpanded((v) => !v)}
+              className="mt-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-indigo-100/60"
+              aria-expanded={descriptionExpanded}
+              aria-label={descriptionExpanded ? 'Hide sync details' : 'Show sync details'}
+            >
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-indigo-700 transition-transform ${descriptionExpanded ? '' : '-rotate-90'}`}
+              />
+              <span className="text-sm font-semibold text-indigo-900">
+                Sync with mod-individual-progression
+              </span>
+            </button>
+          </div>
+
+          {descriptionExpanded && (
+            <div className="mt-2 space-y-2 pl-6">
+              <p className="max-w-2xl text-sm text-indigo-800">
+                Automatically import patch files from{' '}
+                <code className="rounded bg-indigo-100 px-1 text-xs">Azeroth-Platform-Progression</code>{' '}
+                and <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>.
+                Both repositories are updated first (<code className="rounded bg-indigo-100 px-1 text-xs">git pull</code>),
+                patch folders are created from the progression repository layout, its files are copied in, and then
+                optional module mappings are imported. Later syncs only modify managed progression patches; custom
+                patches are left unchanged.
+              </p>
+              <p className="max-w-2xl text-xs text-indigo-700 font-mono whitespace-pre-wrap">
+                {`{BuildsPath}/{stackId}/
 ├── azeroth-platform-progression/   ← cloned on first sync, git pull after
 ├── migrations/                       ← patch folders
 └── azerothcore-wotlk/
     └── modules/mod-individual-progression/`}
-          </p>
-          <p className="mt-2 max-w-2xl text-xs text-indigo-800">
-            The progression repository lives on the stack only — nothing is cloned beside the platform or
-            onto the host outside the stack data directory. Validation compares{' '}
-            <code className="rounded bg-indigo-100 px-1">migrations/</code> against that on-stack checkout.
-          </p>
+              </p>
+              <p className="max-w-2xl text-xs text-indigo-800">
+                The progression repository lives on the stack only — nothing is cloned beside the platform or
+                onto the host outside the stack data directory. Validation compares{' '}
+                <code className="rounded bg-indigo-100 px-1">migrations/</code> against that on-stack checkout.
+              </p>
+            </div>
+          )}
+
           {syncStatus?.lastSyncAt && (
-            <p className="mt-1 text-xs text-indigo-700">
+            <p className={`text-xs text-indigo-700 ${descriptionExpanded ? 'mt-2 pl-6' : 'mt-1 pl-6'}`}>
               Last synced: {new Date(syncStatus.lastSyncAt).toLocaleString()}
             </p>
           )}

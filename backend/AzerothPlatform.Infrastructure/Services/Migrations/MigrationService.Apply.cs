@@ -1313,7 +1313,17 @@ public sealed partial class MigrationService
                 try
                 {
                     var json = await File.ReadAllTextAsync(jsonFile, cancellationToken);
-                    overrides = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json, JsonOptions);
+                    var loadOutcome = PatchConfigJson.TryLoadOverrides(json, out overrides, out var parseError);
+                    if (loadOutcome == ConfigOverrideLoadOutcome.Failed)
+                    {
+                        AddLog(result, $"Failed to parse {Path.GetFileName(jsonFile)}: {parseError}");
+                        continue;
+                    }
+
+                    if (loadOutcome == ConfigOverrideLoadOutcome.Skipped)
+                    {
+                        continue;
+                    }
                 }
                 catch (Exception ex)
                 {
