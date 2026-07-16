@@ -177,13 +177,6 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
                 optional module mappings are imported. Later syncs only modify managed progression patches; custom
                 patches are left unchanged.
               </p>
-              <p className="max-w-2xl text-xs text-indigo-700 font-mono whitespace-pre-wrap">
-                {`{BuildsPath}/{stackId}/
-├── azeroth-platform-progression/   ← cloned on first sync, git pull after
-├── migrations/                       ← patch folders
-└── azerothcore-wotlk/
-    └── modules/mod-individual-progression/`}
-              </p>
               <p className="max-w-2xl text-xs text-indigo-800">
                 The progression repository lives on the stack only — nothing is cloned beside the platform or
                 onto the host outside the stack data directory. Validation compares{' '}
