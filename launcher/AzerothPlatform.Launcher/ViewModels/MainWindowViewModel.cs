@@ -447,15 +447,23 @@ public partial class MainWindowViewModel : ObservableObject
                 seeds.Add(ServerUrl);
             }
 
-            var currentServer = seeds.FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(currentServer))
+            var seedList = seeds
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(u => u.TrimEnd('/'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (seedList.Count == 0)
             {
                 IsBusy = false;
                 IsConnecting = false;
                 return;
             }
 
-            var result = await _reconciler.ReconcileCurrentAsync(currentServer, _shutdownCts.Token);
+            // Query every known stack portal in parallel, merge the registry, and health-ping each profile.
+            // This avoids getting stuck on a discontinued/offline saved Server URL when another seed still
+            // answers.
+            var result = await _reconciler.ReconcileAsync(seedList, _shutdownCts.Token);
             if (generation != _profileLoadGeneration)
             {
                 return;
@@ -483,7 +491,7 @@ public partial class MainWindowViewModel : ObservableObject
             IsBusy = false;
             await OnProfileSelectedAsync();
             _ = CheckLauncherUpdateAsync(ArtifactSource());
-            StartBackgroundRegistryRefresh(_state.KnownServers, generation);
+            StartBackgroundRegistryRefresh(seedList, generation);
         }
         catch (OperationCanceledException) when (_shutdownCts.IsCancellationRequested)
         {
@@ -509,7 +517,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void ApplyProfileResult(ReconcileResult result, bool preserveSelection)
+    private bool ApplyProfileResult(ReconcileResult result, bool preserveSelection)
     {
         _profilesDoc = result.Profiles;
         _state.KnownServers = result.KnownServers;
@@ -523,7 +531,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         ApplyAccentColor(_profilesDoc.AccentColor);
 
-        var selectedStackId = preserveSelection
+        var preferredStackId = preserveSelection
             ? SelectedProfile?.StackId ?? _state.SelectedProfileId
             : _state.SelectedProfileId;
 
@@ -537,9 +545,67 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowConnectingMessage));
         OnPropertyChanged(nameof(ShowNoServerMessage));
 
-        SelectedProfile = Profiles.FirstOrDefault(p => p.StackId == selectedStackId)
-            ?? Profiles.FirstOrDefault();
+        var resolved = ResolveSelectedProfile(Profiles, preferredStackId);
+        var selectionChanged = !string.Equals(resolved?.StackId, SelectedProfile?.StackId, StringComparison.Ordinal);
+        SelectedProfile = resolved;
         _suppressProfileReload = false;
+
+        MaybeRetargetPrimaryServerUrl(preferredStackId, resolved);
+        return selectionChanged;
+    }
+
+    /// <summary>
+    /// Keeps the player's saved profile when it is still reachable; otherwise picks the first healthy
+    /// profile (by sort order), then falls back to any published profile.
+    /// </summary>
+    private static LauncherProfile? ResolveSelectedProfile(
+        IEnumerable<LauncherProfile> profiles,
+        string? preferredStackId)
+    {
+        var ordered = profiles.OrderBy(p => p.SortOrder).ToList();
+        static bool IsAvailable(LauncherProfile profile) =>
+            profile.Healthy && !string.IsNullOrWhiteSpace(profile.PortalUrl);
+
+        var preferred = ordered.FirstOrDefault(profile =>
+            string.Equals(profile.StackId, preferredStackId, StringComparison.Ordinal));
+
+        if (preferred is not null && IsAvailable(preferred))
+        {
+            return preferred;
+        }
+
+        return ordered.FirstOrDefault(IsAvailable)
+            ?? ordered.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// When the saved profile or primary Server URL is unavailable, point the launcher at the profile we
+    /// auto-selected so the player is not forced to edit Settings manually.
+    /// </summary>
+    private void MaybeRetargetPrimaryServerUrl(string? preferredStackId, LauncherProfile? resolved)
+    {
+        if (resolved is not { Healthy: true } || string.IsNullOrWhiteSpace(resolved.PortalUrl))
+        {
+            return;
+        }
+
+        if (string.Equals(resolved.StackId, preferredStackId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var portal = resolved.PortalUrl.TrimEnd('/');
+        var saved = NormalizePortalUrl(_state.ServerUrl);
+        if (saved is not null && string.Equals(saved, portal, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _state.ServerUrl = portal;
+        ServerUrl = portal;
+        _state.KnownServers.Remove(portal);
+        _state.KnownServers.Insert(0, portal);
+        _stateStore.Save(_state);
     }
 
     private void StartBackgroundRegistryRefresh(IEnumerable<string> seeds, int generation)
@@ -566,8 +632,12 @@ public partial class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            ApplyProfileResult(result, preserveSelection: true);
+            var selectionChanged = ApplyProfileResult(result, preserveSelection: true);
             _ = CheckLauncherUpdateAsync(ArtifactSource());
+            if (selectionChanged)
+            {
+                await OnProfileSelectedAsync();
+            }
         }
         catch (OperationCanceledException)
         {
