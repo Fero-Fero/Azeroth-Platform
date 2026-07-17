@@ -240,8 +240,12 @@ public static class MigrationLayout
         Directory.CreateDirectory(MpqDir(stackRoot, patchKey));
         Directory.CreateDirectory(ConfigDir(stackRoot, patchKey));
         Directory.CreateDirectory(PatchLuaDir(stackRoot, patchKey));
+        Directory.CreateDirectory(PatchNewsDir(stackRoot, patchKey));
         SeedPatchDescriptionIfMissing(stackRoot, patchKey);
     }
+
+    public static string PatchNewsDir(string stackRoot, string patchKey) =>
+        Path.Combine(PatchDir(stackRoot, patchKey), "news");
 
     /// <summary>Writes the default placeholder description for built-in expansion patches when none exists.</summary>
     public static void SeedPatchDescriptionIfMissing(string stackRoot, string patchKey)

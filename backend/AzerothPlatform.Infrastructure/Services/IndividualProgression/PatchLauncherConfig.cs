@@ -71,4 +71,29 @@ internal static class PatchLauncherConfig
 
         return true;
     }
+
+    public static bool TryReadTheme(string configPath, out string? theme, out string? error)
+    {
+        theme = null;
+        error = null;
+        if (!File.Exists(configPath))
+        {
+            error = "launcher.json not found.";
+            return false;
+        }
+
+        return TryParseTheme(File.ReadAllText(configPath), out theme, out error);
+    }
+
+    public static bool TryNormalizeTheme(string? theme, out string normalized)
+    {
+        normalized = string.Empty;
+        if (!ValidateTheme(theme?.Trim(), out _))
+        {
+            return false;
+        }
+
+        normalized = theme!.Trim().ToLowerInvariant();
+        return true;
+    }
 }

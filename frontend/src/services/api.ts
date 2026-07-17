@@ -311,6 +311,32 @@ export const patchApi = {
       `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/news-preview`
     ),
 
+  saveNews: (
+    stackId: string,
+    patchKey: string,
+    request: import('@/types/patch.types').SavePatchNewsRequest
+  ) =>
+    apiClient.put<import('@/types/patch.types').PatchDetailsDto>(
+      `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/news`,
+      request
+    ),
+
+  uploadNewsCover: (stackId: string, patchKey: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<import('@/types/patch.types').PatchDetailsDto>(
+      `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/news/cover`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    )
+  },
+
+  saveLauncherTheme: (stackId: string, patchKey: string, theme: string) =>
+    apiClient.put<import('@/types/patch.types').PatchDetailsDto>(
+      `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/launcher-theme`,
+      { theme }
+    ),
+
   saveDescription: (stackId: string, patchKey: string, content: string) =>
     apiClient.put<import('@/types/patch.types').PatchDetailsDto>(
       `/stacks/${stackId}/migrations/${encodeURIComponent(patchKey)}/description`,

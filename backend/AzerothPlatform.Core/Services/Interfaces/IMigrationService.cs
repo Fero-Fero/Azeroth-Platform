@@ -48,6 +48,28 @@ public interface IMigrationService
     /// <summary>Saves description.md / description.txt for a patch.</summary>
     Task<PatchDetailsDto> SavePatchDescriptionAsync(string stackId, string patchKey, string content, CancellationToken cancellationToken = default);
 
+    /// <summary>Saves a patch news article (<c>news/article.json</c> + <c>news/article.html</c>).</summary>
+    Task<PatchDetailsDto> SavePatchNewsAsync(
+        string stackId,
+        string patchKey,
+        SavePatchNewsRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Uploads or replaces the patch news cover image.</summary>
+    Task<PatchDetailsDto> UploadPatchNewsCoverAsync(
+        string stackId,
+        string patchKey,
+        Stream content,
+        string fileName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Writes <c>config/launcher.json</c> theme override for a patch.</summary>
+    Task<PatchDetailsDto> SavePatchLauncherThemeAsync(
+        string stackId,
+        string patchKey,
+        string theme,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Creates a new patch folder ("{level}_{name}") with the standard sub-folders.</summary>
     Task<PatchSummaryDto> CreatePatchAsync(string stackId, CreatePatchRequest request, CancellationToken cancellationToken = default);
 

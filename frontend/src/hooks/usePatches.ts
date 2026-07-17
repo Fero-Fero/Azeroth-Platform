@@ -273,6 +273,45 @@ export function useSavePatchDescription(stackId: string) {
   })
 }
 
+export function useSavePatchNews(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      patchKey,
+      ...request
+    }: { patchKey: string } & import('@/types/patch.types').SavePatchNewsRequest) =>
+      patchApi.saveNews(stackId, patchKey, request),
+    onSuccess: (res, { patchKey }) => {
+      queryClient.setQueryData(patchKeys.detail(stackId, patchKey), res.data)
+      queryClient.invalidateQueries({ queryKey: patchKeys.newsPreview(stackId, patchKey) })
+      queryClient.invalidateQueries({ queryKey: patchKeys.overview(stackId) })
+    },
+  })
+}
+
+export function useUploadPatchNewsCover(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ patchKey, file }: { patchKey: string; file: File }) =>
+      patchApi.uploadNewsCover(stackId, patchKey, file),
+    onSuccess: (res, { patchKey }) => {
+      queryClient.setQueryData(patchKeys.detail(stackId, patchKey), res.data)
+      queryClient.invalidateQueries({ queryKey: patchKeys.newsPreview(stackId, patchKey) })
+    },
+  })
+}
+
+export function useSavePatchLauncherTheme(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ patchKey, theme }: { patchKey: string; theme: string }) =>
+      patchApi.saveLauncherTheme(stackId, patchKey, theme),
+    onSuccess: (res, { patchKey }) => {
+      queryClient.setQueryData(patchKeys.detail(stackId, patchKey), res.data)
+    },
+  })
+}
+
 export function useBootstrapIndividualProgression(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({

@@ -199,6 +199,16 @@ public sealed partial class MigrationService : IMigrationService
             patchNews = newsArticle;
         }
 
+        string? launcherTheme = null;
+        var hasLauncherTheme = false;
+        var launcherConfigPath = Path.Combine(MigrationLayout.ConfigDir(stackRoot, patch.Key), PatchLauncherConfig.ConfigFileName);
+        if (File.Exists(launcherConfigPath)
+            && PatchLauncherConfig.TryReadTheme(launcherConfigPath, out var theme, out _))
+        {
+            hasLauncherTheme = true;
+            launcherTheme = theme;
+        }
+
         return new PatchDetailsDto
         {
             Key = patch.Key,
@@ -215,41 +225,49 @@ public sealed partial class MigrationService : IMigrationService
             ConfigOverrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patch.Key),
             HasPatchNews = patchNews is not null,
             PatchNewsTitle = patchNews?.Title,
+            HasLauncherTheme = hasLauncherTheme,
+            LauncherTheme = launcherTheme,
         };
     }
 
-    public Task<PatchNewsPreviewDto> GetPatchNewsPreviewAsync(
+    public async Task<PatchNewsPreviewDto> GetPatchNewsPreviewAsync(
         string stackId,
         string patchKey,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var stack = await GetStackAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
-        RequirePatch(stackRoot, patchKey);
+        var patch = RequirePatch(stackRoot, patchKey);
 
         if (!PatchNewsReader.TryReadArticle(stackRoot, patchKey, out var article, out var coverPath, out var error))
         {
-            return Task.FromResult(new PatchNewsPreviewDto
+            return new PatchNewsPreviewDto
             {
                 Available = false,
                 Error = error,
-            });
+            };
         }
 
         var encodedKey = Uri.EscapeDataString(patchKey);
-        return Task.FromResult(new PatchNewsPreviewDto
+        var date = patch.Level <= stack.AppliedPatchLevel
+            ? article.Date
+            : PatchNewsWriter.TodayIsoDate();
+
+        return new PatchNewsPreviewDto
         {
             Available = true,
             Id = article.Id,
             Title = article.Title,
-            Date = article.Date,
+            Date = date,
             Tag = article.Tag,
             Html = PatchNewsReader.RewriteHtmlForPreview(article.Html, stackId, patchKey),
             HasCover = coverPath is not null,
             CoverUrl = coverPath is not null
                 ? $"/api/stacks/{stackId}/migrations/{encodedKey}/news-cover"
                 : null,
-        });
+            DateLocked = patch.Level <= stack.AppliedPatchLevel,
+        };
     }
 
     public Task<(string Path, string ContentType)?> ResolvePatchNewsAssetAsync(
@@ -324,6 +342,63 @@ public sealed partial class MigrationService : IMigrationService
         var stackRoot = GetStackRoot(stackId);
         RequirePatch(stackRoot, patchKey);
         MigrationLayout.SavePatchDescription(stackRoot, patchKey, content);
+        return await GetPatchAsync(stackId, patchKey, cancellationToken);
+    }
+
+    public async Task<PatchDetailsDto> SavePatchNewsAsync(
+        string stackId,
+        string patchKey,
+        SavePatchNewsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await GetStackAsync(stackId, cancellationToken);
+        var stackRoot = GetStackRoot(stackId);
+        var patch = RequirePatch(stackRoot, patchKey);
+
+        var date = ResolvePatchNewsDateForSave(stackRoot, patchKey, patch.Level, stack.AppliedPatchLevel);
+        PatchNewsWriter.SaveArticle(stackRoot, patchKey, request, date);
+        return await GetPatchAsync(stackId, patchKey, cancellationToken);
+    }
+
+    public async Task<PatchDetailsDto> UploadPatchNewsCoverAsync(
+        string stackId,
+        string patchKey,
+        Stream content,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+        PatchNewsWriter.SaveCover(stackRoot, patchKey, content, fileName);
+        return await GetPatchAsync(stackId, patchKey, cancellationToken);
+    }
+
+    public async Task<PatchDetailsDto> SavePatchLauncherThemeAsync(
+        string stackId,
+        string patchKey,
+        string theme,
+        CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+
+        if (!PatchLauncherConfig.TryNormalizeTheme(theme, out var normalized))
+        {
+            throw new ArgumentException("Theme must be one of: classic, tbc, wotlk.");
+        }
+
+        var configDir = MigrationLayout.ConfigDir(stackRoot, patchKey);
+        Directory.CreateDirectory(configDir);
+        var json = JsonSerializer.Serialize(
+            new Dictionary<string, string> { ["theme"] = normalized },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+        await File.WriteAllTextAsync(
+            Path.Combine(configDir, PatchLauncherConfig.ConfigFileName),
+            json + Environment.NewLine,
+            cancellationToken);
+
         return await GetPatchAsync(stackId, patchKey, cancellationToken);
     }
 
@@ -1827,6 +1902,22 @@ public sealed partial class MigrationService : IMigrationService
         return nextLevel.HasValue && level == nextLevel.Value ? PatchStatus.Next : PatchStatus.Locked;
     }
 
+    private static string ResolvePatchNewsDateForSave(
+        string stackRoot,
+        string patchKey,
+        int patchLevel,
+        int appliedPatchLevel)
+    {
+        if (patchLevel <= appliedPatchLevel
+            && PatchNewsReader.TryReadArticle(stackRoot, patchKey, out var existing, out _, out _)
+            && !string.IsNullOrWhiteSpace(existing.Date))
+        {
+            return existing.Date.Trim();
+        }
+
+        return PatchNewsWriter.TodayIsoDate();
+    }
+
     private static (int Sql, int Dbc, int Map, int Mpq) CountFiles(string stackRoot, string patchKey)
     {
         var sql = MigrationLayout.SqlDatabases.Keys.Sum(database =>
@@ -1851,8 +1942,35 @@ public sealed partial class MigrationService : IMigrationService
         AddCategoryFiles(files, MigrationLayout.MpqDir(stackRoot, patchKey), "mpq", stackRoot, patchKey);
         AddCategoryFiles(files, MigrationLayout.ConfigDir(stackRoot, patchKey), "config");
         AddLuaCategoryFiles(files, MigrationLayout.PatchLuaDir(stackRoot, patchKey));
+        AddNewsCategoryFiles(files, MigrationLayout.PatchNewsDir(stackRoot, patchKey));
 
         return files;
+    }
+
+    private static void AddNewsCategoryFiles(List<PatchFileDto> target, string newsDir)
+    {
+        if (!Directory.Exists(newsDir))
+        {
+            return;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(newsDir, "*", SearchOption.AllDirectories)
+                     .OrderBy(p => p, StringComparer.Ordinal))
+        {
+            var name = Path.GetFileName(path);
+            if (name.StartsWith('.'))
+            {
+                continue;
+            }
+
+            var info = new FileInfo(path);
+            target.Add(new PatchFileDto
+            {
+                Category = "news",
+                Name = Path.GetRelativePath(newsDir, path).Replace('\\', '/'),
+                Size = info.Length,
+            });
+        }
     }
 
     private static void AddLuaCategoryFiles(List<PatchFileDto> target, string luaDir)

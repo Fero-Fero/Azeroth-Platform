@@ -190,8 +190,10 @@ export default function ProgressionSyncPanel({ stackId, onReapplyAllRecommended 
                 <code className="rounded bg-indigo-100 px-1 text-xs">Azeroth-Platform-Progression</code>{' '}
                 and <code className="rounded bg-indigo-100 px-1 text-xs">mod-individual-progression</code>.
                 Both repositories are updated first (<code className="rounded bg-indigo-100 px-1 text-xs">git pull</code>),
-                patch folders are created from the progression repository layout, its files are copied in, and then
-                optional module mappings are imported. Later syncs only modify managed progression patches; custom
+                patch folders are created from the progression repository layout, its files are copied in
+                (including <code className="rounded bg-indigo-100 px-1 text-xs">news/</code> articles and{' '}
+                <code className="rounded bg-indigo-100 px-1 text-xs">config/launcher.json</code> themes),
+                and then optional module mappings are imported. Later syncs only modify managed progression patches; custom
                 patches are left unchanged.
               </p>
               <p className="max-w-2xl text-xs text-indigo-800">

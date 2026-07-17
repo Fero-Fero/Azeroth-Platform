@@ -15,7 +15,10 @@ export interface NewsPreviewArticle {
 }
 
 function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|blob):|\/|data:image\/)/i,
+  })
 }
 
 /** Fixed-size card as shown in the launcher Play tab news strip (156×210). */
@@ -40,8 +43,8 @@ export function LauncherNewsCardPreview({ article }: { article: NewsPreviewArtic
           {article.date && <div className="launcher-news-card__date">{article.date}</div>}
         </div>
       </div>
-      <p className="mt-3 text-xs text-gray-500">
-        Launcher card — cover, title, and date only (156×210 px).
+      <p className="launcher-news-preview-strip__caption">
+        Launcher card at 156×210 px proportions — scales with preview width.
       </p>
     </div>
   )

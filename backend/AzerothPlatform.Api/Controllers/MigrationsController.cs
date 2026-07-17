@@ -151,6 +151,51 @@ public class MigrationsController : ControllerBase
         string stackId, string patchKey, [FromBody] SavePatchDescriptionRequest request, CancellationToken cancellationToken)
         => Execute(() => _migrations.SavePatchDescriptionAsync(stackId, patchKey, request?.Content ?? string.Empty, cancellationToken));
 
+    /// <summary>Saves a patch news article (news/article.json + news/article.html).</summary>
+    [HttpPut("{patchKey}/news")]
+    public Task<IActionResult> SavePatchNews(
+        string stackId,
+        string patchKey,
+        [FromBody] SavePatchNewsRequest request,
+        CancellationToken cancellationToken)
+        => Execute(() => _migrations.SavePatchNewsAsync(stackId, patchKey, request, cancellationToken));
+
+    /// <summary>Uploads or replaces the patch news cover image.</summary>
+    [HttpPost("{patchKey}/news/cover")]
+    public Task<IActionResult> UploadPatchNewsCover(
+        string stackId,
+        string patchKey,
+        IFormFile file,
+        CancellationToken cancellationToken)
+        => Execute(async () =>
+        {
+            if (file is null || file.Length == 0)
+            {
+                throw new ArgumentException("Cover image file is required.");
+            }
+
+            await using var stream = file.OpenReadStream();
+            return await _migrations.UploadPatchNewsCoverAsync(
+                stackId,
+                patchKey,
+                stream,
+                file.FileName,
+                cancellationToken);
+        });
+
+    /// <summary>Writes config/launcher.json theme override for a patch.</summary>
+    [HttpPut("{patchKey}/launcher-theme")]
+    public Task<IActionResult> SavePatchLauncherTheme(
+        string stackId,
+        string patchKey,
+        [FromBody] SavePatchLauncherThemeRequest request,
+        CancellationToken cancellationToken)
+        => Execute(() => _migrations.SavePatchLauncherThemeAsync(
+            stackId,
+            patchKey,
+            request?.Theme ?? string.Empty,
+            cancellationToken));
+
     /// <summary>Sets which published MPQ files this patch removes from the client overlay on apply.</summary>
     [HttpPut("{patchKey}/mpq-removals")]
     public Task<IActionResult> SetMpqRemovals(string stackId, string patchKey, [FromBody] SetMpqRemovalsRequest request, CancellationToken cancellationToken)

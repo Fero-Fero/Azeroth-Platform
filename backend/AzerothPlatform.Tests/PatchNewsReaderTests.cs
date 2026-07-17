@@ -1,6 +1,5 @@
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.IndividualProgression;
-using AzerothPlatform.Infrastructure.Services.Migrations;
 using FluentAssertions;
 using Xunit;
 
@@ -120,6 +119,73 @@ public sealed class PatchNewsReaderTests
 
         PatchNewsReader.ResolveCoverImagePath(stack.Path, patchKey)
             .Should().EndWith("cover.png");
+    }
+
+    [Fact]
+    public void SaveArticle_writes_json_and_html()
+    {
+        using var stack = new TempDirectory();
+        var patchKey = "patch 1.1 Molten Core & Onyxia";
+        PatchNewsWriter.SaveArticle(stack.Path, patchKey, new SavePatchNewsRequest
+        {
+            Id = "progression-1-1-molten-core-onyxia",
+            Title = "Fire and Shadow",
+            Date = "2005-02-12",
+            Tag = "patch",
+            Html = "<p>The molten core bellows.</p>",
+        });
+
+        PatchNewsReader.TryReadArticle(stack.Path, patchKey, out var article, out _, out var error)
+            .Should().BeTrue(error);
+
+        article.Title.Should().Be("Fire and Shadow");
+        article.Html.Should().Contain("molten core bellows");
+        File.Exists(Path.Combine(stack.Path, "migrations", patchKey, "news", "article.html")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void TryStampDate_updates_article_json_date()
+    {
+        using var stack = new TempDirectory();
+        var patchKey = "patch 1.0 Start";
+        PatchNewsWriter.SaveArticle(stack.Path, patchKey, new SavePatchNewsRequest
+        {
+            Id = "progression-1-0-start",
+            Title = "Welcome",
+            Date = "2004-11-23",
+            Html = "<p>Hi</p>",
+        });
+
+        PatchNewsWriter.TryStampDate(stack.Path, patchKey, "2026-07-18", out var error)
+            .Should().BeTrue(error);
+
+        PatchNewsReader.TryReadArticle(stack.Path, patchKey, out var article, out _, out _)
+            .Should().BeTrue();
+
+        article.Date.Should().Be("2026-07-18");
+    }
+
+    [Fact]
+    public void SaveArticle_honors_date_override()
+    {
+        using var stack = new TempDirectory();
+        var patchKey = "patch 1.1 Molten Core & Onyxia";
+        PatchNewsWriter.SaveArticle(
+            stack.Path,
+            patchKey,
+            new SavePatchNewsRequest
+            {
+                Id = "progression-1-1-molten-core-onyxia",
+                Title = "Fire and Shadow",
+                Date = "2005-02-12",
+                Html = "<p>Test</p>",
+            },
+            "2026-07-18");
+
+        PatchNewsReader.TryReadArticle(stack.Path, patchKey, out var article, out _, out _)
+            .Should().BeTrue();
+
+        article.Date.Should().Be("2026-07-18");
     }
 
     private sealed class TempDirectory : IDisposable

@@ -1448,6 +1448,13 @@ public sealed partial class MigrationService
             return false;
         }
 
+        if (!PatchNewsWriter.TryStampDate(stackRoot, patchKey, PatchNewsWriter.TodayIsoDate(), out var stampError)
+            || !PatchNewsReader.TryReadArticle(stackRoot, patchKey, out article, out coverPath, out error))
+        {
+            AddLog(result, $"Failed to publish patch news: {stampError ?? error}");
+            return false;
+        }
+
         var applied = false;
         await RunStageAsync("patch-news", result, async () =>
         {

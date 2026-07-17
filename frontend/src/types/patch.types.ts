@@ -42,6 +42,17 @@ export interface PatchDetailsDto {
   configOverrides?: PatchConfigOverrideDto[]
   hasPatchNews?: boolean
   patchNewsTitle?: string | null
+  launcherTheme?: string | null
+  hasLauncherTheme?: boolean
+}
+
+export interface SavePatchNewsRequest {
+  id: string
+  title: string
+  date?: string | null
+  tag?: string | null
+  sortOrder?: number
+  html: string
 }
 
 export interface PatchNewsPreviewDto {
@@ -54,6 +65,7 @@ export interface PatchNewsPreviewDto {
   html?: string | null
   hasCover: boolean
   coverUrl?: string | null
+  dateLocked?: boolean
 }
 
 export interface PatchConfigOverrideDto {

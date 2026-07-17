@@ -100,6 +100,12 @@ public sealed class PatchDetailsDto
 
     /// <summary>Headline from <c>news/article.json</c> when present.</summary>
     public string? PatchNewsTitle { get; set; }
+
+    /// <summary>Launcher theme from <c>config/launcher.json</c> when present (classic/tbc/wotlk).</summary>
+    public string? LauncherTheme { get; set; }
+
+    /// <summary>Whether <c>config/launcher.json</c> exists on this patch.</summary>
+    public bool HasLauncherTheme { get; set; }
 }
 
 /// <summary>Preview of a patch-authored launcher news article before apply.</summary>
@@ -123,6 +129,9 @@ public sealed class PatchNewsPreviewDto
 
     /// <summary>Relative API URL to the patch news cover image for preview.</summary>
     public string? CoverUrl { get; set; }
+
+    /// <summary>When true, the article date was fixed at patch apply and cannot be edited.</summary>
+    public bool DateLocked { get; set; }
 }
 
 /// <summary>A single key/value override from a patch config JSON file.</summary>
@@ -289,4 +298,21 @@ public sealed class ImportPatchCollectionResultDto
 public sealed class SavePatchDescriptionRequest
 {
     public string Content { get; set; } = string.Empty;
+}
+
+/// <summary>Request to save a patch player-facing news article.</summary>
+public sealed class SavePatchNewsRequest
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Date { get; set; }
+    public string? Tag { get; set; }
+    public int SortOrder { get; set; }
+    public string Html { get; set; } = string.Empty;
+}
+
+/// <summary>Request to save a patch launcher theme override.</summary>
+public sealed class SavePatchLauncherThemeRequest
+{
+    public string Theme { get; set; } = string.Empty;
 }

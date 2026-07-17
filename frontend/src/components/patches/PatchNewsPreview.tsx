@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Eye, LayoutGrid, Loader2, Newspaper, X } from 'lucide-react'
+import { LayoutGrid, Loader2, Newspaper, X } from 'lucide-react'
 import { usePatchNewsPreview } from '@/hooks/usePatches'
+import { usePatchNewsPreviewMedia } from '@/hooks/usePatchNewsPreviewMedia'
 import {
   LauncherNewsCardPreview,
   LauncherNewsReadingPreview,
@@ -15,44 +16,19 @@ interface PatchNewsPreviewProps {
 
 type PreviewMode = 'card' | 'article'
 
-export function PatchNewsPreviewButton({
-  hasPatchNews,
-  patchNewsTitle,
-  onOpen,
-}: {
-  hasPatchNews: boolean
-  patchNewsTitle?: string | null
-  onOpen: () => void
-}) {
-  if (!hasPatchNews) {
-    return null
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={patchNewsTitle ? `Preview "${patchNewsTitle}"` : 'Preview patch news article'}
-      className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-    >
-      <Eye className="h-3.5 w-3.5" />
-      Preview news
-    </button>
-  )
-}
-
 export default function PatchNewsPreview({
   stackId,
   patchKey,
   open,
   onClose,
 }: PatchNewsPreviewProps) {
-  const [mode, setMode] = useState<PreviewMode>('card')
+  const [mode, setMode] = useState<PreviewMode>('article')
   const { data: preview, isLoading, isError, error } = usePatchNewsPreview(stackId, patchKey, open)
+  const { coverUrl, html, loadingMedia } = usePatchNewsPreviewMedia(preview, open)
 
   useEffect(() => {
     if (open) {
-      setMode('card')
+      setMode('article')
     }
   }, [open, patchKey])
 
@@ -61,15 +37,17 @@ export default function PatchNewsPreview({
   }
 
   const article =
-    preview?.available && preview.html
+    preview?.available && html
       ? {
           title: preview.title ?? 'Untitled',
           date: preview.date,
           tag: preview.tag,
-          html: preview.html,
-          coverUrl: preview.hasCover ? preview.coverUrl : null,
+          html,
+          coverUrl,
         }
       : null
+
+  const showContentLoading = isLoading || (preview?.available && loadingMedia)
 
   return (
     <div
@@ -80,7 +58,9 @@ export default function PatchNewsPreview({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-950 shadow-2xl"
+        className={`flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-950 shadow-2xl ${
+          mode === 'card' ? 'max-w-md' : 'max-w-3xl'
+        }`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-gray-800 px-5 py-4">
@@ -119,18 +99,6 @@ export default function PatchNewsPreview({
           <div className="flex gap-1 border-b border-gray-800 bg-gray-900/50 px-5">
             <button
               type="button"
-              onClick={() => setMode('card')}
-              className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors -mb-px ${
-                mode === 'card'
-                  ? 'border-blue-500 text-blue-300'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Card
-            </button>
-            <button
-              type="button"
               onClick={() => setMode('article')}
               className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors -mb-px ${
                 mode === 'article'
@@ -141,11 +109,23 @@ export default function PatchNewsPreview({
               <Newspaper className="h-4 w-4" />
               Full article
             </button>
+            <button
+              type="button"
+              onClick={() => setMode('card')}
+              className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors -mb-px ${
+                mode === 'card'
+                  ? 'border-blue-500 text-blue-300'
+                  : 'border-transparent text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              Card
+            </button>
           </div>
         )}
 
         <div className="overflow-y-auto px-5 py-4">
-          {isLoading && (
+          {showContentLoading && (
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
             </div>
@@ -163,17 +143,17 @@ export default function PatchNewsPreview({
             </p>
           )}
 
-          {!isLoading && article && mode === 'card' && (
-            <div className="flex justify-center py-2">
+          {!showContentLoading && article && mode === 'card' && (
+            <div className="launcher-news-card-preview-host">
               <LauncherNewsCardPreview article={article} />
             </div>
           )}
 
-          {!isLoading && article && mode === 'article' && (
+          {!showContentLoading && article && mode === 'article' && (
             <LauncherNewsReadingPreview article={article} />
           )}
 
-          {!isLoading && preview?.available && (
+          {!showContentLoading && preview?.available && (
             <p className="mt-6 text-xs text-gray-500">
               Published to the launcher and armory news feed when this patch is applied.
             </p>
