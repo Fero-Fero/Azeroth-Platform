@@ -9,6 +9,34 @@ export interface DockerDiskUsageDto {
   reclaimableBytes: number
   dockerImagesReclaimableBytes: number
   dockerBuildCacheReclaimableBytes: number
+  dockerVolumesBytes: number
+  dockerContainersBytes: number
+  dockerVolumesReclaimableBytes: number
+  dockerContainersReclaimableBytes: number
+}
+
+export interface DockerDiskUsageBreakdownDto {
+  dockerImagesBytes: number
+  dockerImagesCount: number
+  activeImagesBytes: number
+  activeImagesCount: number
+  reclaimableImagesBytes: number
+  reclaimableImagesCount: number
+  dockerVolumesBytes: number
+  dockerVolumesCount: number
+  activeVolumesBytes: number
+  activeVolumesCount: number
+  dockerBuildCacheBytes: number
+  dockerContainersBytes: number
+  managedBuildCheckoutBytes: number
+  managedBuildCheckoutCount: number
+  orphanedBuildCheckoutBytes: number
+  orphanedBuildCheckoutCount: number
+  danglingLayerBytes: number
+  danglingLayerCount: number
+  reclaimableBytes: number
+  activeImages: StackDockerImageDto[]
+  activeVolumes: StackDockerVolumeDto[]
 }
 
 export interface DockerReclaimableBreakdownDto {
@@ -59,6 +87,7 @@ export interface StackDockerVolumeDto {
 
 export interface StackDockerOverviewDto {
   diskUsage?: DockerDiskUsageDto | null
+  diskUsageBreakdown?: DockerDiskUsageBreakdownDto | null
   reclaimableBreakdown?: DockerReclaimableBreakdownDto | null
   buildFiles?: StackDockerBuildFilesDto | null
   images: StackDockerImageDto[]
@@ -69,6 +98,60 @@ export interface StackDockerOverviewDto {
   buildCacheBytes: number
   reclaimableBytes: number
   totalBytes: number
+}
+
+export interface DockerVolumeCleanupResultDto {
+  success: boolean
+  message: string
+  freedBytes: number
+  deletedVolumes: number
+  deletedFiles: number
+}
+
+export interface DockerVolumeAuditDuplicateCopyDto {
+  label: string
+  managerPath: string
+  managerBytes: number
+  volumeName: string
+  volumeBytes: number
+  detail: string
+}
+
+export interface DockerVolumeAuditOrphanVolumeDto {
+  volumeName: string
+  inferredStackId?: string | null
+  sizeBytes?: number | null
+  linkCount: number
+  isSafeToDelete: boolean
+  reason: string
+}
+
+export interface DockerVolumeAuditStaleFileDto {
+  volumeName: string
+  relativePath: string
+  sizeBytes: number
+  reason: string
+  isSafeToDelete: boolean
+}
+
+export interface DockerVolumeAuditDriftNoteDto {
+  category: string
+  detail: string
+}
+
+export interface DockerVolumeAuditDto {
+  auditedAt: string
+  duplicateCopies: DockerVolumeAuditDuplicateCopyDto[]
+  orphanVolumes: DockerVolumeAuditOrphanVolumeDto[]
+  staleOverlayFiles: DockerVolumeAuditStaleFileDto[]
+  driftNotes: DockerVolumeAuditDriftNoteDto[]
+  reclaimableBytes: number
+  reclaimableItemCount: number
+}
+
+export interface DockerVolumeCleanupRequestDto {
+  orphanVolumeNames: string[]
+  staleOverlayPaths: string[]
 }
 
 export interface StackDockerDeleteResultDto {

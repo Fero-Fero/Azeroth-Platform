@@ -5,6 +5,7 @@ import { stackKeys } from '@/hooks/useStacks'
 export const dockerKeys = {
   disk: ['docker', 'disk'] as const,
   overview: (stackId: string) => [...stackKeys.detail(stackId), 'docker'] as const,
+  volumeAudit: (stackId: string) => [...stackKeys.detail(stackId), 'docker', 'volume-audit'] as const,
 }
 
 export function useDockerDiskUsage(enabled = true) {
@@ -65,5 +66,26 @@ export function useDeleteDockerVolume(stackId: string) {
   return useMutation({
     mutationFn: (volumeName: string) => stackApi.deleteDockerVolume(stackId, volumeName),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: dockerKeys.overview(stackId) }),
+  })
+}
+
+export function useDockerVolumeAudit(stackId: string) {
+  return useQuery({
+    queryKey: dockerKeys.volumeAudit(stackId),
+    queryFn: async () => (await stackApi.getDockerVolumeAudit(stackId)).data,
+    enabled: false,
+  })
+}
+
+export function useDockerVolumeAuditCleanup(stackId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (request: import('@/types/docker.types').DockerVolumeCleanupRequestDto) =>
+      stackApi.cleanupDockerVolumeAudit(stackId, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: dockerKeys.volumeAudit(stackId) })
+      queryClient.invalidateQueries({ queryKey: dockerKeys.overview(stackId) })
+      queryClient.invalidateQueries({ queryKey: dockerKeys.disk })
+    },
   })
 }

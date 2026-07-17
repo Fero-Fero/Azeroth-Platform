@@ -144,4 +144,25 @@ public interface IRemoteEngineService
         string localSourcePath,
         string containerDestinationPath,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists regular files in a named volume as paths relative to the volume root with byte sizes.
+    /// Uses a throwaway read-only container; intended for small managed trees (e.g. client overlay).
+    /// </summary>
+    Task<IReadOnlyList<VolumeFileEntry>> ListVolumeFilesAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lists files in a named volume on the local daemon (no stack context).</summary>
+    Task<IReadOnlyList<VolumeFileEntry>> ListLocalVolumeFilesAsync(
+        string volumeName,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>A file inside a Docker named volume (path relative to volume root).</summary>
+public sealed class VolumeFileEntry
+{
+    public string RelativePath { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
 }

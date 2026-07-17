@@ -63,6 +63,26 @@ public static class DockerComposeOverrideGenerator
     public static string LogsVolumeName(string stackId) => $"acore-{stackId}-logs";
 
     /// <summary>
+    /// All Docker named volumes owned by a stack (external per-stack volumes plus compose-managed DB/client-data).
+    /// Used when deleting a stack to reclaim disk space on the engine.
+    /// </summary>
+    public static IEnumerable<string> GetAllStackVolumeNames(string stackId)
+    {
+        var project = GetComposeProjectName(stackId);
+        yield return ModulesVolumeName(stackId);
+        yield return LuaVolumeName(stackId);
+        yield return EtcVolumeName(stackId);
+        yield return LogsVolumeName(stackId);
+        yield return ClientBaseVolumeName(stackId);
+        yield return ClientOverlayVolumeName(stackId);
+        yield return ClientCacheVolumeName(stackId);
+        yield return ClientLauncherDistVolumeName(stackId);
+        yield return ArmoryAssetsVolumeName(stackId);
+        yield return $"{project}_ac-database";
+        yield return $"{project}_ac-client-data";
+    }
+
+    /// <summary>
     /// Per-stack 3D model-viewer asset volume (the <c>frontend-armory/data</c> dataset). Seeded from
     /// that stack's own uploaded armory data and served read-only by its <c>armory-assets</c> sidecar.
     /// </summary>

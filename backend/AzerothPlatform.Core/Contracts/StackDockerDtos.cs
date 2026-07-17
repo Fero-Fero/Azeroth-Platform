@@ -13,6 +13,36 @@ public sealed class DockerDiskUsageDto
     public long ReclaimableBytes { get; set; }
     public long DockerImagesReclaimableBytes { get; set; }
     public long DockerBuildCacheReclaimableBytes { get; set; }
+    public long DockerVolumesBytes { get; set; }
+    public long DockerContainersBytes { get; set; }
+    public long DockerVolumesReclaimableBytes { get; set; }
+    public long DockerContainersReclaimableBytes { get; set; }
+}
+
+/// <summary>Where Docker / on-disk space is consumed on the engine host.</summary>
+public sealed class DockerDiskUsageBreakdownDto
+{
+    public long DockerImagesBytes { get; set; }
+    public int DockerImagesCount { get; set; }
+    public long ActiveImagesBytes { get; set; }
+    public int ActiveImagesCount { get; set; }
+    public long ReclaimableImagesBytes { get; set; }
+    public int ReclaimableImagesCount { get; set; }
+    public long DockerVolumesBytes { get; set; }
+    public int DockerVolumesCount { get; set; }
+    public long ActiveVolumesBytes { get; set; }
+    public int ActiveVolumesCount { get; set; }
+    public long DockerBuildCacheBytes { get; set; }
+    public long DockerContainersBytes { get; set; }
+    public long ManagedBuildCheckoutBytes { get; set; }
+    public int ManagedBuildCheckoutCount { get; set; }
+    public long OrphanedBuildCheckoutBytes { get; set; }
+    public int OrphanedBuildCheckoutCount { get; set; }
+    public long DanglingLayerBytes { get; set; }
+    public int DanglingLayerCount { get; set; }
+    public long ReclaimableBytes { get; set; }
+    public List<StackDockerImageDto> ActiveImages { get; set; } = [];
+    public List<StackDockerVolumeDto> ActiveVolumes { get; set; } = [];
 }
 
 /// <summary>On-disk build checkout that no longer belongs to a managed stack.</summary>
@@ -41,6 +71,7 @@ public sealed class DockerReclaimableBreakdownDto
 public sealed class StackDockerOverviewDto
 {
     public DockerDiskUsageDto? DiskUsage { get; set; }
+    public DockerDiskUsageBreakdownDto? DiskUsageBreakdown { get; set; }
     public DockerReclaimableBreakdownDto? ReclaimableBreakdown { get; set; }
     public StackDockerBuildFilesDto? BuildFiles { get; set; }
     public List<StackDockerImageDto> Images { get; set; } = [];
@@ -98,6 +129,68 @@ public sealed class DockerCleanupResultDto
     public long FreedBytes { get; set; }
     public int RemovedImages { get; set; }
     public int RemovedBuildDirs { get; set; }
+}
+
+/// <summary>Read-only audit of Docker volume usage, drift, and safe cleanup candidates.</summary>
+public sealed class DockerVolumeAuditDto
+{
+    public DateTime AuditedAt { get; set; }
+    public List<DockerVolumeAuditDuplicateCopyDto> DuplicateCopies { get; set; } = [];
+    public List<DockerVolumeAuditOrphanVolumeDto> OrphanVolumes { get; set; } = [];
+    public List<DockerVolumeAuditStaleFileDto> StaleOverlayFiles { get; set; } = [];
+    public List<DockerVolumeAuditDriftNoteDto> DriftNotes { get; set; } = [];
+    public long ReclaimableBytes { get; set; }
+    public int ReclaimableItemCount { get; set; }
+}
+
+public sealed class DockerVolumeAuditDuplicateCopyDto
+{
+    public string Label { get; set; } = string.Empty;
+    public string ManagerPath { get; set; } = string.Empty;
+    public long ManagerBytes { get; set; }
+    public string VolumeName { get; set; } = string.Empty;
+    public long VolumeBytes { get; set; }
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class DockerVolumeAuditOrphanVolumeDto
+{
+    public string VolumeName { get; set; } = string.Empty;
+    public string? InferredStackId { get; set; }
+    public long? SizeBytes { get; set; }
+    public int LinkCount { get; set; }
+    public bool IsSafeToDelete { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class DockerVolumeAuditStaleFileDto
+{
+    public string VolumeName { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public bool IsSafeToDelete { get; set; }
+}
+
+public sealed class DockerVolumeAuditDriftNoteDto
+{
+    public string Category { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class DockerVolumeCleanupRequestDto
+{
+    public List<string> OrphanVolumeNames { get; set; } = [];
+    public List<string> StaleOverlayPaths { get; set; } = [];
+}
+
+public sealed class DockerVolumeCleanupResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public long FreedBytes { get; set; }
+    public int DeletedVolumes { get; set; }
+    public int DeletedFiles { get; set; }
 }
 
 /// <summary>Phase of the global Docker disk-reclaim background job.</summary>

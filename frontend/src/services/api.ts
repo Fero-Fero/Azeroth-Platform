@@ -172,6 +172,20 @@ export const stackApi = {
       `/stacks/${stackId}/docker/volumes/${encodeURIComponent(volumeName)}`,
     ),
 
+  getDockerVolumeAudit: (stackId: string) =>
+    apiClient.get<import('@/types/docker.types').DockerVolumeAuditDto>(
+      `/stacks/${stackId}/docker/volume-audit`,
+    ),
+
+  cleanupDockerVolumeAudit: (
+    stackId: string,
+    request: import('@/types/docker.types').DockerVolumeCleanupRequestDto,
+  ) =>
+    apiClient.post<import('@/types/docker.types').DockerVolumeCleanupResultDto>(
+      `/stacks/${stackId}/docker/volume-audit/cleanup`,
+      request,
+    ),
+
   // Module configuration (post-setup env var overrides)
   applyModuleConfig: (stackId: string, envVars: Record<string, string>) =>
     apiClient.post<{ success: boolean; message: string }>(`/stacks/${stackId}/module-config`, { envVars }),

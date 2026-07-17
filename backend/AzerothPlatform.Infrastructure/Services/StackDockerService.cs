@@ -7,6 +7,7 @@ using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Data.Entities;
+using AzerothPlatform.Infrastructure.Services.Migrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,8 @@ public sealed class StackDockerService : IStackDockerService
     private readonly IBuildService _buildService;
     private readonly IRemoteEngineService _remoteEngine;
     private readonly IArmoryImageService _armoryImageService;
+    private readonly ClientDistributionOptions _clientOptions;
+    private readonly ArmoryAssetsOptions _armoryAssetsOptions;
     private readonly string _buildsPath;
     private readonly ILogger<StackDockerService> _logger;
 
@@ -33,6 +36,8 @@ public sealed class StackDockerService : IStackDockerService
         IRemoteEngineService remoteEngine,
         IArmoryImageService armoryImageService,
         IOptions<DockerOptions> dockerOptions,
+        IOptions<ClientDistributionOptions> clientOptions,
+        IOptions<ArmoryAssetsOptions> armoryAssetsOptions,
         ILogger<StackDockerService> logger)
     {
         _dbContext = dbContext;
@@ -40,6 +45,8 @@ public sealed class StackDockerService : IStackDockerService
         _buildService = buildService;
         _remoteEngine = remoteEngine;
         _armoryImageService = armoryImageService;
+        _clientOptions = clientOptions.Value;
+        _armoryAssetsOptions = armoryAssetsOptions.Value;
         _logger = logger;
 
         var configuredPath = dockerOptions.Value.BuildsPath;
@@ -109,6 +116,7 @@ public sealed class StackDockerService : IStackDockerService
         var stackBusy = IsStackRuntimeBusy(stack.Status) || buildInProgress;
 
         var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
+        var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
         var allContainerImageRefs = await GetAllContainerImageRefsAsync(contextArg, cancellationToken);
         var activeImageRefs = await GetActiveImageReferencesAsync(contextArg, project, cancellationToken);
         foreach (var reference in allContainerImageRefs)
@@ -125,11 +133,13 @@ public sealed class StackDockerService : IStackDockerService
             contextArg,
             activeImageRefs,
             managedStackIds,
+            anyClientEnabled,
             cancellationToken);
         var allPlatformImages = await ListAllPlatformImagesAsync(
             contextArg,
             activeImageRefs,
             managedStackIds,
+            anyClientEnabled,
             cancellationToken);
         var currentIds = images.Select(i => i.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var unusedImages = allPlatformImages
@@ -147,6 +157,12 @@ public sealed class StackDockerService : IStackDockerService
             cancellationToken);
 
         var deletableUnusedImages = unusedImages.Where(i => !i.IsActive).ToList();
+        var managedBuildDirs = ListManagedBuildDirs(managedStackIds);
+        var allManagedVolumes = await ListAllManagedStackVolumesAsync(
+            managedStackIds,
+            contextArg,
+            volumeUsage,
+            cancellationToken);
         var listedReclaimableBytes = diskUsage.DockerBuildCacheReclaimableBytes
             + danglingImages.Sum(i => i.SizeBytes)
             + deletableUnusedImages.Sum(i => i.SizeBytes)
@@ -155,6 +171,14 @@ public sealed class StackDockerService : IStackDockerService
         return new StackDockerOverviewDto
         {
             DiskUsage = diskUsage,
+            DiskUsageBreakdown = BuildDiskUsageBreakdown(
+                diskUsage,
+                allPlatformImages,
+                danglingImages,
+                deletableUnusedImages,
+                managedBuildDirs,
+                obsoleteBuildDirs,
+                allManagedVolumes),
             ReclaimableBreakdown = new DockerReclaimableBreakdownDto
             {
                 BuildCacheBytes = diskUsage.DockerBuildCacheReclaimableBytes,
@@ -164,7 +188,7 @@ public sealed class StackDockerService : IStackDockerService
                 UnusedTaggedImageCount = deletableUnusedImages.Count,
                 ObsoleteBuildDirBytes = obsoleteBuildDirs.Sum(d => d.SizeBytes),
                 ObsoleteBuildDirCount = obsoleteBuildDirs.Count,
-                EngineReclaimableBytes = diskUsage.ReclaimableBytes,
+                EngineReclaimableBytes = listedReclaimableBytes,
                 ListedReclaimableBytes = listedReclaimableBytes,
             },
             BuildFiles = buildFiles,
@@ -174,7 +198,7 @@ public sealed class StackDockerService : IStackDockerService
             ObsoleteBuildDirs = obsoleteBuildDirs,
             Volumes = volumes,
             BuildCacheBytes = diskUsage.DockerBuildCacheBytes,
-            ReclaimableBytes = diskUsage.ReclaimableBytes,
+            ReclaimableBytes = listedReclaimableBytes,
             TotalBytes = (buildFiles?.SizeBytes ?? 0)
                 + images.Sum(i => i.SizeBytes)
                 + unusedImages.Sum(i => i.SizeBytes)
@@ -188,6 +212,7 @@ public sealed class StackDockerService : IStackDockerService
     {
         var result = new DockerCleanupResultDto();
         var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
+        var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
         var allContainerImageRefs = await GetAllContainerImageRefsAsync(string.Empty, cancellationToken);
         var before = await GetDiskUsageAsync(cancellationToken);
 
@@ -201,6 +226,7 @@ public sealed class StackDockerService : IStackDockerService
             string.Empty,
             allContainerImageRefs,
             managedStackIds,
+            anyClientEnabled,
             cancellationToken);
         foreach (var image in allPlatformImages.Where(i => !i.IsActive))
         {
@@ -409,6 +435,377 @@ public sealed class StackDockerService : IStackDockerService
         };
     }
 
+    public async Task<DockerVolumeAuditDto?> GetVolumeAuditAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null)
+        {
+            return null;
+        }
+
+        var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
+        var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
+        var contextArg = ContextArg(dockerContext);
+        var volumeUsage = await GetVolumeUsageAsync(contextArg, cancellationToken);
+        var stackRoot = Path.Combine(_buildsPath, stackId);
+        var audit = new DockerVolumeAuditDto { AuditedAt = DateTime.UtcNow };
+
+        audit.DuplicateCopies.AddRange(await BuildDuplicateCopyReportAsync(stack, stackRoot, volumeUsage, cancellationToken));
+        audit.OrphanVolumes.AddRange(await ListOrphanVolumesAsync(contextArg, managedStackIds, volumeUsage, cancellationToken));
+
+        if (stack.ClientEnabled)
+        {
+            var overlayVolume = DockerComposeOverrideGenerator.ClientOverlayVolumeName(stackId);
+            var overlayMirrorDir = MigrationLayout.ClientOverlayDir(stackRoot);
+            var mirrorFiles = ListLocalOverlayFiles(overlayMirrorDir);
+            var volumeFiles = await _remoteEngine.ListVolumeFilesAsync(stack, overlayVolume, cancellationToken);
+            audit.StaleOverlayFiles.AddRange(
+                FindStaleOverlayFiles(overlayVolume, mirrorFiles, volumeFiles));
+            audit.DriftNotes.AddRange(
+                FindOverlayDriftNotes(overlayMirrorDir, overlayVolume, mirrorFiles, volumeFiles));
+        }
+
+        audit.ReclaimableBytes = audit.OrphanVolumes.Where(v => v.IsSafeToDelete).Sum(v => v.SizeBytes ?? 0)
+            + audit.StaleOverlayFiles.Where(f => f.IsSafeToDelete).Sum(f => f.SizeBytes);
+        audit.ReclaimableItemCount = audit.OrphanVolumes.Count(v => v.IsSafeToDelete)
+            + audit.StaleOverlayFiles.Count(f => f.IsSafeToDelete);
+
+        return audit;
+    }
+
+    public async Task<DockerVolumeCleanupResultDto> CleanupVolumeAuditAsync(
+        string stackId,
+        DockerVolumeCleanupRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var audit = await GetVolumeAuditAsync(stackId, cancellationToken);
+        if (audit is null)
+        {
+            return new DockerVolumeCleanupResultDto { Success = false, Message = "Stack not found." };
+        }
+
+        var stack = await _dbContext.ManagedStacks.AsNoTracking().SingleAsync(s => s.Id == stackId, cancellationToken);
+        var result = new DockerVolumeCleanupResultDto();
+        var overlayVolume = DockerComposeOverrideGenerator.ClientOverlayVolumeName(stackId);
+
+        var allowedOrphans = audit.OrphanVolumes
+            .Where(v => v.IsSafeToDelete)
+            .Select(v => v.VolumeName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allowedStalePaths = audit.StaleOverlayFiles
+            .Where(f => f.IsSafeToDelete)
+            .Select(f => f.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var volumeName in (request.OrphanVolumeNames ?? []).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!allowedOrphans.Contains(volumeName))
+            {
+                return new DockerVolumeCleanupResultDto
+                {
+                    Success = false,
+                    Message = $"Volume '{volumeName}' is not a confirmed-safe orphan and was not deleted.",
+                };
+            }
+
+            var orphan = audit.OrphanVolumes.First(v =>
+                string.Equals(v.VolumeName, volumeName, StringComparison.OrdinalIgnoreCase));
+            await _remoteEngine.RemoveVolumeAsync(stack, volumeName, cancellationToken);
+
+            result.DeletedVolumes++;
+            result.FreedBytes += orphan.SizeBytes ?? 0;
+            _logger.LogInformation("Removed orphan docker volume {Volume} via volume audit cleanup.", volumeName);
+        }
+
+        var stalePaths = (request.StaleOverlayPaths ?? [])
+            .Select(p => p.Replace('\\', '/').Trim().Trim('/'))
+            .Where(p => p.Length > 0 && !p.Split('/').Contains("..", StringComparer.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var pathsToDelete = stalePaths.Where(allowedStalePaths.Contains).ToList();
+        if (stalePaths.Count > 0 && pathsToDelete.Count != stalePaths.Count)
+        {
+            return new DockerVolumeCleanupResultDto
+            {
+                Success = false,
+                Message = "One or more overlay paths are not confirmed stale and were not deleted.",
+            };
+        }
+
+        if (pathsToDelete.Count > 0)
+        {
+            await _remoteEngine.DeleteVolumePathsAsync(stack, overlayVolume, pathsToDelete, cancellationToken);
+            foreach (var path in pathsToDelete)
+            {
+                var stale = audit.StaleOverlayFiles.First(f =>
+                    string.Equals(f.RelativePath, path, StringComparison.OrdinalIgnoreCase));
+                result.DeletedFiles++;
+                result.FreedBytes += stale.SizeBytes;
+            }
+
+            _logger.LogInformation(
+                "Removed {Count} stale overlay path(s) from volume {Volume} via volume audit cleanup.",
+                pathsToDelete.Count,
+                overlayVolume);
+        }
+
+        if (result.DeletedVolumes == 0 && result.DeletedFiles == 0)
+        {
+            result.Success = true;
+            result.Message = "No cleanup items were selected.";
+            return result;
+        }
+
+        result.Success = true;
+        result.Message = $"Removed {result.DeletedVolumes} orphan volume(s) and {result.DeletedFiles} stale overlay file(s).";
+        return result;
+    }
+
+    private async Task<List<DockerVolumeAuditDuplicateCopyDto>> BuildDuplicateCopyReportAsync(
+        ManagedStackEntity stack,
+        string stackRoot,
+        Dictionary<string, (long? SizeBytes, int Links)> volumeUsage,
+        CancellationToken cancellationToken)
+    {
+        var copies = new List<DockerVolumeAuditDuplicateCopyDto>();
+
+        if (stack.ClientEnabled)
+        {
+            var gameDir = _clientOptions.StackGameDir(stack.Id);
+            var baseVolume = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
+            volumeUsage.TryGetValue(baseVolume, out var baseUsage);
+            copies.Add(new DockerVolumeAuditDuplicateCopyDto
+            {
+                Label = "WoW base client",
+                ManagerPath = gameDir,
+                ManagerBytes = DirectorySize(gameDir),
+                VolumeName = baseVolume,
+                VolumeBytes = baseUsage.SizeBytes ?? 0,
+                Detail = "The uploaded client exists on manager disk and in a Docker volume by design. Do not delete either copy unless you intend to re-upload or re-seed.",
+            });
+
+            var overlayDir = MigrationLayout.ClientOverlayDir(stackRoot);
+            var overlayVolume = DockerComposeOverrideGenerator.ClientOverlayVolumeName(stack.Id);
+            volumeUsage.TryGetValue(overlayVolume, out var overlayUsage);
+            copies.Add(new DockerVolumeAuditDuplicateCopyDto
+            {
+                Label = "Client overlay (patches)",
+                ManagerPath = overlayDir,
+                ManagerBytes = DirectorySize(overlayDir),
+                VolumeName = overlayVolume,
+                VolumeBytes = overlayUsage.SizeBytes ?? 0,
+                Detail = "The manager overlay mirror is the source of truth. The Docker volume should match; stale files may exist only in the volume.",
+            });
+        }
+
+        var armoryDir = _armoryAssetsOptions.StackRootPath(stack.Id);
+        var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id);
+        if (await _remoteEngine.VolumeExistsAsync(stack, assetsVolume, cancellationToken))
+        {
+            volumeUsage.TryGetValue(assetsVolume, out var assetsUsage);
+            copies.Add(new DockerVolumeAuditDuplicateCopyDto
+            {
+                Label = "Armory 3D assets",
+                ManagerPath = armoryDir,
+                ManagerBytes = DirectorySize(armoryDir),
+                VolumeName = assetsVolume,
+                VolumeBytes = assetsUsage.SizeBytes ?? 0,
+                Detail = "Armory assets are seeded from manager storage into a Docker volume for serving.",
+            });
+        }
+
+        return copies.Where(c => c.ManagerBytes > 0 || c.VolumeBytes > 0).ToList();
+    }
+
+    private async Task<List<DockerVolumeAuditOrphanVolumeDto>> ListOrphanVolumesAsync(
+        string contextArg,
+        HashSet<string> managedStackIds,
+        Dictionary<string, (long? SizeBytes, int Links)> volumeUsage,
+        CancellationToken cancellationToken)
+    {
+        var orphans = new List<DockerVolumeAuditOrphanVolumeDto>();
+        var (exitCode, output, _) = await RunDockerAsync($"{contextArg}volume ls --format \"{{{{.Name}}}}\"", cancellationToken);
+        if (exitCode != 0)
+        {
+            return orphans;
+        }
+
+        foreach (var volumeName in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!volumeName.StartsWith("acore-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var inferredStackId = InferStackIdFromVolumeName(volumeName);
+            if (string.IsNullOrWhiteSpace(inferredStackId)
+                || managedStackIds.Contains(inferredStackId))
+            {
+                continue;
+            }
+
+            volumeUsage.TryGetValue(volumeName, out var usage);
+            var linkCount = usage.Links;
+            if (linkCount <= 0)
+            {
+                var (containerExit, containerOutput, _) = await RunDockerAsync(
+                    $"{contextArg}ps -a --filter volume={volumeName} -q",
+                    cancellationToken);
+                if (containerExit == 0)
+                {
+                    linkCount = containerOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+                }
+            }
+
+            var isSafe = linkCount == 0;
+            orphans.Add(new DockerVolumeAuditOrphanVolumeDto
+            {
+                VolumeName = volumeName,
+                InferredStackId = inferredStackId,
+                SizeBytes = usage.SizeBytes,
+                LinkCount = linkCount,
+                IsSafeToDelete = isSafe,
+                Reason = isSafe
+                    ? "Volume belongs to a stack that no longer exists and is not linked to any container."
+                    : "Volume belongs to a deleted stack but is still linked to a container — stop/remove the container first.",
+            });
+        }
+
+        return orphans
+            .OrderByDescending(v => v.SizeBytes ?? 0)
+            .ThenBy(v => v.VolumeName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static Dictionary<string, long> ListLocalOverlayFiles(string overlayRootDir)
+    {
+        var files = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(overlayRootDir))
+        {
+            return files;
+        }
+
+        foreach (var absolutePath in Directory.EnumerateFiles(overlayRootDir, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(overlayRootDir, absolutePath).Replace('\\', '/');
+            if (IsOverlayBookkeeping(relativePath))
+            {
+                continue;
+            }
+
+            files[relativePath] = new FileInfo(absolutePath).Length;
+        }
+
+        return files;
+    }
+
+    private static List<DockerVolumeAuditStaleFileDto> FindStaleOverlayFiles(
+        string overlayVolume,
+        Dictionary<string, long> mirrorFiles,
+        IReadOnlyList<VolumeFileEntry> volumeFiles)
+    {
+        var stale = new List<DockerVolumeAuditStaleFileDto>();
+        foreach (var file in volumeFiles)
+        {
+            var relativePath = file.RelativePath.Replace('\\', '/').Trim().TrimStart('/');
+            if (IsOverlayBookkeeping(relativePath))
+            {
+                continue;
+            }
+
+            if (mirrorFiles.ContainsKey(relativePath))
+            {
+                continue;
+            }
+
+            if (!IsManagedOverlayPath(relativePath))
+            {
+                stale.Add(new DockerVolumeAuditStaleFileDto
+                {
+                    VolumeName = overlayVolume,
+                    RelativePath = relativePath,
+                    SizeBytes = file.SizeBytes,
+                    IsSafeToDelete = true,
+                    Reason = "Present in the Docker overlay volume but outside managed overlay paths and not in the manager mirror.",
+                });
+                continue;
+            }
+
+            stale.Add(new DockerVolumeAuditStaleFileDto
+            {
+                VolumeName = overlayVolume,
+                RelativePath = relativePath,
+                SizeBytes = file.SizeBytes,
+                IsSafeToDelete = true,
+                Reason = "Present in the Docker overlay volume but not in the manager overlay mirror — not served to clients.",
+            });
+        }
+
+        return stale.OrderByDescending(f => f.SizeBytes).ToList();
+    }
+
+    private static List<DockerVolumeAuditDriftNoteDto> FindOverlayDriftNotes(
+        string overlayMirrorDir,
+        string overlayVolume,
+        Dictionary<string, long> mirrorFiles,
+        IReadOnlyList<VolumeFileEntry> volumeFiles)
+    {
+        var notes = new List<DockerVolumeAuditDriftNoteDto>();
+        var volumePaths = volumeFiles
+            .Select(f => f.RelativePath.Replace('\\', '/').Trim().TrimStart('/'))
+            .Where(p => !IsOverlayBookkeeping(p))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var mirrorOnly = mirrorFiles.Keys.Where(k => !volumePaths.Contains(k)).ToList();
+        if (mirrorOnly.Count > 0)
+        {
+            var bytes = mirrorOnly.Sum(p => mirrorFiles[p]);
+            notes.Add(new DockerVolumeAuditDriftNoteDto
+            {
+                Category = "Overlay mirror ahead of volume",
+                Detail = $"{mirrorOnly.Count} file(s) ({FormatBytesShort(bytes)}) exist in {overlayMirrorDir} but not in {overlayVolume}. Start the stack or re-seed the overlay to sync — do not delete these from the mirror.",
+            });
+        }
+
+        return notes;
+    }
+
+    private static bool IsManagedOverlayPath(string relativePath) =>
+        relativePath.StartsWith("Data/", StringComparison.OrdinalIgnoreCase)
+        || relativePath.StartsWith("Interface/AddOns/", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsOverlayBookkeeping(string relativePath) =>
+        relativePath is ".hashcache.json" or ".manifest.json" or ".verifytoken"
+        || relativePath.EndsWith("/.hashcache.json", StringComparison.OrdinalIgnoreCase)
+        || relativePath.EndsWith("/.manifest.json", StringComparison.OrdinalIgnoreCase)
+        || relativePath.EndsWith("/.verifytoken", StringComparison.OrdinalIgnoreCase);
+
+    private static string? InferStackIdFromVolumeName(string volumeName)
+    {
+        var match = Regex.Match(volumeName, @"^acore-([^_-]+)(?:-|_)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static long DirectorySize(string path) =>
+        !Directory.Exists(path)
+            ? 0
+            : Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
+
+    private static string FormatBytesShort(long bytes)
+    {
+        if (bytes <= 0)
+        {
+            return "0 B";
+        }
+
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        var order = Math.Min((int)Math.Floor(Math.Log(bytes) / Math.Log(1024)), units.Length - 1);
+        var size = bytes / Math.Pow(1024, order);
+        return $"{size:0.#} {units[order]}";
+    }
+
     private StackDockerBuildFilesDto DescribeBuildFiles(
         string stackId,
         bool stackBusy,
@@ -451,6 +848,7 @@ public sealed class StackDockerService : IStackDockerService
         string contextArg,
         HashSet<string> activeImageRefs,
         HashSet<string> managedStackIds,
+        bool anyClientEnabled,
         CancellationToken cancellationToken)
     {
         var patterns = GetImagePatternsWithArmory(stackId);
@@ -465,6 +863,7 @@ public sealed class StackDockerService : IStackDockerService
                 stackId,
                 activeImageRefs,
                 managedStackIds,
+                anyClientEnabled,
                 seen,
                 images,
                 currentStackOnly: true,
@@ -482,6 +881,7 @@ public sealed class StackDockerService : IStackDockerService
         string contextArg,
         HashSet<string> activeImageRefs,
         HashSet<string> managedStackIds,
+        bool anyClientEnabled,
         CancellationToken cancellationToken)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -494,6 +894,7 @@ public sealed class StackDockerService : IStackDockerService
                 ownerStackId: null,
                 activeImageRefs,
                 managedStackIds,
+                anyClientEnabled,
                 seen,
                 images,
                 currentStackOnly: false,
@@ -514,6 +915,7 @@ public sealed class StackDockerService : IStackDockerService
         string? ownerStackId,
         HashSet<string> activeImageRefs,
         HashSet<string> managedStackIds,
+        bool anyClientEnabled,
         HashSet<string> seen,
         List<StackDockerImageDto> images,
         bool currentStackOnly,
@@ -561,7 +963,8 @@ public sealed class StackDockerService : IStackDockerService
                 row.Tag,
                 imageOwnerStackId,
                 activeImageRefs,
-                managedStackIds);
+                managedStackIds,
+                anyClientEnabled);
 
             images.Add(new StackDockerImageDto
             {
@@ -659,12 +1062,113 @@ public sealed class StackDockerService : IStackDockerService
         return dirs.OrderByDescending(d => d.SizeBytes).ToList();
     }
 
+    private List<DockerObsoleteBuildDirDto> ListManagedBuildDirs(HashSet<string> managedStackIds)
+    {
+        if (!Directory.Exists(_buildsPath))
+        {
+            return [];
+        }
+
+        var dirs = new List<DockerObsoleteBuildDirDto>();
+        foreach (var dir in Directory.GetDirectories(_buildsPath))
+        {
+            var stackId = Path.GetFileName(dir);
+            if (string.IsNullOrWhiteSpace(stackId) || !managedStackIds.Contains(stackId))
+            {
+                continue;
+            }
+
+            dirs.Add(new DockerObsoleteBuildDirDto
+            {
+                StackId = stackId,
+                Path = dir,
+                SizeBytes = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length),
+            });
+        }
+
+        return dirs.OrderByDescending(d => d.SizeBytes).ToList();
+    }
+
+    private async Task<List<StackDockerVolumeDto>> ListAllManagedStackVolumesAsync(
+        HashSet<string> managedStackIds,
+        string contextArg,
+        Dictionary<string, (long? SizeBytes, int Links)> volumeUsage,
+        CancellationToken cancellationToken)
+    {
+        var volumes = new List<StackDockerVolumeDto>();
+        foreach (var stackId in managedStackIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase))
+        {
+            var project = DockerComposeOverrideGenerator.GetComposeProjectName(stackId);
+            var stackVolumes = await ListStackVolumesAsync(
+                stackId,
+                project,
+                contextArg,
+                volumeUsage,
+                hasContainers: false,
+                stackBusy: false,
+                cancellationToken);
+            volumes.AddRange(stackVolumes);
+        }
+
+        return volumes
+            .OrderByDescending(v => v.SizeBytes ?? 0)
+            .ThenBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static DockerDiskUsageBreakdownDto BuildDiskUsageBreakdown(
+        DockerDiskUsageDto diskUsage,
+        List<StackDockerImageDto> allPlatformImages,
+        List<StackDockerImageDto> danglingImages,
+        List<StackDockerImageDto> deletableUnusedImages,
+        List<DockerObsoleteBuildDirDto> managedBuildDirs,
+        List<DockerObsoleteBuildDirDto> obsoleteBuildDirs,
+        List<StackDockerVolumeDto> allManagedVolumes)
+    {
+        var activeImages = allPlatformImages.Where(i => i.IsActive).ToList();
+        var reclaimableImages = deletableUnusedImages;
+        var reclaimableBytes = diskUsage.DockerBuildCacheReclaimableBytes
+            + danglingImages.Sum(i => i.SizeBytes)
+            + reclaimableImages.Sum(i => i.SizeBytes)
+            + obsoleteBuildDirs.Sum(d => d.SizeBytes);
+
+        return new DockerDiskUsageBreakdownDto
+        {
+            DockerImagesBytes = diskUsage.DockerImagesBytes,
+            DockerImagesCount = allPlatformImages.Count + danglingImages.Count,
+            ActiveImagesBytes = activeImages.Sum(i => i.SizeBytes),
+            ActiveImagesCount = activeImages.Count,
+            ReclaimableImagesBytes = reclaimableImages.Sum(i => i.SizeBytes) + danglingImages.Sum(i => i.SizeBytes),
+            ReclaimableImagesCount = reclaimableImages.Count + danglingImages.Count,
+            DockerVolumesBytes = diskUsage.DockerVolumesBytes,
+            DockerVolumesCount = allManagedVolumes.Count,
+            ActiveVolumesBytes = allManagedVolumes.Where(v => v.SizeBytes.HasValue).Sum(v => v.SizeBytes!.Value),
+            ActiveVolumesCount = allManagedVolumes.Count,
+            DockerBuildCacheBytes = diskUsage.DockerBuildCacheBytes,
+            DockerContainersBytes = diskUsage.DockerContainersBytes,
+            ManagedBuildCheckoutBytes = managedBuildDirs.Sum(d => d.SizeBytes),
+            ManagedBuildCheckoutCount = managedBuildDirs.Count,
+            OrphanedBuildCheckoutBytes = obsoleteBuildDirs.Sum(d => d.SizeBytes),
+            OrphanedBuildCheckoutCount = obsoleteBuildDirs.Count,
+            DanglingLayerBytes = danglingImages.Sum(i => i.SizeBytes),
+            DanglingLayerCount = danglingImages.Count,
+            ReclaimableBytes = reclaimableBytes,
+            ActiveImages = activeImages,
+            ActiveVolumes = allManagedVolumes,
+        };
+    }
+
     private async Task<HashSet<string>> GetManagedStackIdsAsync(CancellationToken cancellationToken) =>
         (await _dbContext.ManagedStacks
             .AsNoTracking()
             .Select(s => s.Id)
             .ToListAsync(cancellationToken))
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<bool> AnyManagedStackClientEnabledAsync(CancellationToken cancellationToken) =>
+        await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .AnyAsync(s => s.ClientEnabled, cancellationToken);
 
     private async Task<HashSet<string>> GetAllContainerImageRefsAsync(
         string contextArg,
@@ -693,7 +1197,8 @@ public sealed class StackDockerService : IStackDockerService
         string tag,
         string? ownerStackId,
         HashSet<string> activeImageRefs,
-        HashSet<string> managedStackIds)
+        HashSet<string> managedStackIds,
+        bool anyClientEnabled)
     {
         var referencedByContainer = activeImageRefs.Contains(reference)
             || activeImageRefs.Contains(imageId)
@@ -708,14 +1213,28 @@ public sealed class StackDockerService : IStackDockerService
             return (false, "Dangling image layer.");
         }
 
-        if (IsSharedPlatformImage(reference))
-        {
-            return (false, "Unused shared platform image.");
-        }
-
         if (!string.IsNullOrWhiteSpace(ownerStackId) && managedStackIds.Contains(ownerStackId))
         {
-            return (false, "Old build image for a managed stack (not in use).");
+            return (true, "Required image for a managed stack.");
+        }
+
+        if (IsSharedPlatformImage(reference))
+        {
+            if (reference.StartsWith("azeroth-platform-client:", StringComparison.OrdinalIgnoreCase)
+                && anyClientEnabled
+                && managedStackIds.Count > 0)
+            {
+                return (true, "Shared client distribution image required by managed stacks.");
+            }
+
+            if (reference.StartsWith("azeroth-platform:", StringComparison.OrdinalIgnoreCase)
+                && !reference.StartsWith("azeroth-platform-armory-", StringComparison.OrdinalIgnoreCase)
+                && managedStackIds.Count > 0)
+            {
+                return (true, "Shared platform image required by managed stacks.");
+            }
+
+            return (false, "Unused shared platform image.");
         }
 
         return (false, "Unused image from an old build or removed stack.");
@@ -828,6 +1347,28 @@ public sealed class StackDockerService : IStackDockerService
                     usage.ReclaimableBytes += reclaimable;
                 }
             }
+            else if (line.StartsWith("Local Volumes", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = Regex.Split(line, @"\s{2,}");
+                if (parts.Length >= 5)
+                {
+                    usage.DockerVolumesBytes = ParseHumanSize(parts[3].Trim());
+                    var reclaimable = ParseReclaimableSize(parts[4].Trim());
+                    usage.DockerVolumesReclaimableBytes = reclaimable;
+                    usage.ReclaimableBytes += reclaimable;
+                }
+            }
+            else if (line.StartsWith("Containers", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = Regex.Split(line, @"\s{2,}");
+                if (parts.Length >= 5)
+                {
+                    usage.DockerContainersBytes = ParseHumanSize(parts[3].Trim());
+                    var reclaimable = ParseReclaimableSize(parts[4].Trim());
+                    usage.DockerContainersReclaimableBytes = reclaimable;
+                    usage.ReclaimableBytes += reclaimable;
+                }
+            }
             else if (line.StartsWith("Build Cache", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = Regex.Split(line, @"\s{2,}");
@@ -877,16 +1418,10 @@ public sealed class StackDockerService : IStackDockerService
                 ? usage.Links
                 : containerOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
 
-            var active = linkCount > 0 || (stackBusy && hasContainers);
-            string? reason = null;
-            if (linkCount > 0)
-            {
-                reason = "Mounted by one or more containers.";
-            }
-            else if (active)
-            {
-                reason = "Stack is running or has live containers.";
-            }
+            var active = true;
+            string? reason = linkCount > 0
+                ? "Mounted by one or more containers."
+                : "Data volume for a managed stack.";
 
             volumes.Add(new StackDockerVolumeDto
             {
@@ -1034,19 +1569,7 @@ public sealed class StackDockerService : IStackDockerService
     }
 
     private static List<string> GetExpectedVolumeNames(string stackId, string project) =>
-    [
-        DockerComposeOverrideGenerator.ModulesVolumeName(stackId),
-        DockerComposeOverrideGenerator.LuaVolumeName(stackId),
-        DockerComposeOverrideGenerator.EtcVolumeName(stackId),
-        DockerComposeOverrideGenerator.LogsVolumeName(stackId),
-        DockerComposeOverrideGenerator.ClientBaseVolumeName(stackId),
-        DockerComposeOverrideGenerator.ClientOverlayVolumeName(stackId),
-        DockerComposeOverrideGenerator.ClientCacheVolumeName(stackId),
-        DockerComposeOverrideGenerator.ClientLauncherDistVolumeName(stackId),
-        DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId),
-        $"{project}_ac-database",
-        $"{project}_ac-client-data",
-    ];
+        DockerComposeOverrideGenerator.GetAllStackVolumeNames(stackId).ToList();
 
     private static bool IsStackVolumeName(string stackId, string volumeName)
     {

@@ -206,6 +206,25 @@ public class StacksController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
+    [HttpGet("{stackId}/docker/volume-audit")]
+    public async Task<ActionResult<DockerVolumeAuditDto>> GetDockerVolumeAudit(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var audit = await _stackDockerService.GetVolumeAuditAsync(stackId, cancellationToken);
+        return audit is null ? NotFound() : Ok(audit);
+    }
+
+    [HttpPost("{stackId}/docker/volume-audit/cleanup")]
+    public async Task<ActionResult<DockerVolumeCleanupResultDto>> CleanupDockerVolumeAudit(
+        string stackId,
+        [FromBody] DockerVolumeCleanupRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _stackDockerService.CleanupVolumeAuditAsync(stackId, request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     // Stack lifecycle actions run as detached background jobs so a slow operation (ensuring images,
     // seeding volumes, docker compose up, waiting for services) doesn't block the request and survives
     // navigating away. Endpoints return the initial job status immediately; the UI reattaches via GET

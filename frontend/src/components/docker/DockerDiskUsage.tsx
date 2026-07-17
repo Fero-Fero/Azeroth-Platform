@@ -53,9 +53,11 @@ export function DiskUsageBar({ disk, reclaimableBytes, showDetails = true }: Dis
         <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${percent}%` }} />
       </div>
       {showDetails && (
-        <div className="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-2 lg:grid-cols-4">
           <div>Images: {formatBytes(disk.dockerImagesBytes)}</div>
+          <div>Volumes: {formatBytes(disk.dockerVolumesBytes)}</div>
           <div>Build cache: {formatBytes(disk.dockerBuildCacheBytes)}</div>
+          <div>Containers: {formatBytes(disk.dockerContainersBytes)}</div>
         </div>
       )}
     </div>

@@ -22,4 +22,11 @@ public interface IStackDockerService
     Task<StackDockerDeleteResultDto> DeleteImageAsync(string stackId, string imageId, CancellationToken cancellationToken = default);
 
     Task<StackDockerDeleteResultDto> DeleteVolumeAsync(string stackId, string volumeName, CancellationToken cancellationToken = default);
+
+    Task<DockerVolumeAuditDto?> GetVolumeAuditAsync(string stackId, CancellationToken cancellationToken = default);
+
+    Task<DockerVolumeCleanupResultDto> CleanupVolumeAuditAsync(
+        string stackId,
+        DockerVolumeCleanupRequestDto request,
+        CancellationToken cancellationToken = default);
 }

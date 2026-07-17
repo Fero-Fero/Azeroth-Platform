@@ -418,6 +418,74 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
     }
 
+    public Task<IReadOnlyList<VolumeFileEntry>> ListVolumeFilesAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        CancellationToken cancellationToken = default)
+        => ListVolumeFilesCoreAsync(stack, volumeName, cancellationToken);
+
+    public Task<IReadOnlyList<VolumeFileEntry>> ListLocalVolumeFilesAsync(
+        string volumeName,
+        CancellationToken cancellationToken = default)
+        => ListVolumeFilesCoreAsync(stack: null, volumeName, cancellationToken);
+
+    private async Task<IReadOnlyList<VolumeFileEntry>> ListVolumeFilesCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken)
+    {
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        var (inspectExit, _, _) = await RunAsync(
+            "docker",
+            $"{contextArg}volume inspect {volumeName}",
+            cancellationToken,
+            throwOnError: false);
+        if (inspectExit != 0)
+        {
+            return [];
+        }
+
+        var command =
+            $"docker {contextArg}run --rm -v {volumeName}:/src:ro alpine:3.20 " +
+            "find /src -type f -printf '%P\\t%s\\n' 2>/dev/null";
+        var (exit, output, stderr) = await RunShellAsync(command, cancellationToken);
+        if (exit != 0)
+        {
+            _logger.LogDebug("Failed to list files in volume {Volume}: {Err}", volumeName, stderr);
+            return [];
+        }
+
+        var files = new List<VolumeFileEntry>();
+        foreach (var raw in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var tab = raw.IndexOf('\t');
+            if (tab <= 0)
+            {
+                continue;
+            }
+
+            var relativePath = raw[..tab].Replace('\\', '/').Trim().TrimStart('/');
+            if (string.IsNullOrWhiteSpace(relativePath)
+                || relativePath.Split('/').Contains("..", StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            if (!long.TryParse(raw[(tab + 1)..].Trim(), out var sizeBytes))
+            {
+                sizeBytes = 0;
+            }
+
+            files.Add(new VolumeFileEntry
+            {
+                RelativePath = relativePath,
+                SizeBytes = sizeBytes,
+            });
+        }
+
+        return files;
+    }
+
     public async Task SetVolumeOwnershipAsync(ManagedStackEntity stack, string volumeName, int uid, int gid, CancellationToken cancellationToken = default)
     {
         var contextArg = await ContextArgAsync(stack, cancellationToken);

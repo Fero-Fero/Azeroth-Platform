@@ -4,22 +4,28 @@ import {
   useDeleteDockerBuildFiles,
   useDeleteDockerImage,
   useDeleteDockerVolume,
+  useDockerVolumeAudit,
+  useDockerVolumeAuditCleanup,
   useStackDockerOverview,
 } from '@/hooks/useStackDocker'
 import { useDockerCleanupJob } from '@/hooks/useDockerCleanupJob'
 import { DiskUsageBar, formatBytes, formatDate } from '@/components/docker/DockerDiskUsage'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import type {
+  DockerDiskUsageBreakdownDto,
   DockerObsoleteBuildDirDto,
   DockerReclaimableBreakdownDto,
   StackDockerBuildFilesDto,
   StackDockerImageDto,
+  StackDockerOverviewDto,
   StackDockerVolumeDto,
 } from '@/types/docker.types'
 
 interface DockerTabProps {
   stackId: string
 }
+
+type DockerSubTab = 'resources' | 'disk-usage'
 
 export default function DockerTab({ stackId }: DockerTabProps) {
   const { data, isLoading, isError, error, refetch, isFetching } = useStackDockerOverview(stackId)
@@ -41,6 +47,7 @@ export default function DockerTab({ stackId }: DockerTabProps) {
   const [confirmImage, setConfirmImage] = useState<StackDockerImageDto | null>(null)
   const [confirmVolume, setConfirmVolume] = useState<StackDockerVolumeDto | null>(null)
   const [cleanupStarting, setCleanupStarting] = useState(false)
+  const [subTab, setSubTab] = useState<DockerSubTab>('resources')
   const lastHandledCleanupJobRef = useRef<string | null>(null)
 
   const busy =
@@ -260,19 +267,38 @@ export default function DockerTab({ stackId }: DockerTabProps) {
 
       <DiskUsageBar disk={data.diskUsage} reclaimableBytes={data.reclaimableBytes} />
 
-      {data.reclaimableBreakdown && (
-        <ReclaimableBreakdownSection breakdown={data.reclaimableBreakdown} />
-      )}
-
-      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">
-        Estimated footprint on this page: <span className="font-medium">{formatBytes(data.totalBytes)}</span>
-        {data.buildCacheBytes > 0 && (
-          <span className="text-gray-500">
-            {' '}
-            · Build cache on engine: {formatBytes(data.buildCacheBytes)}
-          </span>
-        )}
+      <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+        {(
+          [
+            { id: 'resources' as const, label: 'Resources' },
+            { id: 'disk-usage' as const, label: 'Disk usage' },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setSubTab(tab.id)}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              subTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {subTab === 'disk-usage' ? (
+        <DiskUsageSubTab stackId={stackId} data={data} />
+      ) : (
+        <ResourcesSubTab
+          data={data}
+          busy={busy}
+          deletableUnusedImages={deletableUnusedImages}
+          onDeleteBuildFiles={() => setConfirmBuildDelete(true)}
+          onDeleteImage={setConfirmImage}
+          onDeleteVolume={setConfirmVolume}
+        />
+      )}
 
       {notice && (
         <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{notice}</div>
@@ -281,72 +307,13 @@ export default function DockerTab({ stackId }: DockerTabProps) {
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div>
       )}
 
-      <BuildFilesSection
-        buildFiles={data.buildFiles}
-        busy={busy}
-        onDelete={() => setConfirmBuildDelete(true)}
-      />
-
-      <ResourceSection
-        title="This stack — images"
-        icon={<ImageIcon className="h-4 w-4" />}
-        emptyLabel="No stack images found on the Docker engine."
-      >
-        {data.images.map((image) => (
-          <ImageRow key={image.id} image={image} busy={busy} onDelete={() => setConfirmImage(image)} />
-        ))}
-      </ResourceSection>
-
-      <ResourceSection
-        title="Unused / other images"
-        icon={<ImageIcon className="h-4 w-4" />}
-        emptyLabel="No other unused platform images found."
-        subtitle={`${deletableUnusedImages.length} tagged image(s) from other stacks or old builds can be removed.`}
-      >
-        {data.unusedImages.map((image) => (
-          <ImageRow key={image.id} image={image} busy={busy} onDelete={() => setConfirmImage(image)} showOwner />
-        ))}
-      </ResourceSection>
-
-      <DanglingImagesSection
-        images={data.danglingImages}
-        busy={busy}
-        onDelete={(image) => setConfirmImage(image)}
-      />
-
-      <ObsoleteBuildDirsSection dirs={data.obsoleteBuildDirs} />
-
-      <ResourceSection
-        title="Volumes"
-        icon={<Layers className="h-4 w-4" />}
-        emptyLabel="No stack volumes found on the Docker engine."
-      >
-        {data.volumes.map((volume) => (
-          <tr key={volume.name} className="border-t border-gray-100">
-            <td className="px-4 py-3 font-mono text-xs text-gray-800">{volume.name}</td>
-            <td className="px-4 py-3 text-sm text-gray-600">{formatBytes(volume.sizeBytes)}</td>
-            <td className="px-4 py-3 text-sm text-gray-600">{volume.linkCount}</td>
-            <td className="px-4 py-3">
-              <StatusBadge active={volume.isActive} reason={volume.activeReason} />
-            </td>
-            <td className="px-4 py-3 text-right">
-              <DeleteButton
-                disabled={busy || volume.isActive}
-                title={volume.isActive ? volume.activeReason ?? 'Volume is in use' : `Delete ${volume.name}`}
-                onClick={() => setConfirmVolume(volume)}
-              />
-            </td>
-          </tr>
-        ))}
-      </ResourceSection>
-
       {confirmCleanup && (
         <ConfirmDialog
           title="Reclaim disk space?"
           message={
             reclaimableBytes > 0
-              ? `This will reclaim up to ${reclaimEstimate} by pruning build cache and dangling image layers, removing unused platform images not referenced by any container, and deleting orphaned on-disk build checkouts. Images and volumes in use by your managed stacks are kept.`
-              : 'Little reclaimable space was detected, but this will still prune build cache and dangling image layers if present. Images and volumes in use by your managed stacks are kept.'
+              ? `This will reclaim up to ${reclaimEstimate} by pruning build cache and dangling image layers, removing unused platform images from deleted stacks, and deleting orphaned on-disk build checkouts. Images and volumes belonging to your managed stacks are always kept — even when those stacks are stopped or only partially running.`
+              : 'Little reclaimable space was detected, but this will still prune build cache and dangling image layers if present. Images and volumes belonging to your managed stacks are always kept.'
           }
           onCancel={() => setConfirmCleanup(false)}
           onConfirm={handleCleanup}
@@ -358,8 +325,8 @@ export default function DockerTab({ stackId }: DockerTabProps) {
           title="Clean up old builds?"
           message={
             oldBuildsBytes > 0
-              ? `This will remove up to ${oldBuildsEstimate} of old build artifacts (${oldBuildsCount} item(s)): dangling image layers, unused stack images from past compiles, and orphaned on-disk build checkouts. Docker build cache is kept so future compiles stay fast. Images in use by running stacks are not removed.`
-              : 'This will prune dangling build layers and remove unused stack images and orphaned build checkouts if present. Docker build cache is kept so future compiles stay fast.'
+              ? `This will remove up to ${oldBuildsEstimate} of old build artifacts (${oldBuildsCount} item(s)): dangling image layers, unused images from deleted stacks, and orphaned on-disk build checkouts. Docker build cache is kept so future compiles stay fast. Images required by managed stacks are never removed.`
+              : 'This will prune dangling build layers and remove unused images from deleted stacks and orphaned build checkouts if present. Docker build cache is kept so future compiles stay fast.'
           }
           onCancel={() => setConfirmOldBuildsCleanup(false)}
           onConfirm={handleOldBuildsCleanup}
@@ -390,6 +357,575 @@ export default function DockerTab({ stackId }: DockerTabProps) {
           onConfirm={handleDeleteVolume}
         />
       )}
+    </div>
+  )
+}
+
+function ResourcesSubTab({
+  data,
+  busy,
+  deletableUnusedImages,
+  onDeleteBuildFiles,
+  onDeleteImage,
+  onDeleteVolume,
+}: {
+  data: StackDockerOverviewDto
+  busy: boolean
+  deletableUnusedImages: StackDockerImageDto[]
+  onDeleteBuildFiles: () => void
+  onDeleteImage: (image: StackDockerImageDto) => void
+  onDeleteVolume: (volume: StackDockerVolumeDto) => void
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm">
+        Estimated footprint on this page: <span className="font-medium">{formatBytes(data.totalBytes)}</span>
+        {data.buildCacheBytes > 0 && (
+          <span className="text-gray-500">
+            {' '}
+            · Build cache on engine: {formatBytes(data.buildCacheBytes)}
+          </span>
+        )}
+      </div>
+
+      <BuildFilesSection buildFiles={data.buildFiles} busy={busy} onDelete={onDeleteBuildFiles} />
+
+      <ResourceSection
+        title="This stack — images"
+        icon={<ImageIcon className="h-4 w-4" />}
+        emptyLabel="No stack images found on the Docker engine."
+      >
+        {data.images.map((image) => (
+          <ImageRow key={image.id} image={image} busy={busy} onDelete={() => onDeleteImage(image)} />
+        ))}
+      </ResourceSection>
+
+      <ResourceSection
+        title="Unused / other images"
+        icon={<ImageIcon className="h-4 w-4" />}
+        emptyLabel="No other unused platform images found."
+        subtitle={
+          deletableUnusedImages.length > 0
+            ? `${deletableUnusedImages.length} tagged image(s) from deleted stacks or old builds can be removed.`
+            : 'Images required by managed stacks are protected even when stopped.'
+        }
+      >
+        {data.unusedImages.map((image) => (
+          <ImageRow key={image.id} image={image} busy={busy} onDelete={() => onDeleteImage(image)} showOwner />
+        ))}
+      </ResourceSection>
+
+      <DanglingImagesSection images={data.danglingImages} busy={busy} onDelete={onDeleteImage} />
+
+      <ObsoleteBuildDirsSection dirs={data.obsoleteBuildDirs} />
+
+      <ResourceSection
+        title="Volumes"
+        icon={<Layers className="h-4 w-4" />}
+        emptyLabel="No stack volumes found on the Docker engine."
+        subtitle="Stack data volumes are protected and cannot be deleted while the stack is managed."
+      >
+        {data.volumes.map((volume) => (
+          <tr key={volume.name} className="border-t border-gray-100">
+            <td className="px-4 py-3 font-mono text-xs text-gray-800">{volume.name}</td>
+            <td className="px-4 py-3 text-sm text-gray-600">{formatBytes(volume.sizeBytes)}</td>
+            <td className="px-4 py-3 text-sm text-gray-600">{volume.linkCount}</td>
+            <td className="px-4 py-3">
+              <StatusBadge active={volume.isActive} reason={volume.activeReason} />
+            </td>
+            <td className="px-4 py-3 text-right">
+              <DeleteButton
+                disabled={busy || volume.isActive}
+                title={volume.isActive ? volume.activeReason ?? 'Volume is in use' : `Delete ${volume.name}`}
+                onClick={() => onDeleteVolume(volume)}
+              />
+            </td>
+          </tr>
+        ))}
+      </ResourceSection>
+    </div>
+  )
+}
+
+function DiskUsageSubTab({ stackId, data }: { stackId: string; data: StackDockerOverviewDto }) {
+  const breakdown = data.diskUsageBreakdown
+  const reclaimable = data.reclaimableBreakdown
+
+  if (!breakdown) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-sm text-gray-500 shadow-sm">
+        Disk usage breakdown is unavailable. Try refreshing the page.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-4 py-3">
+          <h3 className="font-medium text-gray-900">Where disk space is used</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            Breakdown of Docker engine storage and on-disk build checkouts across all managed stacks. Host disk usage
+            includes everything on the machine — not only Docker.
+          </p>
+        </div>
+        <DiskUsageCategoryTable breakdown={breakdown} />
+      </section>
+
+      {reclaimable && <ReclaimableBreakdownSection breakdown={reclaimable} />}
+
+      {breakdown.activeImages.length > 0 && (
+        <ResourceSection
+          title="Active images (protected from reclaim)"
+          icon={<ImageIcon className="h-4 w-4" />}
+          emptyLabel="No active platform images found."
+          subtitle="These images belong to managed stacks and are never removed by reclaim or old-build cleanup."
+        >
+          {breakdown.activeImages.map((image) => (
+            <tr key={image.id} className="border-t border-gray-100">
+              <td className="px-4 py-3 font-mono text-xs text-gray-800">
+                {image.reference}
+                {image.ownerStackId && (
+                  <div className="mt-1 font-sans text-[11px] text-gray-500">Stack {image.ownerStackId}</div>
+                )}
+              </td>
+              <td className="px-4 py-3 text-sm text-gray-600">{formatBytes(image.sizeBytes)}</td>
+              <td className="px-4 py-3 text-sm text-gray-600">{formatDate(image.createdAt)}</td>
+              <td className="px-4 py-3">
+                <StatusBadge active={image.isActive} reason={image.activeReason} />
+              </td>
+              <td className="px-4 py-3 text-right text-xs text-gray-400">Protected</td>
+            </tr>
+          ))}
+        </ResourceSection>
+      )}
+
+      {breakdown.activeVolumes.length > 0 && (
+        <ResourceSection
+          title="Stack volumes (protected from reclaim)"
+          icon={<Layers className="h-4 w-4" />}
+          emptyLabel="No stack volumes found."
+          subtitle="Data volumes for managed stacks are never removed by reclaim. Reclaim does not delete volumes."
+        >
+          {breakdown.activeVolumes.map((volume) => (
+            <tr key={volume.name} className="border-t border-gray-100">
+              <td className="px-4 py-3 font-mono text-xs text-gray-800">{volume.name}</td>
+              <td className="px-4 py-3 text-sm text-gray-600">{formatBytes(volume.sizeBytes)}</td>
+              <td className="px-4 py-3 text-sm text-gray-600">{volume.linkCount}</td>
+              <td className="px-4 py-3">
+                <StatusBadge active={volume.isActive} reason={volume.activeReason} />
+              </td>
+              <td className="px-4 py-3 text-right text-xs text-gray-400">Protected</td>
+            </tr>
+          ))}
+        </ResourceSection>
+      )}
+
+      <VolumeAuditSection stackId={stackId} />
+    </div>
+  )
+}
+
+function VolumeAuditSection({ stackId }: { stackId: string }) {
+  const auditQuery = useDockerVolumeAudit(stackId)
+  const cleanup = useDockerVolumeAuditCleanup(stackId)
+  const [selectedOrphans, setSelectedOrphans] = useState<Set<string>>(new Set())
+  const [selectedStale, setSelectedStale] = useState<Set<string>>(new Set())
+  const [confirmCleanup, setConfirmCleanup] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const audit = auditQuery.data
+  const safeOrphans = audit?.orphanVolumes.filter((v) => v.isSafeToDelete) ?? []
+  const safeStale = audit?.staleOverlayFiles.filter((f) => f.isSafeToDelete) ?? []
+  const selectedBytes =
+    safeOrphans.filter((v) => selectedOrphans.has(v.volumeName)).reduce((s, v) => s + (v.sizeBytes ?? 0), 0) +
+    safeStale.filter((f) => selectedStale.has(f.relativePath)).reduce((s, f) => s + f.sizeBytes, 0)
+  const selectedCount = selectedOrphans.size + selectedStale.size
+
+  const runAudit = async () => {
+    setNotice(null)
+    setActionError(null)
+    setSelectedOrphans(new Set())
+    setSelectedStale(new Set())
+    try {
+      await auditQuery.refetch()
+    } catch (err) {
+      setActionError(errorMessage(err))
+    }
+  }
+
+  const toggleOrphan = (name: string) => {
+    setSelectedOrphans((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const toggleStale = (path: string) => {
+    setSelectedStale((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  const selectAllSafe = () => {
+    setSelectedOrphans(new Set(safeOrphans.map((v) => v.volumeName)))
+    setSelectedStale(new Set(safeStale.map((f) => f.relativePath)))
+  }
+
+  const handleCleanup = async () => {
+    setConfirmCleanup(false)
+    setNotice(null)
+    setActionError(null)
+    try {
+      const result = await cleanup.mutateAsync({
+        orphanVolumeNames: [...selectedOrphans],
+        staleOverlayPaths: [...selectedStale],
+      })
+      setNotice(
+        result.data.message +
+          (result.data.freedBytes ? ` Freed about ${formatBytes(result.data.freedBytes)}.` : ''),
+      )
+      setSelectedOrphans(new Set())
+      setSelectedStale(new Set())
+      await auditQuery.refetch()
+    } catch (err) {
+      setActionError(errorMessage(err))
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-blue-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-blue-100 px-4 py-3">
+        <div>
+          <h3 className="font-medium text-gray-900">Volume audit</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            Detect duplicate copies, orphan volumes from deleted stacks, and stale overlay files that exist only in
+            Docker (not in the manager mirror). Only confirmed-unused items can be selected for cleanup.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void runAudit()}
+          disabled={auditQuery.isFetching || cleanup.isPending}
+          className="inline-flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50"
+        >
+          {auditQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Run volume audit
+        </button>
+      </div>
+
+      <div className="space-y-4 px-4 py-4">
+        {!audit && !auditQuery.isFetching && (
+          <p className="text-sm text-gray-500">
+            Run an audit to compare manager storage with Docker volumes and find safe cleanup candidates.
+          </p>
+        )}
+
+        {auditQuery.isError && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {errorMessage(auditQuery.error)}
+          </div>
+        )}
+
+        {notice && (
+          <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">{notice}</div>
+        )}
+        {actionError && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</div>
+        )}
+
+        {audit && (
+          <>
+            <p className="text-xs text-gray-500">
+              Audited {formatDate(audit.auditedAt)} · Up to {formatBytes(audit.reclaimableBytes)} reclaimable across{' '}
+              {audit.reclaimableItemCount} item(s)
+            </p>
+
+            {audit.duplicateCopies.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-900">Duplicate copies (informational)</h4>
+                <p className="mt-1 text-xs text-gray-500">
+                  These exist on manager disk and in Docker by design — not selectable for cleanup.
+                </p>
+                <div className="mt-2 overflow-x-auto rounded-md border border-gray-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2">Data</th>
+                        <th className="px-3 py-2">Manager</th>
+                        <th className="px-3 py-2">Docker volume</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {audit.duplicateCopies.map((copy) => (
+                        <tr key={copy.label} className="border-t border-gray-100">
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-gray-900">{copy.label}</div>
+                            <div className="text-xs text-gray-500">{copy.detail}</div>
+                          </td>
+                          <td className="px-3 py-2 text-gray-600">
+                            {formatBytes(copy.managerBytes)}
+                            <div className="font-mono text-[10px] text-gray-400">{copy.managerPath}</div>
+                          </td>
+                          <td className="px-3 py-2 text-gray-600">
+                            {formatBytes(copy.volumeBytes)}
+                            <div className="font-mono text-[10px] text-gray-400">{copy.volumeName}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {audit.driftNotes.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {audit.driftNotes.map((note) => (
+                  <div key={note.category} className="mt-1 first:mt-0">
+                    <span className="font-medium">{note.category}:</span> {note.detail}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(safeOrphans.length > 0 || safeStale.length > 0) && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-medium text-gray-900">Safe cleanup candidates</h4>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllSafe}
+                    className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    Select all safe items
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCleanup(true)}
+                    disabled={selectedCount === 0 || cleanup.isPending}
+                    className="inline-flex items-center gap-1 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {cleanup.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Delete selected ({selectedCount})
+                    {selectedBytes > 0 && ` · ${formatBytes(selectedBytes)}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {audit.orphanVolumes.length > 0 && (
+              <div className="overflow-x-auto rounded-md border border-gray-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2 w-8" />
+                      <th className="px-3 py-2">Orphan volume</th>
+                      <th className="px-3 py-2">Stack</th>
+                      <th className="px-3 py-2">Size</th>
+                      <th className="px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {audit.orphanVolumes.map((volume) => (
+                      <tr key={volume.volumeName} className="border-t border-gray-100">
+                        <td className="px-3 py-2">
+                          {volume.isSafeToDelete ? (
+                            <input
+                              type="checkbox"
+                              checked={selectedOrphans.has(volume.volumeName)}
+                              onChange={() => toggleOrphan(volume.volumeName)}
+                              className="rounded border-gray-300"
+                            />
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs">{volume.volumeName}</td>
+                        <td className="px-3 py-2 text-gray-600">{volume.inferredStackId ?? '—'}</td>
+                        <td className="px-3 py-2">{formatBytes(volume.sizeBytes)}</td>
+                        <td className="px-3 py-2 text-xs text-gray-600">{volume.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {audit.staleOverlayFiles.length > 0 && (
+              <div>
+                <h4 className="mb-2 text-sm font-medium text-gray-900">Stale overlay files</h4>
+                <div className="overflow-x-auto rounded-md border border-gray-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                      <tr>
+                        <th className="px-3 py-2 w-8" />
+                        <th className="px-3 py-2">Path in volume</th>
+                        <th className="px-3 py-2">Size</th>
+                        <th className="px-3 py-2">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {audit.staleOverlayFiles.map((file) => (
+                        <tr key={file.relativePath} className="border-t border-gray-100">
+                          <td className="px-3 py-2">
+                            {file.isSafeToDelete ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedStale.has(file.relativePath)}
+                                onChange={() => toggleStale(file.relativePath)}
+                                className="rounded border-gray-300"
+                              />
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-xs">{file.relativePath}</td>
+                          <td className="px-3 py-2">{formatBytes(file.sizeBytes)}</td>
+                          <td className="px-3 py-2 text-xs text-gray-600">{file.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {audit.orphanVolumes.length === 0 &&
+              audit.staleOverlayFiles.length === 0 &&
+              audit.duplicateCopies.length === 0 && (
+                <p className="text-sm text-gray-500">No issues found. Volumes appear consistent with managed stacks.</p>
+              )}
+          </>
+        )}
+      </div>
+
+      {confirmCleanup && (
+        <ConfirmDialog
+          title="Delete selected unused volume data?"
+          message={`This will permanently remove ${selectedOrphans.size} orphan volume(s) and ${selectedStale.size} stale overlay file(s) (${formatBytes(selectedBytes)}). Active stack data, database volumes, client base copies, and files present in the manager overlay mirror are never included. This cannot be undone.`}
+          onCancel={() => setConfirmCleanup(false)}
+          onConfirm={() => void handleCleanup()}
+          confirmLabel="Delete selected"
+        />
+      )}
+    </section>
+  )
+}
+
+function DiskUsageCategoryTable({ breakdown }: { breakdown: DockerDiskUsageBreakdownDto }) {
+  const rows = [
+    {
+      label: 'Active stack images',
+      detail: 'Worldserver, authserver, client, armory, and other images required by managed stacks',
+      bytes: breakdown.activeImagesBytes,
+      count: breakdown.activeImagesCount,
+      tone: 'active' as const,
+    },
+    {
+      label: 'Docker volumes',
+      detail: 'Database, client data, configs, and other persistent stack storage',
+      bytes: breakdown.activeVolumesBytes || breakdown.dockerVolumesBytes,
+      count: breakdown.activeVolumesCount || breakdown.dockerVolumesCount,
+      tone: 'active' as const,
+    },
+    {
+      label: 'Build checkouts',
+      detail: 'On-disk AzerothCore source trees used for compiles',
+      bytes: breakdown.managedBuildCheckoutBytes,
+      count: breakdown.managedBuildCheckoutCount,
+      tone: 'active' as const,
+    },
+    {
+      label: 'Build cache',
+      detail: 'Docker BuildKit cache from past compiles (partially reclaimable)',
+      bytes: breakdown.dockerBuildCacheBytes,
+      count: breakdown.dockerBuildCacheBytes > 0 ? 1 : 0,
+      tone: 'mixed' as const,
+    },
+    {
+      label: 'Container writable layers',
+      detail: 'Ephemeral changes inside running/stopped containers',
+      bytes: breakdown.dockerContainersBytes,
+      count: breakdown.dockerContainersBytes > 0 ? 1 : 0,
+      tone: 'neutral' as const,
+    },
+    {
+      label: 'Dangling build layers',
+      detail: 'Untagged intermediate layers left by builds (reclaimable)',
+      bytes: breakdown.danglingLayerBytes,
+      count: breakdown.danglingLayerCount,
+      tone: 'reclaimable' as const,
+    },
+    {
+      label: 'Unused images',
+      detail: 'Images from deleted stacks or old builds (reclaimable)',
+      bytes: breakdown.reclaimableImagesBytes - breakdown.danglingLayerBytes,
+      count: breakdown.reclaimableImagesCount - breakdown.danglingLayerCount,
+      tone: 'reclaimable' as const,
+    },
+    {
+      label: 'Orphaned build checkouts',
+      detail: 'On-disk folders from stacks that no longer exist (reclaimable)',
+      bytes: breakdown.orphanedBuildCheckoutBytes,
+      count: breakdown.orphanedBuildCheckoutCount,
+      tone: 'reclaimable' as const,
+    },
+  ].filter((row) => row.bytes > 0 || row.count > 0)
+
+  const accountedBytes = rows.reduce((sum, row) => sum + row.bytes, 0)
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-left">
+        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <tr>
+            <th className="px-4 py-2">Category</th>
+            <th className="px-4 py-2">Items</th>
+            <th className="px-4 py-2">Size</th>
+            <th className="px-4 py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label} className="border-t border-gray-100">
+              <td className="px-4 py-3">
+                <div className="text-sm font-medium text-gray-900">{row.label}</div>
+                <div className="text-xs text-gray-500">{row.detail}</div>
+              </td>
+              <td className="px-4 py-3 text-sm text-gray-600">{row.count > 0 ? row.count : '—'}</td>
+              <td className="px-4 py-3 text-sm font-medium text-gray-800">{formatBytes(row.bytes)}</td>
+              <td className="px-4 py-3">
+                {row.tone === 'active' ? (
+                  <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                    Protected
+                  </span>
+                ) : row.tone === 'reclaimable' ? (
+                  <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    Reclaimable
+                  </span>
+                ) : (
+                  <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600">
+                    Mixed
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot className="border-t border-gray-200 bg-gray-50">
+          <tr>
+            <td className="px-4 py-3 text-sm font-medium text-gray-900">Accounted on this breakdown</td>
+            <td className="px-4 py-3" />
+            <td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatBytes(accountedBytes)}</td>
+            <td className="px-4 py-3 text-xs text-gray-500">
+              Up to {formatBytes(breakdown.reclaimableBytes)} reclaimable
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   )
 }
@@ -445,7 +981,7 @@ function ReclaimableBreakdownSection({ breakdown }: { breakdown: DockerReclaimab
     },
     {
       label: 'Unused tagged images',
-      detail: 'Old stack or platform images not used by any container',
+      detail: 'Images from deleted stacks or old builds — not required by any managed stack',
       bytes: breakdown.unusedTaggedImageBytes,
       count: breakdown.unusedTaggedImageCount,
     },

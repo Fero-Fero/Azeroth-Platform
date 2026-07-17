@@ -524,15 +524,23 @@ public sealed class StackService : IStackService
             // Container might not exist, continue with cleanup
         }
 
-        // Remove Docker images (gracefully handle if already removed)
-        await RemoveDockerImagesAsync(stackId, cancellationToken);
+        // Remove Docker images and all per-stack volumes/containers on the engine (local or remote).
+        await CleanupStackDockerFootprintAsync(stack, cancellationToken);
 
-        // External stacks: also tear down the remote engine's per-stack images + named volumes and the
-        // local SSH docker context/key material. Best-effort so a delete never blocks on remote hiccups.
+        // External stacks: also remove the SSH docker context/key material.
         if (stack.DeploymentTarget == DeploymentTarget.External)
         {
-            await CleanupExternalStackAsync(stack, cancellationToken);
+            try
+            {
+                await _remoteEngine.RemoveContextAsync(stack, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove remote docker context for external stack {StackId}", stack.Id);
+            }
         }
+
+        CleanupManagerPersistentData(stackId);
 
         // Remove stack directory (gracefully handle if already removed)
         if (Directory.Exists(stackPath))
@@ -2518,67 +2526,115 @@ public sealed class StackService : IStackService
     }
 
     /// <summary>
-    /// Tears down an external stack's remote footprint: removes the per-stack images and per-stack named
-    /// volumes on the remote engine (never the shared base client volume, which other stacks reuse), then
-    /// removes the local SSH docker context, alias, and key. All best-effort and logged.
+    /// Removes all Docker resources owned by a stack on its engine: containers, named volumes, and images.
+    /// Best-effort so delete never blocks on remote hiccups. Runs for both local and external stacks.
     /// </summary>
-    private async Task CleanupExternalStackAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    private async Task CleanupStackDockerFootprintAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
     {
-        string? context;
-        try
+        var contextArg = string.Empty;
+        if (stack.DeploymentTarget == DeploymentTarget.External)
         {
-            context = _remoteEngine.GetContextName(stack.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not resolve docker context for external stack {StackId} cleanup", stack.Id);
-            context = null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(context))
-        {
-            var contextArg = $"--context {context} ";
-
-            foreach (var image in new[]
-                     {
-                         $"acore/ac-wotlk-worldserver:{stack.Id}",
-                         $"acore/ac-wotlk-authserver:{stack.Id}",
-                         $"acore/ac-wotlk-db-import:{stack.Id}"
-                     })
+            try
             {
-                await RunDockerBestEffortAsync($"{contextArg}rmi -f {image}", cancellationToken);
+                contextArg = $"--context {_remoteEngine.GetContextName(stack.Id)} ";
             }
-
-            // All per-stack named volumes, including this stack's base client and armory asset volumes
-            // (they are owned by the stack now, so they are removed with it).
-            foreach (var volume in new[]
-                     {
-                         DockerComposeOverrideGenerator.ModulesVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.LuaVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.ClientOverlayVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.ClientCacheVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.EtcVolumeName(stack.Id),
-                         DockerComposeOverrideGenerator.LogsVolumeName(stack.Id)
-                     })
+            catch (Exception ex)
             {
-                await RunDockerBestEffortAsync($"{contextArg}volume rm -f {volume}", cancellationToken);
+                _logger.LogWarning(ex, "Could not resolve docker context for stack {StackId} cleanup", stack.Id);
+                return;
             }
         }
 
-        try
+        var project = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
+
+        // Stop and remove any remaining containers for this compose project (covers cases where the
+        // checkout was already deleted or compose down failed).
+        await RunDockerBestEffortAsync(
+            $"{contextArg}ps -aq --filter label=com.docker.compose.project={project}",
+            cancellationToken,
+            captureOutput: true,
+            onStdout: async ids =>
+            {
+                var containerIds = ids.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var containerId in containerIds)
+                {
+                    await RunDockerBestEffortAsync($"{contextArg}rm -f {containerId}", cancellationToken);
+                }
+            });
+
+        foreach (var volume in DockerComposeOverrideGenerator.GetAllStackVolumeNames(stack.Id))
         {
-            await _remoteEngine.RemoveContextAsync(stack, cancellationToken);
+            await RunDockerBestEffortAsync($"{contextArg}volume rm -f {volume}", cancellationToken);
+            _logger.LogInformation("Removed stack volume {Volume} during delete of stack {StackId}.", volume, stack.Id);
         }
-        catch (Exception ex)
+
+        var removeSharedClientImage = !await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .AnyAsync(s => s.Id != stack.Id && s.ClientEnabled, cancellationToken);
+
+        foreach (var image in GetStackImageNames(stack, removeSharedClientImage))
         {
-            _logger.LogWarning(ex, "Failed to remove remote docker context for external stack {StackId}", stack.Id);
+            await RunDockerBestEffortAsync($"{contextArg}rmi -f {image}", cancellationToken);
+        }
+
+        // Dangling build layers from this stack's compiles.
+        await RunDockerBestEffortAsync($"{contextArg}image prune -f", cancellationToken);
+    }
+
+    private IEnumerable<string> GetStackImageNames(ManagedStackEntity stack, bool removeSharedClientImage)
+    {
+        var stackId = stack.Id;
+        foreach (var repository in new[]
+                 {
+                     "acore/ac-wotlk-worldserver",
+                     "acore/ac-wotlk-authserver",
+                     "acore/ac-wotlk-db-import",
+                     "acore/ac-wotlk-client-data",
+                 })
+        {
+            yield return $"{repository}:{stackId}";
+            yield return $"localhost/{repository}:{stackId}";
+        }
+
+        yield return _armoryImageService.ImageNameFor(stackId);
+
+        if (removeSharedClientImage && !string.IsNullOrWhiteSpace(_clientServerOptions.ImageName))
+        {
+            yield return _clientServerOptions.ImageName;
+        }
+    }
+
+    private void CleanupManagerPersistentData(string stackId)
+    {
+        foreach (var path in new[]
+                 {
+                     _clientOptions.StackGameDir(stackId),
+                     _armoryAssetsOptions.StackRootPath(stackId),
+                 })
+        {
+            if (!Directory.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                _logger.LogInformation("Removed manager persistent data at {Path} during stack {StackId} delete.", path, stackId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove manager persistent data at {Path} during stack {StackId} delete.", path, stackId);
+            }
         }
     }
 
     /// <summary>Runs a docker CLI command, swallowing all failures (used for best-effort cleanup).</summary>
-    private async Task RunDockerBestEffortAsync(string arguments, CancellationToken cancellationToken)
+    private async Task RunDockerBestEffortAsync(
+        string arguments,
+        CancellationToken cancellationToken,
+        bool captureOutput = false,
+        Func<string, Task>? onStdout = null)
     {
         try
         {
@@ -2586,90 +2642,34 @@ public sealed class StackService : IStackService
             {
                 FileName = "docker",
                 Arguments = arguments,
-                RedirectStandardOutput = true,
+                RedirectStandardOutput = captureOutput,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
 
-            if (process is not null)
+            if (process is null)
             {
-                await process.WaitForExitAsync(cancellationToken);
+                return;
             }
+
+            if (captureOutput && onStdout is not null)
+            {
+                var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+                await process.WaitForExitAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(stdout))
+                {
+                    await onStdout(stdout);
+                }
+
+                return;
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Best-effort docker command failed: docker {Args}", arguments);
-        }
-    }
-
-    private static async Task RemoveDockerImagesAsync(string stackId, CancellationToken cancellationToken)
-    {
-        // Detect whether to use podman or docker
-        var dockerCommand = File.Exists("/usr/bin/podman") ? "podman" : "docker";
-        
-        // Images are tagged with stackId for isolation between stacks
-        // Podman tags images with localhost/ prefix
-        var imageNames = new[]
-        {
-            $"localhost/acore/ac-wotlk-worldserver:{stackId}",
-            $"localhost/acore/ac-wotlk-authserver:{stackId}",
-            $"localhost/acore/ac-wotlk-db-import:{stackId}",
-            // Also try without localhost prefix for Docker compatibility
-            $"acore/ac-wotlk-worldserver:{stackId}",
-            $"acore/ac-wotlk-authserver:{stackId}",
-            $"acore/ac-wotlk-db-import:{stackId}"
-        };
-
-        foreach (var imageName in imageNames)
-        {
-            try
-            {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = dockerCommand,
-                    Arguments = $"rmi {imageName} -f",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(startInfo);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync(cancellationToken);
-                    // Ignore exit code - image might already be removed
-                }
-            }
-            catch
-            {
-                // Image might not exist or already removed, continue
-            }
-        }
-
-        // Clean up dangling images (intermediate build stages)
-        try
-        {
-            var pruneInfo = new ProcessStartInfo
-            {
-                FileName = dockerCommand,
-                Arguments = "image prune -f",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var pruneProcess = Process.Start(pruneInfo);
-            if (pruneProcess != null)
-            {
-                await pruneProcess.WaitForExitAsync(cancellationToken);
-            }
-        }
-        catch
-        {
-            // Prune might fail, continue anyway
         }
     }
 
