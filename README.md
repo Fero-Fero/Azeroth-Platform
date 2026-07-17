@@ -85,8 +85,11 @@ Docker through an allowlisted socket proxy.
 - ⚙️ **Guided module configuration** for AH Bot, AutoBalance, Playerbots, and Transmog (others fall
   back to generic `.conf`/env editing).
 - 🧩 **Stack patches/migrations** — incremental SQL, DBC edits (via the WDBX sidecar), map overrides,
-  and client MPQ patches, applied strictly in order with per-file SQL transactions and tracing.
-- 🌙 **Lua scripts** — ship Lua scripts (via the AzerothCore Lua Engine, `mod-ale`) to the worldserver and hot-reload them.
+  client MPQ patches, **config overrides** (`config/*.json` → server and module `.conf` files), and
+  **patch Lua scripts** (`lua/` → worldserver), applied strictly in order with per-file SQL transactions
+  and tracing.
+- 🌙 **Lua scripts** — ship Lua scripts (via the AzerothCore Lua Engine, `mod-ale`) to the worldserver
+  from the **Lua Scripts** tab or from a patch's `lua/` folder on apply.
 - 🛡️ **Armory** — per-stack character/guild site with equipment tooltips and a 3D model viewer;
   upload the model-viewer assets and one-click **DBC sync** for rich tooltips/titles.
 
@@ -615,21 +618,30 @@ A **stack** is one complete game server: authentication + world + database, buil
 
 #### Lua Scripts
 - **What:** Lua scripts for custom behavior, powered by the [AzerothCore Lua Engine (`mod-ale`)](https://github.com/azerothcore/mod-ale).
-- **Where:** stack → **Game** group → **Lua Scripts**.
-- **Beginner:** upload a `.zip` of scripts or edit `.lua` files inline, then **Apply & reload**.
+- **Where:** stack → **Game** group → **Lua Scripts** (live scripts), or a patch's **`lua/`** folder (versioned with patch apply).
+- **Beginner:** upload a `.zip` of scripts or edit `.lua` files inline, then **Apply & reload**. Patch
+  `lua/` files are copied into the same live folder when you **Apply** that patch.
 - **Advanced:** scripts run only if a **Lua engine** is compiled into the worldserver — add
   `mod-ale` from the catalog, select it for the stack, and rebuild; the tab warns when no Lua
-  engine is detected.
+  engine is detected. Re-applying patches redeploys each patch's `lua/` tree in order (later files
+  overwrite earlier ones).
 
 #### Patches
-- **What:** incremental content layered onto a server over time — SQL, DBC edits, map overrides, and
-  client MPQ patches — applied strictly in order.
+- **What:** incremental content layered onto a server over time — SQL, DBC edits, map overrides, client
+  MPQ patches, **config overrides**, and **Lua scripts** — applied strictly in order.
 - **Where:** stack → **Game** group → **Patches**.
-- **Beginner:** create a numbered patch folder (e.g. `1_classic`), drop files into its `sql`/`dbc`/
-  `map`/`mpq` sections, and **Apply**.
-- **Advanced:** organize files into one-level "containers", capture a cumulative DBC baseline from the server with
-**Init Baseline** (DBC editing needs the WDBX sidecar image), and rely on per-file SQL transactions
-  and OpenTelemetry-traced applies. See [DOCKER.md → Stack Migrations / Patches](./DOCKER.md#stack-migrations--patches).
+- **Beginner:** create a numbered patch folder (e.g. `patch 1.1 my_patch`), drop files into its
+  `sql/`, `dbc/`, `map/`, `mpq/`, `config/`, and/or `lua/` sections, and **Apply**.
+- **Advanced:** organize files into one-level "containers", capture a cumulative DBC baseline from the
+  server with **Init Baseline** (DBC editing needs the WDBX sidecar image), and rely on per-file SQL
+  transactions and OpenTelemetry-traced applies. **`config/*.json`** files map to live server `.conf`
+  files (`worldserver.json` → `worldserver.conf`, `individualProgression.json` →
+  `modules/individualProgression.conf`, and other module configs by base name). Use **Preview changes**
+  on a patch to compare live config values with what apply will write. Servers with
+  **mod-individual-progression** can **Sync with mod-individual-progression** to seed patches from
+  [Azeroth-Platform-Progression](https://github.com/Fero-Fero/Azeroth-Platform-Progression) — see that
+  repository's README for the reference patch layout. See
+  [DOCKER.md → Stack Migrations / Patches](./DOCKER.md#stack-migrations--patches).
 
 ### Configuration (Configs & Environment Variables)
 

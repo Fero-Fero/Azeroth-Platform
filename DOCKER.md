@@ -249,13 +249,16 @@ See [README.md → Armory](./README.md#armory).
 
 Each stack has an incremental patch system managed from the **Patches** tab, stored under
 `data/stacks/{stackId}/migrations/{level_name}/` with `sql/{world,auth,characters}`, `dbc`,
-`map`, and `mpq` sub-folders. A cumulative DBC baseline lives at
+`map`, `mpq`, `config`, and `lua` sub-folders. A cumulative DBC baseline lives at
 `data/stacks/{stackId}/server_dbc/` and per-stack launcher content at
 `data/stacks/{stackId}/client/game/Data/`.
 
 Applying a patch runs SQL against the databases, imports DBC CSV edits via the WDBX sidecar,
-overrides maps and DBC in the stack's `ac-client-data` volume, and publishes MPQ files to the
-per-stack launcher. Because the manager talks to Docker via the socket, patch helper containers work
+overrides maps and DBC in the stack's `ac-client-data` volume, publishes MPQ files to the
+per-stack launcher, writes **`config/*.json` overrides** into the matching server and module
+`.conf` files under `etc/`, and copies **`lua/`** scripts into the stack's live `lua_scripts/`
+folder (bind-mounted into the worldserver). A worldserver restart is triggered when config or Lua
+content changes. Because the manager talks to Docker via the socket, patch helper containers work
 against named volumes (seeded/fetched from the manager's data volume) rather than host bind mounts,
 so no `HOST_DATA_PATH` is involved.
 
@@ -319,11 +322,12 @@ See [`wdbx/README.md`](wdbx/README.md) for details. SQL, map, and MPQ patches wo
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/stacks/{id}/migrations` | List patches (status, per-category counts, current level) |
-| `GET /api/stacks/{id}/migrations/{patchKey}` | Detailed file listing for a patch |
+| `GET /api/stacks/{id}/migrations/{patchKey}` | Detailed file listing for a patch (includes parsed `configOverrides`) |
+| `GET /api/stacks/{id}/migrations/{patchKey}/config-overrides-preview` | Config overrides compared against live server `.conf` values |
 | `POST /api/stacks/{id}/migrations` | Create a patch folder |
 | `POST /api/stacks/{id}/migrations/init-baseline` | Capture `server_dbc` from the data volume |
 | `POST /api/stacks/{id}/migrations/{patchKey}/apply` | Apply the next incremental patch |
-| `POST /api/stacks/{id}/migrations/{patchKey}/files/{category}` | Upload files (multipart; optional parallel `paths` field places files in one-level containers for `dbc`/`map`/`sql/*`) |
+| `POST /api/stacks/{id}/migrations/{patchKey}/files/{category}` | Upload files (multipart; optional parallel `paths` field places files in one-level containers for `dbc`/`map`/`sql/*`; categories include `config` and `lua`) |
 | `GET`/`PUT /api/stacks/{id}/migrations/{patchKey}/dbc/{file}` | Read / save a DBC CSV (path may include a container) |
 | `DELETE /api/stacks/{id}/migrations/{patchKey}/files/{category}/{file}` | Delete a file (file part may include a container, e.g. `sql/world/quests/foo.sql`) |
 | `GET /api/stacks/{id}/launcher/{config,manifest}` | Per-stack launcher config / manifest |
