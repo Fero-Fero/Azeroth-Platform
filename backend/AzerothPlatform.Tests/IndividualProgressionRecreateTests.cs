@@ -241,6 +241,73 @@ public sealed class IndividualProgressionRecreateTests
     }
 
     [Fact]
+    public async Task ValidatePatchesAsync_fails_when_patch_folders_use_catalog_slugs()
+    {
+        var stackId = "ip-validate-misnamed";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-ip-validate-misnamed-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, stackId);
+        try
+        {
+            await using var db = CreateDbContext(new ManagedStackEntity
+            {
+                Id = stackId,
+                StackName = stackId,
+                AppliedPatchLevel = 0,
+                ModuleIdsJson = """["mod-individual-progression"]""",
+                CoreCommitSha = "abc123",
+                LastBuiltAt = DateTime.UtcNow,
+            });
+            var service = CreateSyncService(db, buildsPath);
+
+            await service.BootstrapAsync(stackId);
+            SeedRealisticProgressionRepo(stackRoot);
+            SeedCompletedSyncArtifacts(stackRoot, pruneRepo: true);
+
+            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "Start");
+            var onyxiaKey = PatchFolderNames.Format(new PatchIndex(1, 2, explicitSub1: true), "ONYXIA");
+            MigrationLayout.EnsurePatchDirectories(stackRoot, startKey);
+            MigrationLayout.EnsurePatchDirectories(stackRoot, onyxiaKey);
+            File.WriteAllText(Path.Combine(MigrationLayout.PatchDir(stackRoot, startKey), "description.md"), "Start");
+            File.WriteAllText(Path.Combine(MigrationLayout.PatchDir(stackRoot, onyxiaKey), "description.md"), "Onyxia");
+            File.WriteAllText(Path.Combine(MigrationLayout.PatchDir(stackRoot, onyxiaKey), "progression.json"), "{}");
+
+            var result = await service.ValidatePatchesAsync(stackId);
+
+            result.Passed.Should().BeFalse();
+            result.Mode.Should().Be(PatchValidationMode.Full);
+            result.ExpectedPatchCount.Should().BeGreaterThan(2);
+            result.Errors.Should().Contain(error => error.Contains("Missing", StringComparison.Ordinal));
+            result.Errors.Should().Contain(error => error.Contains("ONYXIA", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
+    private static void SeedRealisticProgressionRepo(string stackRoot)
+    {
+        var repoRoot = MigrationLayout.ProgressionRepoDir(stackRoot);
+        foreach (var (expansion, patchFolder) in new (string, string)[]
+                 {
+                     ("Classic", "1.0 Start"),
+                     ("Classic", "1.1 Molten Core & Onyxia"),
+                     ("Classic", "1.2 Blackwing Lair"),
+                     ("Classic", "1.3 Pre AQ"),
+                     ("Tbc", "2.0 Karazhan, Gruul's Lair, Magtheridon's Lair"),
+                     ("Wotlk", "3.0 Naxxramas, Eye of Eternity, Obsidian Sanctum"),
+                 })
+        {
+            var patchDir = Path.Combine(repoRoot, expansion, patchFolder);
+            Directory.CreateDirectory(Path.Combine(patchDir, "config"));
+            File.WriteAllText(Path.Combine(patchDir, "description.md"), patchFolder);
+        }
+    }
+
+    [Fact]
     public async Task ValidatePatchesAsync_fails_when_only_subset_of_repo_patches_present()
     {
         var stackId = "ip-validate-subset";

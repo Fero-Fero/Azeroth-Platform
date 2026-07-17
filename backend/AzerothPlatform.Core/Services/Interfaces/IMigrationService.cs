@@ -26,6 +26,25 @@ public interface IMigrationService
         string patchKey,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the player-facing news article bundled in a patch folder, if any.</summary>
+    Task<PatchNewsPreviewDto> GetPatchNewsPreviewAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves a patch news cover image on disk for preview, or null when absent.</summary>
+    Task<(string Path, string ContentType)?> ResolvePatchNewsCoverAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Resolves an inline image or other asset from a patch's news folder for preview.</summary>
+    Task<(string Path, string ContentType)?> ResolvePatchNewsAssetAsync(
+        string stackId,
+        string patchKey,
+        string relativePath,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Saves description.md / description.txt for a patch.</summary>
     Task<PatchDetailsDto> SavePatchDescriptionAsync(string stackId, string patchKey, string content, CancellationToken cancellationToken = default);
 

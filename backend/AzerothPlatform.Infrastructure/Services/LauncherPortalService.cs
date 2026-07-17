@@ -426,6 +426,21 @@ public sealed class LauncherPortalService : ILauncherPortalService
     private static readonly HashSet<string> AllowedNewsTags =
         new(StringComparer.OrdinalIgnoreCase) { "patch", "announcement", "expansion", "event", "update", "hotfix" };
 
+    private static LauncherNewsItemDto NormalizeIncomingNewsItem(LauncherNewsItemDto item)
+    {
+        var id = string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id.Trim();
+        return new LauncherNewsItemDto
+        {
+            Id = id,
+            Title = (item.Title ?? string.Empty).Trim(),
+            Date = (item.Date ?? string.Empty).Trim(),
+            Html = NewsSanitizer.Sanitize(item.Html ?? string.Empty),
+            SortOrder = item.SortOrder,
+            IsDraft = item.IsDraft,
+            Tag = NormalizeNewsTag(item.Tag),
+        };
+    }
+
     private static string NormalizeNewsTag(string? tag)
     {
         var normalized = (tag ?? string.Empty).Trim().ToLowerInvariant();
@@ -550,6 +565,50 @@ public sealed class LauncherPortalService : ILauncherPortalService
         return await GetStackNewsAsync(stackId, includeDrafts: true, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<LauncherNewsItemDto>> MergeStackNewsArticleAsync(
+        string stackId,
+        LauncherNewsItemDto article,
+        CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+        var dir = StackNewsDir(stackId);
+        var imageRoute = $"/api/stacks/{stackId}/launcher/news-image";
+        var existing = await ReadNewsAsync(dir, imageRoute, includeDrafts: true, cancellationToken);
+        var merged = existing.ToList();
+        var normalized = NormalizeIncomingNewsItem(article);
+
+        var existingIndex = merged.FindIndex(item =>
+            string.Equals(item.Id, normalized.Id, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            normalized.SortOrder = merged[existingIndex].SortOrder;
+            merged[existingIndex] = normalized;
+        }
+        else
+        {
+            normalized.SortOrder = merged.Count == 0 ? 0 : merged.Max(item => item.SortOrder) + 1;
+            merged.Add(normalized);
+        }
+
+        return await WriteNewsAsync(dir, merged, imageRoute, cancellationToken);
+    }
+
+    public async Task MergeStackNewsCoverFromFileAsync(
+        string stackId,
+        string itemId,
+        string sourceImagePath,
+        CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+        await using var stream = File.OpenRead(sourceImagePath);
+        await StoreNewsImageAsync(
+            StackNewsDir(stackId),
+            itemId,
+            Path.GetFileName(sourceImagePath),
+            stream,
+            cancellationToken);
+    }
+
     public async Task<(string Path, string ContentType)?> ResolveStackNewsImageAsync(
         string stackId, string itemId, CancellationToken cancellationToken = default)
     {
@@ -611,16 +670,16 @@ public sealed class LauncherPortalService : ILauncherPortalService
         var normalized = new List<StoredNewsItem>();
         foreach (var item in items ?? Array.Empty<LauncherNewsItemDto>())
         {
-            var id = string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id.Trim();
+            var dto = NormalizeIncomingNewsItem(item);
             normalized.Add(new StoredNewsItem
             {
-                Id = id,
-                Title = (item.Title ?? string.Empty).Trim(),
-                Date = (item.Date ?? string.Empty).Trim(),
-                Html = NewsSanitizer.Sanitize(item.Html ?? string.Empty),
-                SortOrder = item.SortOrder,
-                IsDraft = item.IsDraft,
-                Tag = NormalizeNewsTag(item.Tag)
+                Id = dto.Id,
+                Title = dto.Title,
+                Date = dto.Date,
+                Html = dto.Html,
+                SortOrder = dto.SortOrder,
+                IsDraft = dto.IsDraft,
+                Tag = dto.Tag,
             });
         }
 

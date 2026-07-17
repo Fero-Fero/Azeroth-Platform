@@ -53,6 +53,7 @@ public sealed partial class MigrationService : IMigrationService
     private readonly IIndividualProgressionSyncService _individualProgression;
     private readonly IServerConfigService _serverConfig;
     private readonly IStackRegistryService _stackRegistry;
+    private readonly ILauncherPortalService _launcherPortal;
     private readonly ClientServerOptions _clientServerOptions;
     private readonly ILogger<MigrationService> _logger;
 
@@ -66,6 +67,7 @@ public sealed partial class MigrationService : IMigrationService
         IIndividualProgressionSyncService individualProgression,
         IServerConfigService serverConfig,
         IStackRegistryService stackRegistry,
+        ILauncherPortalService launcherPortal,
         IOptions<ClientServerOptions> clientServerOptions,
         ILogger<MigrationService> logger)
     {
@@ -78,6 +80,7 @@ public sealed partial class MigrationService : IMigrationService
         _individualProgression = individualProgression;
         _serverConfig = serverConfig;
         _stackRegistry = stackRegistry;
+        _launcherPortal = launcherPortal;
         _clientServerOptions = clientServerOptions.Value;
         _logger = logger;
     }
@@ -190,6 +193,11 @@ public sealed partial class MigrationService : IMigrationService
 
         var appliedAt = ParseAppliedPatches(stack.AppliedPatchesJson);
         var metadata = await _individualProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
+        LauncherNewsItemDto? patchNews = null;
+        if (PatchNewsReader.TryReadArticle(stackRoot, patch.Key, out var newsArticle, out _, out _))
+        {
+            patchNews = newsArticle;
+        }
 
         return new PatchDetailsDto
         {
@@ -205,8 +213,92 @@ public sealed partial class MigrationService : IMigrationService
             MpqRemovals = ReadMpqRemovals(stackRoot, patch.Key),
             Progression = metadata,
             ConfigOverrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patch.Key),
+            HasPatchNews = patchNews is not null,
+            PatchNewsTitle = patchNews?.Title,
         };
     }
+
+    public Task<PatchNewsPreviewDto> GetPatchNewsPreviewAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+
+        if (!PatchNewsReader.TryReadArticle(stackRoot, patchKey, out var article, out var coverPath, out var error))
+        {
+            return Task.FromResult(new PatchNewsPreviewDto
+            {
+                Available = false,
+                Error = error,
+            });
+        }
+
+        var encodedKey = Uri.EscapeDataString(patchKey);
+        return Task.FromResult(new PatchNewsPreviewDto
+        {
+            Available = true,
+            Id = article.Id,
+            Title = article.Title,
+            Date = article.Date,
+            Tag = article.Tag,
+            Html = PatchNewsReader.RewriteHtmlForPreview(article.Html, stackId, patchKey),
+            HasCover = coverPath is not null,
+            CoverUrl = coverPath is not null
+                ? $"/api/stacks/{stackId}/migrations/{encodedKey}/news-cover"
+                : null,
+        });
+    }
+
+    public Task<(string Path, string ContentType)?> ResolvePatchNewsAssetAsync(
+        string stackId,
+        string patchKey,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+
+        var assetPath = PatchNewsReader.ResolveAssetPath(stackRoot, patchKey, relativePath);
+        if (assetPath is null)
+        {
+            return Task.FromResult<(string Path, string ContentType)?>(null);
+        }
+
+        return Task.FromResult<(string Path, string ContentType)?>(
+            (assetPath, GuessContentType(assetPath)));
+    }
+
+    public Task<(string Path, string ContentType)?> ResolvePatchNewsCoverAsync(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var stackRoot = GetStackRoot(stackId);
+        RequirePatch(stackRoot, patchKey);
+
+        var coverPath = PatchNewsReader.ResolveCoverImagePath(stackRoot, patchKey);
+        if (coverPath is null)
+        {
+            return Task.FromResult<(string Path, string ContentType)?>(null);
+        }
+
+        return Task.FromResult<(string Path, string ContentType)?>(
+            (coverPath, GuessContentType(coverPath)));
+    }
+
+    private static string GuessContentType(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => "image/png",
+        };
 
     public async Task<List<PatchConfigOverrideDto>> GetPatchConfigOverridesPreviewAsync(
         string stackId,

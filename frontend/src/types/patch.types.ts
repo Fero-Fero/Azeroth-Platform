@@ -40,6 +40,20 @@ export interface PatchDetailsDto {
   mpqRemovals: string[]
   progression?: PatchProgressionMetadata | null
   configOverrides?: PatchConfigOverrideDto[]
+  hasPatchNews?: boolean
+  patchNewsTitle?: string | null
+}
+
+export interface PatchNewsPreviewDto {
+  available: boolean
+  error?: string | null
+  id?: string | null
+  title?: string | null
+  date?: string | null
+  tag?: string | null
+  html?: string | null
+  hasCover: boolean
+  coverUrl?: string | null
 }
 
 export interface PatchConfigOverrideDto {

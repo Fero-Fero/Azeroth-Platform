@@ -1309,6 +1309,8 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
 .news-content blockquote { margin: 0.8em 0; padding: 0.4em 1em; font-style: italic; color: #cbd5e1; border-left: 3px solid var(--news-accent); background: rgba(255,255,255,0.05); }
 .news-content hr { border: none; border-top: 1px solid rgba(255,255,255,0.15); margin: 1em 0; }
 .news-content img { max-width: 100%; height: auto; border-radius: 6px; }
+.news-content .news-inline-image { margin: 1em 0; text-align: center; }
+.news-content .news-inline-image img { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 .news-content code { background: rgba(255,255,255,0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
 .news-content strong { color: #fff; }
 .news-content table { border-collapse: collapse; width: 100%; margin: 0.6em 0; }

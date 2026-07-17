@@ -97,43 +97,106 @@ internal static class ProgressionRepoAlignment
         string stackRoot,
         ICollection<string> errors)
     {
+        ValidatePatchFolderAlignment(expectedPatchKeys, stackRoot, errors);
+    }
+
+    /// <summary>
+    /// Ensures stack patch folders exactly match the synced Azeroth-Platform-Progression reference:
+    /// every expected folder must exist with the correct name, and no extra classic/tbc/wotlk patch
+    /// folders or managed progression folders may remain under <c>migrations/</c>.
+    /// </summary>
+    public static void ValidatePatchFolderAlignment(
+        IReadOnlyCollection<string> expectedPatchKeys,
+        string stackRoot,
+        ICollection<string> errors)
+    {
         if (expectedPatchKeys.Count == 0)
         {
             return;
         }
 
+        var expectedSet = expectedPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
         if (!Directory.Exists(migrationsRoot))
         {
+            foreach (var expectedKey in expectedPatchKeys)
+            {
+                errors.Add(
+                    $"Missing progression patch folder '{expectedKey}'. Run Update & re-sync to create patch folders from Azeroth-Platform-Progression.");
+            }
+
             return;
         }
 
-        foreach (var patchDir in Directory.EnumerateDirectories(migrationsRoot))
+        var stackPatchDirs = Directory.EnumerateDirectories(migrationsRoot).ToList();
+        var stackKeysByIndex = new Dictionary<PatchIndex, List<string>>();
+        foreach (var patchDir in stackPatchDirs)
         {
             var patchKey = Path.GetFileName(patchDir);
-            if (expectedPatchKeys.Contains(patchKey))
+            if (!PatchFolderNames.TryParse(patchKey, out var index, out _))
             {
                 continue;
             }
 
-            if (!File.Exists(Path.Combine(patchDir, ProgressionMetadataFileName)))
+            if (!stackKeysByIndex.TryGetValue(index, out var keys))
+            {
+                keys = [];
+                stackKeysByIndex[index] = keys;
+            }
+
+            keys.Add(patchKey);
+        }
+
+        foreach (var expectedKey in expectedPatchKeys)
+        {
+            var expectedDir = MigrationLayout.PatchDir(stackRoot, expectedKey);
+            if (Directory.Exists(expectedDir))
             {
                 continue;
             }
 
             errors.Add(
-                $"Unexpected progression patch '{patchKey}' is not in Azeroth-Platform-Progression. Run Update & re-sync or remove the orphaned patch folder.");
+                $"Missing progression patch folder '{expectedKey}'. Run Update & re-sync to create patch folders from Azeroth-Platform-Progression.");
+
+            if (!PatchFolderNames.TryParse(expectedKey, out var expectedIndex, out _))
+            {
+                continue;
+            }
+
+            if (!stackKeysByIndex.TryGetValue(expectedIndex, out var stackKeysWithIndex))
+            {
+                continue;
+            }
+
+            foreach (var misnamedKey in stackKeysWithIndex.Where(key =>
+                         !expectedSet.Contains(key)))
+            {
+                errors.Add(
+                    $"Patch index {expectedIndex.ToIndexString()} is named '{misnamedKey}' but Azeroth-Platform-Progression expects '{expectedKey}'. Run Update & re-sync.");
+            }
+        }
+
+        foreach (var patchDir in stackPatchDirs)
+        {
+            var patchKey = Path.GetFileName(patchDir);
+            if (expectedSet.Contains(patchKey))
+            {
+                continue;
+            }
+
+            var hasProgressionMetadata = File.Exists(Path.Combine(patchDir, ProgressionMetadataFileName));
+            var isProgressionExpansionPatch = PatchFolderNames.TryParse(patchKey, out var index, out _)
+                && index.ExpansionRoot is >= 1 and <= 3;
+
+            if (!hasProgressionMetadata && !isProgressionExpansionPatch)
+            {
+                continue;
+            }
+
+            errors.Add(
+                $"Unexpected progression patch folder '{patchKey}' is not in Azeroth-Platform-Progression. Run Update & re-sync or remove the orphaned patch folder.");
         }
     }
-
-    /// <summary>
-    /// Reports managed progression patches on the stack that are not present in the repository layout.
-    /// </summary>
-    public static void ValidateUnexpectedManagedPatches(
-        string repoDir,
-        string stackRoot,
-        ICollection<string> errors) =>
-        ValidateUnexpectedManagedPatches(EnumerateExpectedPatchKeys(repoDir), stackRoot, errors);
 
     /// <summary>
     /// Removes managed progression patch folders that no longer exist in the repository layout

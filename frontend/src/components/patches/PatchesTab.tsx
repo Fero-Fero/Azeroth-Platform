@@ -29,6 +29,7 @@ import PatchFileCategory from './PatchFileCategory'
 import PatchConfigOverridesPreview, {
   PatchConfigOverridesPreviewButton,
 } from './PatchConfigOverridesPreview'
+import PatchNewsPreview, { PatchNewsPreviewButton } from './PatchNewsPreview'
 import ContainerFileCategory from './ContainerFileCategory'
 import DbcEditorDialog from './DbcEditorDialog'
 import MpqRemovalPanel from './MpqRemovalPanel'
@@ -272,7 +273,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   // so they're visible without scrolling.
   const [uploadError, setUploadError] = useState<{ category: string; message: string } | null>(null)
   const [showConfigOverridesPreview, setShowConfigOverridesPreview] = useState(false)
-  const [patchDetailTab, setPatchDetailTab] = useState<'description' | 'files'>('files')
+  const [showPatchNewsPreview, setShowPatchNewsPreview] = useState(false)
+  const [patchDetailTab, setPatchDetailTab] = useState<'description' | 'files' | 'news'>('files')
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null)
   const [descriptionSaved, setDescriptionSaved] = useState(false)
   const [descriptionSaveError, setDescriptionSaveError] = useState<string | null>(null)
@@ -1627,6 +1629,11 @@ Flat layout also works:
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  <PatchNewsPreviewButton
+                    hasPatchNews={detail?.hasPatchNews ?? false}
+                    patchNewsTitle={detail?.patchNewsTitle}
+                    onOpen={() => setShowPatchNewsPreview(true)}
+                  />
                   {!hasAppliedPatches && (
                     <button
                       type="button"
@@ -1690,10 +1697,43 @@ Flat layout also works:
                 >
                   Description
                 </button>
+                {detail?.hasPatchNews && (
+                  <button
+                    type="button"
+                    onClick={() => setPatchDetailTab('news')}
+                    className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                      patchDetailTab === 'news'
+                        ? 'border-blue-600 text-blue-700'
+                        : 'border-transparent text-gray-500 hover:text-gray-800'
+                    }`}
+                  >
+                    News
+                  </button>
+                )}
               </div>
 
               <div className="space-y-4 p-5">
-              {patchDetailTab === 'files' ? (
+              {patchDetailTab === 'news' ? (
+                <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900">
+                        {detail?.patchNewsTitle ?? 'Patch news article'}
+                      </h4>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Player-facing article from{' '}
+                        <span className="font-mono">news/article.json</span>. Published to the
+                        launcher and armory when this patch is applied.
+                      </p>
+                    </div>
+                    <PatchNewsPreviewButton
+                      hasPatchNews
+                      patchNewsTitle={detail?.patchNewsTitle}
+                      onOpen={() => setShowPatchNewsPreview(true)}
+                    />
+                  </div>
+                </div>
+              ) : patchDetailTab === 'files' ? (
                 <>
               <PatchFileCategory
                 title="Config overrides"
@@ -1881,6 +1921,13 @@ Flat layout also works:
         overrides={configOverrides}
         open={showConfigOverridesPreview}
         onClose={() => setShowConfigOverridesPreview(false)}
+      />
+
+      <PatchNewsPreview
+        stackId={stackId}
+        patchKey={selectedKey}
+        open={showPatchNewsPreview}
+        onClose={() => setShowPatchNewsPreview(false)}
       />
 
       {confirmApply && applyProgressionPreview && (

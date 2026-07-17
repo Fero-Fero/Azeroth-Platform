@@ -104,6 +104,47 @@ public class MigrationsController : ControllerBase
         CancellationToken cancellationToken)
         => Execute(() => _migrations.GetPatchConfigOverridesPreviewAsync(stackId, patchKey, cancellationToken));
 
+    /// <summary>Preview of the player-facing news article bundled in a patch folder.</summary>
+    [HttpGet("{patchKey}/news-preview")]
+    public Task<IActionResult> GetPatchNewsPreview(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken)
+        => Execute(() => _migrations.GetPatchNewsPreviewAsync(stackId, patchKey, cancellationToken));
+
+    /// <summary>Cover image for a patch news article preview.</summary>
+    [HttpGet("{patchKey}/news-cover")]
+    public async Task<IActionResult> GetPatchNewsCover(
+        string stackId,
+        string patchKey,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await _migrations.ResolvePatchNewsCoverAsync(stackId, patchKey, cancellationToken);
+        if (resolved is null)
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(resolved.Value.Path, resolved.Value.ContentType);
+    }
+
+    /// <summary>Inline image or other asset bundled in a patch news folder.</summary>
+    [HttpGet("{patchKey}/news-asset/{**relativePath}")]
+    public async Task<IActionResult> GetPatchNewsAsset(
+        string stackId,
+        string patchKey,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await _migrations.ResolvePatchNewsAssetAsync(stackId, patchKey, relativePath, cancellationToken);
+        if (resolved is null)
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(resolved.Value.Path, resolved.Value.ContentType);
+    }
+
     /// <summary>Saves description.md / description.txt for a single patch.</summary>
     [HttpPut("{patchKey}/description")]
     public Task<IActionResult> SavePatchDescription(

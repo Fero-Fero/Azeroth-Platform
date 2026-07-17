@@ -80,6 +80,22 @@ public interface ILauncherPortalService
     /// <summary>Stores/replaces a stack news article's cover image. Returns the updated list.</summary>
     Task<IReadOnlyList<LauncherNewsItemDto>> SaveStackNewsImageAsync(string stackId, string itemId, string fileName, Stream content, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Inserts or replaces a single news article in a stack's news feed (used when a patch with
+    /// <c>news/article.json</c> is applied).
+    /// </summary>
+    Task<IReadOnlyList<LauncherNewsItemDto>> MergeStackNewsArticleAsync(
+        string stackId,
+        LauncherNewsItemDto article,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Copies a patch news cover image into the stack news store for the given article id.</summary>
+    Task MergeStackNewsCoverFromFileAsync(
+        string stackId,
+        string itemId,
+        string sourceImagePath,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Resolves a stack news cover image to an absolute path + content type, or null.</summary>
     Task<(string Path, string ContentType)?> ResolveStackNewsImageAsync(string stackId, string itemId, CancellationToken cancellationToken = default);
 

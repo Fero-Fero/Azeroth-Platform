@@ -94,6 +94,35 @@ public sealed class PatchDetailsDto
     /// Parsed config overrides from <c>config/*.json</c> that will be applied to server <c>.conf</c> files.
     /// </summary>
     public List<PatchConfigOverrideDto> ConfigOverrides { get; set; } = new();
+
+    /// <summary>Whether this patch folder contains a <c>news/article.json</c> player-facing article.</summary>
+    public bool HasPatchNews { get; set; }
+
+    /// <summary>Headline from <c>news/article.json</c> when present.</summary>
+    public string? PatchNewsTitle { get; set; }
+}
+
+/// <summary>Preview of a patch-authored launcher news article before apply.</summary>
+public sealed class PatchNewsPreviewDto
+{
+    public bool Available { get; set; }
+
+    public string? Error { get; set; }
+
+    public string? Id { get; set; }
+
+    public string? Title { get; set; }
+
+    public string? Date { get; set; }
+
+    public string? Tag { get; set; }
+
+    public string? Html { get; set; }
+
+    public bool HasCover { get; set; }
+
+    /// <summary>Relative API URL to the patch news cover image for preview.</summary>
+    public string? CoverUrl { get; set; }
 }
 
 /// <summary>A single key/value override from a patch config JSON file.</summary>

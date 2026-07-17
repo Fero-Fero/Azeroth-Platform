@@ -255,16 +255,16 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     private static IReadOnlyList<string> ResolveExpectedPatchKeys(string stackRoot)
     {
-        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        if (Directory.Exists(repoPath))
-        {
-            return ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoPath).ToList();
-        }
-
         var manifest = LoadReferenceManifest(stackRoot);
         if (manifest?.ExpectedPatchKeys.Count > 0)
         {
             return manifest.ExpectedPatchKeys;
+        }
+
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        if (Directory.Exists(repoPath))
+        {
+            return ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoPath).ToList();
         }
 
         var syncLog = LoadSyncLog(stackRoot);
@@ -296,11 +296,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var mode = validateRepoStructure ? PatchValidationMode.Full : PatchValidationMode.ConfigOnly;
         var fingerprintMode = hasMip && settings is { Bootstrapped: true } && hasCompletedSync;
 
-        var expectedPatchKeys = syncLog.LastKnownPatchKeys.Count > 0
-            ? syncLog.LastKnownPatchKeys
-            : repoExists
-                ? ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoPath).ToList()
-                : LoadReferenceManifest(stackRoot)?.ExpectedPatchKeys ?? [];
+        var expectedPatchKeys = ResolveExpectedPatchKeys(stackRoot);
 
         var errors = new List<string>();
         var keyChecks = new List<IndividualProgressionKeyCheckDto>();
@@ -317,6 +313,12 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                 "Progression sync has not completed yet. Run Sync with mod-individual-progression before validating patch structure.");
         }
 
+        if (validateRepoStructure && expectedPatchKeys.Count == 0)
+        {
+            errors.Add(
+                "No expected progression patch folders captured from Azeroth-Platform-Progression. Run Update & re-sync.");
+        }
+
         if (validateRepoStructure)
         {
             var missingPatchCount = ProgressionRepoAlignment.CountMissingPatches(expectedPatchKeys, stackRoot);
@@ -326,8 +328,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                     $"Missing {missingPatchCount} progression patch folder(s) from Azeroth-Platform-Progression ({patchCount} of {expectedPatchCount} present on the stack). Run Update & re-sync.");
             }
 
-            var expectedSet = expectedPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            ProgressionRepoAlignment.ValidateUnexpectedManagedPatches(expectedSet, stackRoot, errors);
+            ProgressionRepoAlignment.ValidatePatchFolderAlignment(expectedPatchKeys, stackRoot, errors);
 
             if (repoExists)
             {
@@ -358,6 +359,16 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         var passed = errors.Count == 0
             && (keyChecks.Count == 0 || keyChecks.All(check => check.Exists && check.CanRead));
+
+        if (validateRepoStructure
+            && expectedPatchCount > 0
+            && patchCount != expectedPatchCount
+            && passed)
+        {
+            passed = false;
+            errors.Add(
+                $"Patch folder alignment mismatch: {patchCount} of {expectedPatchCount} expected progression patches are present with the correct Azeroth-Platform-Progression names.");
+        }
 
         string? buildFingerprint = null;
         if (fingerprintMode)

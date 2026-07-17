@@ -417,6 +417,7 @@ public sealed partial class MigrationService
             // 11.5) Apply config overrides from the patch's config/ directory (worldserver.json, etc.).
             var configApplied = await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
             var launcherApplied = await ApplyPatchLauncherThemeAsync(stackId, stack, stackRoot, patch.Key, result, cancellationToken);
+            await ApplyPatchNewsAsync(stackId, stackRoot, patch.Key, result, cancellationToken);
 
             // 11.6) Deploy Lua scripts from the patch's lua/ directory to the stack lua_scripts root.
             var luaApplied = await ApplyPatchLuaScriptsAsync(stackRoot, patch.Key, result, cancellationToken);
@@ -1421,6 +1422,74 @@ public sealed partial class MigrationService
             catch (Exception ex)
             {
                 AddLog(result, $"Launcher theme saved but registry refresh failed: {ex.Message}");
+            }
+        }, cancellationToken);
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Publishes a player-facing news article from <c>news/article.json</c> when present.
+    /// </summary>
+    private async Task<bool> ApplyPatchNewsAsync(
+        string stackId,
+        string stackRoot,
+        string patchKey,
+        ApplyPatchResultDto result,
+        CancellationToken cancellationToken)
+    {
+        if (!PatchNewsReader.TryReadArticle(stackRoot, patchKey, out var article, out var coverPath, out var error))
+        {
+            if (PatchNewsReader.HasArticle(stackRoot, patchKey))
+            {
+                AddLog(result, $"Failed to publish patch news: {error}");
+            }
+
+            return false;
+        }
+
+        var applied = false;
+        await RunStageAsync("patch-news", result, async () =>
+        {
+            var published = new LauncherNewsItemDto
+            {
+                Id = article.Id,
+                Title = article.Title,
+                Date = article.Date,
+                Tag = article.Tag,
+                SortOrder = article.SortOrder,
+                IsDraft = false,
+                Html = PatchNewsReader.RewriteHtmlForPublish(article.Html, stackId, article.Id),
+            };
+
+            await _launcherPortal.MergeStackNewsArticleAsync(stackId, published, cancellationToken);
+            if (coverPath is not null)
+            {
+                await _launcherPortal.MergeStackNewsCoverFromFileAsync(stackId, article.Id, coverPath, cancellationToken);
+            }
+
+            foreach (var relativeAsset in PatchNewsReader.EnumerateAssetFiles(stackRoot, patchKey))
+            {
+                var assetPath = PatchNewsReader.ResolveAssetPath(stackRoot, patchKey, relativeAsset);
+                if (assetPath is null)
+                {
+                    continue;
+                }
+
+                var assetId = PatchNewsReader.ToPublishedAssetId(article.Id, relativeAsset);
+                await _launcherPortal.MergeStackNewsCoverFromFileAsync(stackId, assetId, assetPath, cancellationToken);
+            }
+
+            applied = true;
+            AddLog(result, $"Published launcher news article '{article.Title}' from news/{PatchNewsReader.ArticleFileName}.");
+
+            try
+            {
+                await _stackRegistry.RebuildAndPushAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                AddLog(result, $"Patch news saved but registry refresh failed: {ex.Message}");
             }
         }, cancellationToken);
 

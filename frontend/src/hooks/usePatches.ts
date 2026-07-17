@@ -9,6 +9,8 @@ export const patchKeys = {
     [...patchKeys.all, 'detail', stackId, patchKey] as const,
   configOverridesPreview: (stackId: string, patchKey: string) =>
     [...patchKeys.all, 'config-overrides-preview', stackId, patchKey] as const,
+  newsPreview: (stackId: string, patchKey: string) =>
+    [...patchKeys.all, 'news-preview', stackId, patchKey] as const,
   applyStatus: (stackId: string) => [...patchKeys.all, 'apply-status', stackId] as const,
   browse: (stackId: string) => [...patchKeys.all, 'browse', stackId] as const,
   publishedMpqs: (stackId: string) => [...patchKeys.all, 'published-mpqs', stackId] as const,
@@ -51,6 +53,18 @@ export function usePatchConfigOverridesPreview(
   return useQuery({
     queryKey: patchKeys.configOverridesPreview(stackId, patchKey ?? ''),
     queryFn: async () => (await patchApi.configOverridesPreview(stackId, patchKey!)).data,
+    enabled: enabled && !!stackId && !!patchKey,
+  })
+}
+
+export function usePatchNewsPreview(
+  stackId: string,
+  patchKey: string | null,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: patchKeys.newsPreview(stackId, patchKey ?? ''),
+    queryFn: async () => (await patchApi.newsPreview(stackId, patchKey!)).data,
     enabled: enabled && !!stackId && !!patchKey,
   })
 }

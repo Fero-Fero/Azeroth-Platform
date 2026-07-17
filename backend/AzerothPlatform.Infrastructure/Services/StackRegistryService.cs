@@ -203,6 +203,9 @@ public sealed class StackRegistryService : IStackRegistryService
     private static readonly Regex NewsImageRouteRegex = new(
         @"/api/(?:launcher|stacks/[^/""']+/launcher)/news-image/", RegexOptions.Compiled);
 
+    private static readonly Regex InlineNewsImageIdRegex = new(
+        @"/news-image/([a-zA-Z0-9_-]+)", RegexOptions.Compiled);
+
     /// <summary>
     /// Resolves a stack's published news feed + cover images and pushes them into its client container so it
     /// can serve them at <c>/news</c> and <c>/news-image/{id}</c>, or clears the feed when there is none.
@@ -240,6 +243,21 @@ public sealed class StackRegistryService : IStackRegistryService
                 if (resolved is { } asset && File.Exists(asset.Path))
                 {
                     images[item.Id] = await File.ReadAllBytesAsync(asset.Path, cancellationToken);
+                }
+            }
+
+            foreach (Match match in InlineNewsImageIdRegex.Matches(item.Html ?? string.Empty))
+            {
+                var imageId = match.Groups[1].Value;
+                if (images.ContainsKey(imageId))
+                {
+                    continue;
+                }
+
+                var resolved = await _launcherPortal.ResolveStackNewsImageAsync(stackId, imageId, cancellationToken);
+                if (resolved is { } asset && File.Exists(asset.Path))
+                {
+                    images[imageId] = await File.ReadAllBytesAsync(asset.Path, cancellationToken);
                 }
             }
         }

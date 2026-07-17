@@ -174,6 +174,7 @@ public sealed class PatchDeleteTests
             ipSync.Object,
             serverConfig.Object,
             stackRegistry.Object,
+            new Mock<ILauncherPortalService>().Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

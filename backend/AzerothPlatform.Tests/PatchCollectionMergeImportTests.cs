@@ -345,6 +345,7 @@ public sealed class PatchCollectionMergeImportTests
             ipSync.Object,
             serverConfig.Object,
             stackRegistry.Object,
+            new Mock<ILauncherPortalService>().Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

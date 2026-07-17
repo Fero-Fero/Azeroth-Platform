@@ -789,6 +789,31 @@ public sealed class ProgressionSyncProgressStoreTests
 public sealed class ProgressionRepoAlignmentTests
 {
     [Fact]
+    public void ValidatePatchFolderAlignment_flags_catalog_slug_and_misnamed_indices()
+    {
+        using var stack = new TempDirectoryWrapper();
+
+        var expected = new[]
+        {
+            "patch 1.0 Start",
+            "patch 1.1 Molten Core & Onyxia",
+            "patch 1.2 Blackwing Lair",
+        };
+        CreateStackPatch(stack.Path, "patch 1.0 Start", includeMetadata: true);
+        CreateStackPatch(stack.Path, "patch 1.1 MOLTEN_CORE", includeMetadata: true);
+        CreateStackPatch(stack.Path, "patch 1.2 Onyxia", includeMetadata: false);
+
+        var errors = new List<string>();
+        ProgressionRepoAlignment.ValidatePatchFolderAlignment(expected, stack.Path, errors);
+
+        errors.Should().Contain(error => error.Contains("patch 1.1 Molten Core & Onyxia", StringComparison.Ordinal));
+        errors.Should().Contain(error => error.Contains("patch 1.1 MOLTEN_CORE", StringComparison.Ordinal));
+        errors.Should().Contain(error => error.Contains("patch 1.2 Blackwing Lair", StringComparison.Ordinal));
+        errors.Should().Contain(error => error.Contains("patch 1.2 Onyxia", StringComparison.Ordinal));
+        errors.Should().Contain(error => error.Contains("expects 'patch 1.2 Blackwing Lair'", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Counts_use_repo_aligned_patch_keys()
     {
         using var repo = new TempDirectoryWrapper();
