@@ -17,6 +17,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     private const string SettingsFileName = "individual_progression_settings.json";
     private const string ProgressionMetadataFileName = "progression.json";
     private const string SyncLogFileName = "progression_sync_log.json";
+    private const string ReferenceManifestFileName = "progression_reference_manifest.json";
     private const string ProgressionRepoUrl = "https://github.com/Fero-Fero/Azeroth-Platform-Progression";
     private const string MappingFileName = "mapping.json";
 
@@ -240,18 +241,34 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     public int CountProgressionPatches(string stackRoot)
     {
-        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        return Directory.Exists(repoPath)
-            ? ProgressionRepoAlignment.CountAlignedPatches(repoPath, stackRoot)
+        var expectedPatchKeys = ResolveExpectedPatchKeys(stackRoot);
+        return expectedPatchKeys.Count > 0
+            ? ProgressionRepoAlignment.CountAlignedPatches(expectedPatchKeys, stackRoot)
             : ProgressionRepoStructureValidator.CountManagedProgressionPatches(stackRoot);
     }
 
     public int GetExpectedProgressionPatchCount(string stackId)
     {
-        var repoPath = ResolveProgressionRepoDirectory(GetStackRoot(stackId));
-        return Directory.Exists(repoPath)
-            ? ProgressionRepoAlignment.CountExpectedPatches(repoPath)
-            : 0;
+        var stackRoot = GetStackRoot(stackId);
+        return ResolveExpectedPatchKeys(stackRoot).Count;
+    }
+
+    private static IReadOnlyList<string> ResolveExpectedPatchKeys(string stackRoot)
+    {
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        if (Directory.Exists(repoPath))
+        {
+            return ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoPath).ToList();
+        }
+
+        var manifest = LoadReferenceManifest(stackRoot);
+        if (manifest?.ExpectedPatchKeys.Count > 0)
+        {
+            return manifest.ExpectedPatchKeys;
+        }
+
+        var syncLog = LoadSyncLog(stackRoot);
+        return syncLog.LastKnownPatchKeys;
     }
 
     public async Task<IndividualProgressionValidationResultDto> ValidatePatchesAsync(
@@ -271,29 +288,63 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             settings = await LoadSettingsAsync(stackRoot, cancellationToken);
         }
 
+        var syncLog = await LoadSyncLogAsync(stackRoot, cancellationToken);
+        var hasCompletedSync = syncLog.LastSyncAt != default;
         var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        var fullMode = hasMip && settings is { Bootstrapped: true } && Directory.Exists(repoPath);
-        var mode = fullMode ? PatchValidationMode.Full : PatchValidationMode.ConfigOnly;
+        var repoExists = Directory.Exists(repoPath);
+        var validateRepoStructure = hasMip && hasCompletedSync;
+        var mode = validateRepoStructure ? PatchValidationMode.Full : PatchValidationMode.ConfigOnly;
+        var fingerprintMode = hasMip && settings is { Bootstrapped: true } && hasCompletedSync;
+
+        var expectedPatchKeys = syncLog.LastKnownPatchKeys.Count > 0
+            ? syncLog.LastKnownPatchKeys
+            : repoExists
+                ? ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoPath).ToList()
+                : LoadReferenceManifest(stackRoot)?.ExpectedPatchKeys ?? [];
 
         var errors = new List<string>();
         var keyChecks = new List<IndividualProgressionKeyCheckDto>();
-        var patchCount = fullMode ? CountProgressionPatches(stackRoot) : 0;
-        var expectedPatchCount = fullMode && Directory.Exists(repoPath)
-            ? ProgressionRepoAlignment.CountExpectedPatches(repoPath)
+        var patchCount = validateRepoStructure
+            ? ProgressionRepoAlignment.CountAlignedPatches(expectedPatchKeys, stackRoot)
+            : 0;
+        var expectedPatchCount = validateRepoStructure
+            ? expectedPatchKeys.Count
             : 0;
 
-        if (fullMode)
+        if (hasMip && !hasCompletedSync)
         {
-            var missingPatchCount = ProgressionRepoAlignment.CountMissingPatches(repoPath, stackRoot);
+            errors.Add(
+                "Progression sync has not completed yet. Run Sync with mod-individual-progression before validating patch structure.");
+        }
+
+        if (validateRepoStructure)
+        {
+            var missingPatchCount = ProgressionRepoAlignment.CountMissingPatches(expectedPatchKeys, stackRoot);
             if (missingPatchCount > 0)
             {
                 errors.Add(
                     $"Missing {missingPatchCount} progression patch folder(s) from Azeroth-Platform-Progression ({patchCount} of {expectedPatchCount} present on the stack). Run Update & re-sync.");
             }
 
-            if (patchCount > 0)
+            var expectedSet = expectedPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ProgressionRepoAlignment.ValidateUnexpectedManagedPatches(expectedSet, stackRoot, errors);
+
+            if (repoExists)
             {
                 ProgressionRepoStructureValidator.Validate(stackRoot, repoPath, errors);
+            }
+            else
+            {
+                var manifest = LoadReferenceManifest(stackRoot);
+                if (manifest is not null)
+                {
+                    ProgressionRepoStructureValidator.ValidateAgainstManifest(stackRoot, manifest, errors);
+                }
+                else
+                {
+                    errors.Add(
+                        "Progression reference manifest not found. Run Update & re-sync to capture the expected patch layout.");
+                }
             }
         }
 
@@ -309,7 +360,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             && (keyChecks.Count == 0 || keyChecks.All(check => check.Exists && check.CanRead));
 
         string? buildFingerprint = null;
-        if (fullMode)
+        if (fingerprintMode)
         {
             buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
             if (passed && buildFingerprint is null)
@@ -319,7 +370,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             }
         }
 
-        if (fullMode && settings is not null)
+        if (fingerprintMode && settings is not null)
         {
             if (passed)
             {
@@ -338,13 +389,13 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         return new IndividualProgressionValidationResultDto
         {
             Passed = passed,
-            IsCurrent = fullMode
+            IsCurrent = fingerprintMode
                 && passed
                 && settings is not null
                 && IndividualProgressionBuildFingerprint.IsCurrent(settings, stack),
             Mode = mode,
-            ValidatedAt = fullMode ? settings?.ValidationPassedAt : DateTimeOffset.UtcNow,
-            BuildFingerprint = fullMode ? settings?.ValidationBuildFingerprint : null,
+            ValidatedAt = fingerprintMode ? settings?.ValidationPassedAt : DateTimeOffset.UtcNow,
+            BuildFingerprint = fingerprintMode ? settings?.ValidationBuildFingerprint : null,
             PatchCount = patchCount,
             ExpectedPatchCount = expectedPatchCount,
             Errors = errors,
@@ -801,7 +852,10 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
             log.LastSyncAt = DateTimeOffset.UtcNow;
             log.LastKnownPatchKeys = ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoDir).ToList();
+            var referenceManifest = ProgressionReferenceManifestBuilder.BuildFromRepo(repoDir);
+            await PersistReferenceManifestAsync(stackRoot, referenceManifest, cancellationToken);
             await PersistSyncLogAsync(stackRoot, log, cancellationToken);
+            TryPruneProgressionRepo(stackRoot, result.Log);
             result.Success = true;
 
             var successMessage =
@@ -1043,6 +1097,69 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     private static string SyncLogPath(string stackRoot) =>
         Path.Combine(stackRoot, SyncLogFileName);
+
+    private static string ReferenceManifestPath(string stackRoot) =>
+        Path.Combine(stackRoot, ReferenceManifestFileName);
+
+    private static ProgressionReferenceManifestDto? LoadReferenceManifest(string stackRoot)
+    {
+        var path = ReferenceManifestPath(stackRoot);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ProgressionReferenceManifestDto>(File.ReadAllText(path), JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task PersistReferenceManifestAsync(
+        string stackRoot,
+        ProgressionReferenceManifestDto manifest,
+        CancellationToken cancellationToken)
+    {
+        var path = ReferenceManifestPath(stackRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(manifest, JsonOptions), cancellationToken);
+    }
+
+    private static ProgressionOptionalFilesLogDto LoadSyncLog(string stackRoot)
+    {
+        var path = SyncLogPath(stackRoot);
+        if (!File.Exists(path))
+        {
+            return new ProgressionOptionalFilesLogDto();
+        }
+
+        return JsonSerializer.Deserialize<ProgressionOptionalFilesLogDto>(File.ReadAllText(path), JsonOptions)
+            ?? new ProgressionOptionalFilesLogDto();
+    }
+
+    private static void TryPruneProgressionRepo(string stackRoot, ICollection<string> log)
+    {
+        var repoDir = ResolveProgressionRepoDirectory(stackRoot);
+        if (!Directory.Exists(repoDir))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(repoDir, recursive: true);
+            log.Add(
+                "Removed Azeroth-Platform-Progression checkout from the stack to save disk space. Patch validation uses the synced reference manifest.");
+        }
+        catch (Exception ex)
+        {
+            log.Add($"Failed to remove Azeroth-Platform-Progression checkout: {ex.Message}");
+        }
+    }
 
     private static async Task<ProgressionOptionalFilesLogDto> LoadSyncLogAsync(
         string stackRoot,

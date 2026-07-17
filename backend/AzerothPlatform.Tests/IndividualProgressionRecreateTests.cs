@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
@@ -165,9 +166,10 @@ public sealed class IndividualProgressionRecreateTests
 
             var result = await service.ValidatePatchesAsync(stackId);
 
-            result.Passed.Should().BeTrue();
+            result.Passed.Should().BeFalse();
             result.Mode.Should().Be(PatchValidationMode.ConfigOnly);
-            result.Errors.Should().BeEmpty();
+            result.Errors.Should().Contain(error =>
+                error.Contains("Progression sync has not completed", StringComparison.Ordinal));
             result.KeyChecks.Should().BeEmpty();
             result.PatchCount.Should().Be(0);
             result.ExpectedPatchCount.Should().Be(0);
@@ -235,6 +237,76 @@ public sealed class IndividualProgressionRecreateTests
             {
                 Directory.Delete(buildsPath, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ValidatePatchesAsync_fails_when_only_subset_of_repo_patches_present()
+    {
+        var stackId = "ip-validate-subset";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-ip-validate-subset-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, stackId);
+        try
+        {
+            await using var db = CreateDbContext(new ManagedStackEntity
+            {
+                Id = stackId,
+                StackName = stackId,
+                AppliedPatchLevel = 0,
+                ModuleIdsJson = """["mod-individual-progression"]""",
+                CoreCommitSha = "abc123",
+                LastBuiltAt = DateTime.UtcNow,
+            });
+            var service = CreateSyncService(db, buildsPath);
+
+            await service.BootstrapAsync(stackId);
+            SeedTestProgressionRepo(stackRoot);
+            SeedCompletedSyncArtifacts(stackRoot, pruneRepo: true);
+
+            var startKey = PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "Start");
+            var onyxiaKey = PatchFolderNames.Format(new PatchIndex(1, 2, explicitSub1: true), "Onyxia");
+            MigrationLayout.EnsurePatchDirectories(stackRoot, startKey);
+            MigrationLayout.EnsurePatchDirectories(stackRoot, onyxiaKey);
+            File.WriteAllText(Path.Combine(MigrationLayout.PatchDir(stackRoot, startKey), "description.md"), "Start");
+            File.WriteAllText(Path.Combine(MigrationLayout.PatchDir(stackRoot, onyxiaKey), "description.md"), "Onyxia");
+
+            var result = await service.ValidatePatchesAsync(stackId);
+
+            result.Passed.Should().BeFalse();
+            result.Mode.Should().Be(PatchValidationMode.Full);
+            result.ExpectedPatchCount.Should().BeGreaterThan(2);
+            result.PatchCount.Should().Be(2);
+            result.Errors.Should().Contain(error => error.Contains("Missing", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
+    private static void SeedCompletedSyncArtifacts(string stackRoot, bool pruneRepo = false)
+    {
+        var repoPath = MigrationLayout.ProgressionRepoDir(stackRoot);
+        var manifest = ProgressionReferenceManifestBuilder.BuildFromRepo(repoPath);
+        var syncLog = new ProgressionOptionalFilesLogDto
+        {
+            LastSyncAt = DateTimeOffset.UtcNow,
+            LastKnownPatchKeys = manifest.ExpectedPatchKeys,
+        };
+
+        File.WriteAllText(
+            Path.Combine(stackRoot, "progression_sync_log.json"),
+            JsonSerializer.Serialize(syncLog, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        File.WriteAllText(
+            Path.Combine(stackRoot, "progression_reference_manifest.json"),
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+
+        if (pruneRepo && Directory.Exists(repoPath))
+        {
+            Directory.Delete(repoPath, recursive: true);
         }
     }
 

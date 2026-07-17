@@ -219,6 +219,29 @@ public sealed class ProgressionRepoStructureValidatorTests
     }
 
     [Fact]
+    public void ValidateAgainstManifest_reports_missing_stack_files()
+    {
+        using var stack = new TempDirectory();
+        var manifest = new ProgressionReferenceManifestDto
+        {
+            ExpectedPatchKeys = ["patch 1.0 Start"],
+            RequiredFilesByPatchKey =
+            {
+                ["patch 1.0 Start"] = ["config/worldserver.json"],
+            },
+        };
+
+        var patchDir = Path.Combine(stack.Path, "migrations", "patch 1.0 Start");
+        Directory.CreateDirectory(patchDir);
+        File.WriteAllText(Path.Combine(patchDir, "description.md"), "Start");
+
+        var errors = new List<string>();
+        ProgressionRepoStructureValidator.ValidateAgainstManifest(stack.Path, manifest, errors);
+
+        errors.Should().Contain(error => error.Contains("config/worldserver.json"));
+    }
+
+    [Fact]
     public void Validate_accepts_custom_category_folder()
     {
         using var repo = new TempDirectory();

@@ -153,6 +153,23 @@ public sealed class ProgressionOptionalFilesLogDto
     public List<string> LastKnownPatchKeys { get; set; } = new();
 }
 
+/// <summary>
+/// Snapshot of Azeroth-Platform-Progression layout captured during sync so validation can run
+/// after the on-stack repository checkout is removed.
+/// </summary>
+public sealed class ProgressionReferenceManifestDto
+{
+    public DateTimeOffset CapturedAt { get; set; }
+
+    public List<string> ExpectedPatchKeys { get; set; } = new();
+
+    /// <summary>
+    /// Required stack-relative file paths per patch key (for example <c>config/worldserver.json</c>).
+    /// </summary>
+    public Dictionary<string, List<string>> RequiredFilesByPatchKey { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+}
+
 /// <summary>An optional file that the user previously ignored and may re-prompt for.</summary>
 public sealed class ProgressionIgnoredFileDto
 {

@@ -1,3 +1,4 @@
+using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
 namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
@@ -46,6 +47,54 @@ public static class ProgressionRepoStructureValidator
                     stackPatchDir,
                     stackPatchKey,
                     errors);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates stack patch folders against a persisted reference manifest from the last progression sync.
+    /// </summary>
+    public static void ValidateAgainstManifest(
+        string stackRoot,
+        ProgressionReferenceManifestDto manifest,
+        ICollection<string> errors)
+    {
+        if (manifest.ExpectedPatchKeys.Count == 0)
+        {
+            errors.Add(
+                "Progression reference manifest is empty. Run Update & re-sync to refresh the expected patch layout.");
+            return;
+        }
+
+        foreach (var patchKey in manifest.ExpectedPatchKeys)
+        {
+            var stackPatchDir = MigrationLayout.PatchDir(stackRoot, patchKey);
+            if (!Directory.Exists(stackPatchDir))
+            {
+                errors.Add(
+                    $"No stack patch matches reference patch {patchKey}. Run progression sync to create patch folders from Azeroth-Platform-Progression.");
+                continue;
+            }
+
+            if (!manifest.RequiredFilesByPatchKey.TryGetValue(patchKey, out var requiredFiles))
+            {
+                continue;
+            }
+
+            foreach (var stackRelativePath in requiredFiles)
+            {
+                var stackFile = Path.Combine(
+                    stackPatchDir,
+                    stackRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(stackFile))
+                {
+                    errors.Add($"{patchKey}: missing '{stackRelativePath}' (required by Azeroth-Platform-Progression).");
+                }
+            }
+
+            if (!HasPatchDescription(stackPatchDir))
+            {
+                errors.Add($"{patchKey}: missing patch description file.");
             }
         }
     }

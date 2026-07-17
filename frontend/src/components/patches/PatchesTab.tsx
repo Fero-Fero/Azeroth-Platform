@@ -846,14 +846,16 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     !isApplying &&
     !overview?.individualProgressionBootstrapped
   const showValidationPanel = true
-  const validationMode = validationResult?.mode ?? (ipBootstrapped ? 'Full' : 'ConfigOnly')
+  const validationMode =
+    validationResult?.mode ??
+    (hasIpModule && (overview?.individualProgressionExpectedPatchCount ?? 0) > 0 ? 'Full' : 'ConfigOnly')
   const validationPanelPositive =
     ipValidationCurrent ||
     (validationResult?.passed === true && validationResult.mode === 'ConfigOnly')
   const validationModeDescription =
     validationMode === 'Full'
-      ? 'Validates patch folders against Azeroth-Platform-Progression and checks config overrides.'
-      : 'Validates config override keys against live server configs.'
+      ? 'Validates patch folders against the synced Azeroth-Platform-Progression reference and checks config overrides.'
+      : 'Validates config override keys against live server configs. Run progression sync first for full structure checks.'
   const progressionPatchCountMismatch =
     expectedProgressionPatchCount > 0 &&
     (validationResult?.patchCount ?? overview?.individualProgressionPatchCount ?? 0) !==
