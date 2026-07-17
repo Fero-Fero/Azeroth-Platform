@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2, Plus, Play, CheckCircle2, Lock, ArrowRight, Database, AlertTriangle, RefreshCw, Download, Clock, Upload, FolderOpen, Save, ChevronDown, TrendingUp, ShieldCheck, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Play, CheckCircle2, Lock, ArrowRight, Database, AlertTriangle, RefreshCw, Download, Clock, Upload, FolderOpen, Save, ChevronDown, TrendingUp, ShieldCheck, Trash2, X } from 'lucide-react'
 import {
   usePatchOverview,
   usePatchDetail,
@@ -1115,14 +1115,25 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                   : 'border-red-200 bg-white text-red-900'
               }`}
             >
-              <p className="font-medium">
-                {validationResult.passed ? 'Validation passed' : 'Validation failed'}
-                {validationResult.expectedPatchCount > 0
-                  ? ` — ${validationResult.patchCount} / ${validationResult.expectedPatchCount} progression patches`
-                  : validationResult.patchCount > 0
-                  ? ` — ${validationResult.patchCount} progression patch${validationResult.patchCount === 1 ? '' : 'es'}`
-                  : ''}
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-medium">
+                  {validationResult.passed ? 'Validation passed' : 'Validation failed'}
+                  {validationResult.expectedPatchCount > 0
+                    ? ` — ${validationResult.patchCount} / ${validationResult.expectedPatchCount} progression patches`
+                    : validationResult.patchCount > 0
+                    ? ` — ${validationResult.patchCount} progression patch${validationResult.patchCount === 1 ? '' : 'es'}`
+                    : ''}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setValidationResult(null)}
+                  className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Dismiss validation result"
+                  title="Dismiss"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
               {!validationResult.passed && progressionPatchCountMismatch && (
                 <p className="mt-2 text-sm text-red-800">
                   Missing patch folders can be created by running Update &amp; re-sync in the progression
