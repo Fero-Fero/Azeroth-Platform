@@ -416,12 +416,13 @@ public sealed partial class MigrationService
 
             // 11.5) Apply config overrides from the patch's config/ directory (worldserver.json, etc.).
             var configApplied = await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
+            var launcherApplied = await ApplyPatchLauncherThemeAsync(stackId, stack, stackRoot, patch.Key, result, cancellationToken);
 
             // 11.6) Deploy Lua scripts from the patch's lua/ directory to the stack lua_scripts root.
             var luaApplied = await ApplyPatchLuaScriptsAsync(stackRoot, patch.Key, result, cancellationToken);
 
             // 12) Restart the stack (bring world/auth back up) only if we stopped them or config/lua changed.
-            if (needsServerStop || configApplied || luaApplied)
+            if (needsServerStop || configApplied || launcherApplied || luaApplied)
             {
                 await RunStageAsync("restart", result, async () =>
                 {
@@ -766,9 +767,12 @@ public sealed partial class MigrationService
             }
 
             // 5c) Apply config overrides from each patch's config/ directory in order.
+            var launcherApplied = false;
             foreach (var plan in plans)
             {
                 await ApplyPatchConfigOverridesAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
+                launcherApplied |= await ApplyPatchLauncherThemeAsync(
+                    stackId, stack, stackRoot, plan.Patch.Key, result, cancellationToken);
             }
 
             // 5d) Deploy Lua scripts from each patch's lua/ directory in order.
@@ -1309,6 +1313,12 @@ public sealed partial class MigrationService
         {
             foreach (var jsonFile in jsonFiles)
             {
+                var fileName = Path.GetFileName(jsonFile);
+                if (string.Equals(fileName, PatchLauncherConfig.ConfigFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var baseName = Path.GetFileNameWithoutExtension(jsonFile);
                 var confPath = PatchServerConfigResolver.ResolveConfPath(etcDir, baseName);
 
@@ -1356,6 +1366,61 @@ public sealed partial class MigrationService
                 applied = true;
                 var relativeConf = Path.GetRelativePath(etcDir, confPath).Replace('\\', '/');
                 AddLog(result, $"Applied {updatedCount} config override(s) from {Path.GetFileName(jsonFile)} to {relativeConf}.");
+            }
+        }, cancellationToken);
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Applies a launcher theme override from <c>config/launcher.json</c> when present.
+    /// </summary>
+    private async Task<bool> ApplyPatchLauncherThemeAsync(
+        string stackId,
+        Data.Entities.ManagedStackEntity stack,
+        string stackRoot,
+        string patchKey,
+        ApplyPatchResultDto result,
+        CancellationToken cancellationToken)
+    {
+        var launcherConfigPath = Path.Combine(MigrationLayout.ConfigDir(stackRoot, patchKey), PatchLauncherConfig.ConfigFileName);
+        if (!File.Exists(launcherConfigPath))
+        {
+            return false;
+        }
+
+        var applied = false;
+        await RunStageAsync("launcher-theme", result, async () =>
+        {
+            string json;
+            try
+            {
+                json = await File.ReadAllTextAsync(launcherConfigPath, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                AddLog(result, $"Failed to read {PatchLauncherConfig.ConfigFileName}: {ex.Message}");
+                return;
+            }
+
+            if (!PatchLauncherConfig.TryParseTheme(json, out var theme, out var parseError))
+            {
+                AddLog(result, $"Failed to parse config/{PatchLauncherConfig.ConfigFileName}: {parseError}");
+                return;
+            }
+
+            stack.LauncherTemplate = theme!;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            applied = true;
+            AddLog(result, $"Set launcher theme to '{theme}' from config/{PatchLauncherConfig.ConfigFileName}.");
+
+            try
+            {
+                await _stackRegistry.RebuildAndPushAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                AddLog(result, $"Launcher theme saved but registry refresh failed: {ex.Message}");
             }
         }, cancellationToken);
 

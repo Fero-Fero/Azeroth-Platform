@@ -52,6 +52,7 @@ public sealed partial class MigrationService : IMigrationService
     private readonly IRemoteEngineService _remoteEngine;
     private readonly IIndividualProgressionSyncService _individualProgression;
     private readonly IServerConfigService _serverConfig;
+    private readonly IStackRegistryService _stackRegistry;
     private readonly ClientServerOptions _clientServerOptions;
     private readonly ILogger<MigrationService> _logger;
 
@@ -64,6 +65,7 @@ public sealed partial class MigrationService : IMigrationService
         IRemoteEngineService remoteEngine,
         IIndividualProgressionSyncService individualProgression,
         IServerConfigService serverConfig,
+        IStackRegistryService stackRegistry,
         IOptions<ClientServerOptions> clientServerOptions,
         ILogger<MigrationService> logger)
     {
@@ -75,6 +77,7 @@ public sealed partial class MigrationService : IMigrationService
         _remoteEngine = remoteEngine;
         _individualProgression = individualProgression;
         _serverConfig = serverConfig;
+        _stackRegistry = stackRegistry;
         _clientServerOptions = clientServerOptions.Value;
         _logger = logger;
     }

@@ -10,6 +10,7 @@ import IgnoredFilesDialog from './IgnoredFilesDialog'
 
 interface ProgressionSyncPanelProps {
   stackId: string
+  onReapplyAllRecommended?: () => void
 }
 
 const DESCRIPTION_EXPANDED_KEY = 'progression-sync-description-expanded-v2'
@@ -22,7 +23,7 @@ function readDescriptionExpanded(): boolean {
   }
 }
 
-export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelProps) {
+export default function ProgressionSyncPanel({ stackId, onReapplyAllRecommended }: ProgressionSyncPanelProps) {
   const syncMutation = useRunProgressionSync(stackId)
   const resolveMutation = useResolveProgressionOptionalFiles(stackId)
 
@@ -35,6 +36,10 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
   const [showInitialSyncConfirm, setShowInitialSyncConfirm] = useState(false)
   const [pollSync, setPollSync] = useState(false)
   const [descriptionExpanded, setDescriptionExpanded] = useState(readDescriptionExpanded)
+  const [reapplyRecommended, setReapplyRecommended] = useState<{
+    reason: string
+    patchKeys: string[]
+  } | null>(null)
 
   useEffect(() => {
     try {
@@ -69,6 +74,7 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
   const runSync = async () => {
     setSyncError(null)
     setSyncSuccess(null)
+    setReapplyRecommended(null)
     setPendingFiles([])
     setSyncLog([])
     setPollSync(true)
@@ -90,9 +96,20 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
         }
         setPendingDecisions(defaults)
       } else {
+        const createdCount = res.data.newlyCreatedPatchKeys?.length ?? 0
+        const createdSummary =
+          createdCount > 0
+            ? ` Created ${createdCount} new patch folder(s): ${res.data.newlyCreatedPatchKeys.join(', ')}.`
+            : ''
         setSyncSuccess(
-          `Synced successfully: ${res.data.copiedFiles} file(s) copied, ${res.data.skippedOptional} optional file(s) skipped.`
+          `Synced successfully: ${res.data.copiedFiles} file(s) copied, ${res.data.skippedOptional} optional file(s) skipped.${createdSummary}`
         )
+        if (res.data.reapplyAllRecommended && res.data.reapplyAllReason) {
+          setReapplyRecommended({
+            reason: res.data.reapplyAllReason,
+            patchKeys: res.data.newlyCreatedPatchKeys ?? [],
+          })
+        }
       }
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Sync failed.')
@@ -304,6 +321,32 @@ export default function ProgressionSyncPanel({ stackId }: ProgressionSyncPanelPr
         <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {syncSuccess}
+        </div>
+      )}
+
+      {reapplyRecommended && !showProgressBar && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Reapply all patches recommended</p>
+              <p className="mt-1">{reapplyRecommended.reason}</p>
+              {reapplyRecommended.patchKeys.length > 0 && (
+                <p className="mt-2 font-mono text-xs text-amber-900">
+                  New patches: {reapplyRecommended.patchKeys.join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+          {onReapplyAllRecommended && (
+            <button
+              type="button"
+              onClick={onReapplyAllRecommended}
+              className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+            >
+              Reapply all patches
+            </button>
+          )}
         </div>
       )}
 

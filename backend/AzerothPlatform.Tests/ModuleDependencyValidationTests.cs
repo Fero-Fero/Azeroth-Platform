@@ -43,6 +43,9 @@ public sealed class ModuleDependencyValidationTests
         serverTypes
             .Setup(catalog => catalog.IsModuleVisible(It.IsAny<string>(), It.IsAny<ServerType>()))
             .Returns(true);
+        serverTypes
+            .Setup(catalog => catalog.GetRequiredModuleIds(It.IsAny<ServerType>()))
+            .Returns(Array.Empty<string>());
 
         var armoryAccounts = new Mock<IArmoryAccountsService>();
         var validator = new StackConfigurationValidator(

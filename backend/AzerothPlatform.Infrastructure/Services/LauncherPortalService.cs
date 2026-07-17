@@ -216,11 +216,10 @@ public sealed class LauncherPortalService : ILauncherPortalService
             var stackRoot = Path.Combine(_baseDir, stack.Id);
             var assetsDir = MigrationLayout.LauncherProfileDir(stackRoot);
             var profileBase = $"/api/stacks/{stack.Id}/launcher/profile-asset";
+            var stackTemplate = ResolveEffectiveStackTemplate(stack, template);
 
-            // The theme (template + accent) is a single global choice; a stack can only override its
-            // wallpaper and logo. Effective branding precedence, highest first:
-            //   1. an explicit per-stack upload (wallpaper/logo),
-            //   2. the global launcher default (uploaded global asset, else the global theme's asset).
+            // Per-stack theme comes from patch launcher.json overrides when set; otherwise the global theme.
+            // Wallpaper and logo can still be overridden per stack.
             dto.Profiles.Add(new LauncherProfileDto
             {
                 StackId = stack.Id,
@@ -233,12 +232,12 @@ public sealed class LauncherPortalService : ILauncherPortalService
                 // "View all news" shortcut targets a stack that actually has an armory to open.
                 ArmoryPort = stack.ArmoryEnabled ? stack.ArmoryPort : 0,
                 BackgroundUrl = ResolveAsset(assetsDir, "background") is not null ? $"{profileBase}/background"
-                    : dto.DefaultBackgroundUrl,
+                    : ResolveStackDefaultBackgroundUrl(stackTemplate, config, dto.DefaultBackgroundUrl),
                 LogoUrl = ResolveAsset(assetsDir, "logo") is not null ? $"{profileBase}/logo"
-                    : dto.DefaultLogoUrl,
+                    : ResolveStackDefaultLogoUrl(stackTemplate, config, dto.DefaultLogoUrl),
                 NewsUrl = NewsExists(StackNewsDir(stack.Id)) ? $"/api/stacks/{stack.Id}/launcher/news" : null,
-                Template = template?.Id ?? string.Empty,
-                AccentColor = template?.AccentColor ?? string.Empty,
+                Template = stackTemplate?.Id ?? string.Empty,
+                AccentColor = stackTemplate?.AccentColor ?? string.Empty,
                 // Effective client-version label: the per-stack value if set, else the global default.
                 ClientVersion = string.IsNullOrWhiteSpace(stack.LauncherClientVersion)
                     ? config.ClientVersion
@@ -325,16 +324,62 @@ public sealed class LauncherPortalService : ILauncherPortalService
         var global = ResolveAsset(GlobalAssetsDir, baseName);
         if (global is not null) { return (global, GuessContentType(global)); }
 
-        // 3. Selected global theme's shipped asset.
+        // 3. Per-stack or global theme's shipped asset.
+        var stack = await GetStackAsync(stackId, cancellationToken);
         var config = await GetConfigAsync(cancellationToken);
-        var template = FindTemplate(config.Template);
-        if (template is not null)
+        var globalTemplate = FindTemplate(config.Template);
+        var stackTemplate = ResolveEffectiveStackTemplate(stack, globalTemplate);
+        if (stackTemplate is not null)
         {
-            var templatePath = TemplateAssetPath(template.Id, baseName);
+            var templatePath = TemplateAssetPath(stackTemplate.Id, baseName);
             if (templatePath is not null) { return (templatePath, GuessContentType(templatePath)); }
         }
 
         return null;
+    }
+
+    private static LauncherTemplateDto? ResolveEffectiveStackTemplate(
+        ManagedStackEntity stack,
+        LauncherTemplateDto? globalTemplate)
+    {
+        var perStack = FindTemplate(stack.LauncherTemplate);
+        return perStack ?? globalTemplate;
+    }
+
+    private static string? ResolveStackDefaultBackgroundUrl(
+        LauncherTemplateDto? stackTemplate,
+        LauncherDistributionConfigDto config,
+        string? globalDefaultBackgroundUrl)
+    {
+        if (config.HasBackground)
+        {
+            return "/api/launcher/assets/background";
+        }
+
+        if (stackTemplate is not null && TemplateAssetPath(stackTemplate.Id, "background") is not null)
+        {
+            return $"/api/launcher/templates/{stackTemplate.Id}/background";
+        }
+
+        return globalDefaultBackgroundUrl;
+    }
+
+    private static string? ResolveStackDefaultLogoUrl(
+        LauncherTemplateDto? stackTemplate,
+        LauncherDistributionConfigDto config,
+        string? globalDefaultLogoUrl)
+    {
+        if (config.HasLogo)
+        {
+            return "/api/launcher/assets/logo";
+        }
+
+        if (stackTemplate is not null && TemplateAssetPath(stackTemplate.Id, "logo") is not null)
+        {
+            return $"/api/launcher/templates/{stackTemplate.Id}/logo";
+        }
+
+        return globalDefaultLogoUrl;
     }
 
     // ===== News (global + per-stack) =====

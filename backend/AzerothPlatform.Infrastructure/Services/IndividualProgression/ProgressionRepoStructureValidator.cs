@@ -7,11 +7,6 @@ namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
 /// </summary>
 public static class ProgressionRepoStructureValidator
 {
-    private static readonly HashSet<string> ReferencePatchCategories = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "config", "script", "lua", "sql", "dbc", "map", "mpq",
-    };
-
     /// <summary>
     /// Compares each progression patch folder in the reference repo to the matching stack patch.
     /// The reference repo lives on the stack at <see cref="MigrationLayout.ProgressionRepoDir"/>.
@@ -26,21 +21,8 @@ public static class ProgressionRepoStructureValidator
 
         ValidateRepoRootLayout(repoRoot, errors);
 
-        foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
+        foreach (var (expansionName, expansionDir) in EnumerateExpansionDirectories(repoRoot))
         {
-            var expansionName = Path.GetFileName(expansionDir);
-            var expansionKey = expansionName.ToLowerInvariant() switch
-            {
-                "classic" => "classic",
-                "tbc" => "tbc",
-                "wotlk" => "wotlk",
-                _ => string.Empty,
-            };
-            if (expansionKey.Length == 0)
-            {
-                continue;
-            }
-
             foreach (var referencePatchDir in Directory.EnumerateDirectories(expansionDir))
             {
                 var patchFolderName = Path.GetFileName(referencePatchDir);
@@ -110,13 +92,50 @@ public static class ProgressionRepoStructureValidator
 
     private static void ValidateRepoRootLayout(string repoRoot, ICollection<string> errors)
     {
-        foreach (var expansion in new[] { "classic", "tbc", "wotlk" })
+        if (EnumerateExpansionDirectories(repoRoot).Count == 0)
         {
-            if (FindExpansionDir(repoRoot, expansion) is null)
+            errors.Add(
+                "Azeroth-Platform-Progression has no recognized expansion folders (expected Classic, Tbc, or Wotlk).");
+        }
+    }
+
+    private static List<(string ExpansionName, string ExpansionDir)> EnumerateExpansionDirectories(string repoRoot)
+    {
+        var results = new List<(string, string)>();
+        if (!Directory.Exists(repoRoot))
+        {
+            return results;
+        }
+
+        foreach (var expansionDir in Directory.EnumerateDirectories(repoRoot))
+        {
+            var expansionName = Path.GetFileName(expansionDir);
+            if (expansionName.StartsWith('.')
+                || string.Equals(expansionName, ".git", StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add($"Azeroth-Platform-Progression is missing expansion folder: {FormatExpansionFolder(expansion)}.");
+                continue;
+            }
+
+            if (TryNormalizeExpansionName(expansionName, out _))
+            {
+                results.Add((expansionName, expansionDir));
             }
         }
+
+        return results;
+    }
+
+    private static bool TryNormalizeExpansionName(string expansionName, out string expansionKey)
+    {
+        expansionKey = expansionName.Trim().ToLowerInvariant() switch
+        {
+            "classic" => "classic",
+            "tbc" => "tbc",
+            "wotlk" => "wotlk",
+            _ => string.Empty,
+        };
+
+        return expansionKey.Length > 0;
     }
 
     private static void ValidatePatchStructure(
@@ -129,6 +148,11 @@ public static class ProgressionRepoStructureValidator
 
         foreach (var fileName in Directory.EnumerateFiles(referencePatchDir))
         {
+            if (Path.GetFileName(fileName).StartsWith('.'))
+            {
+                continue;
+            }
+
             if (!MigrationLayout.IsPatchDescriptionFile(Path.GetFileName(fileName)))
             {
                 continue;
@@ -146,13 +170,6 @@ public static class ProgressionRepoStructureValidator
             var categoryName = Path.GetFileName(referenceCategoryDir);
             if (categoryName.StartsWith('.'))
             {
-                continue;
-            }
-
-            if (!ReferencePatchCategories.Contains(categoryName))
-            {
-                errors.Add(
-                    $"{stackPatchKey}: reference patch '{referenceName}' has unsupported folder '{categoryName}'.");
                 continue;
             }
 
@@ -177,6 +194,45 @@ public static class ProgressionRepoStructureValidator
             if (categoryName.Equals("config", StringComparison.OrdinalIgnoreCase))
             {
                 ValidateConfigFiles(referenceCategoryDir, stackCategoryDir, stackPatchKey, referenceName, errors);
+            }
+        }
+
+        ValidateReferenceFiles(referencePatchDir, stackPatchDir, stackPatchKey, referenceName, errors);
+    }
+
+    private static void ValidateReferenceFiles(
+        string referencePatchDir,
+        string stackPatchDir,
+        string stackPatchKey,
+        string referenceName,
+        ICollection<string> errors)
+    {
+        foreach (var referenceFile in Directory.EnumerateFiles(referencePatchDir, "*", SearchOption.AllDirectories))
+        {
+            var fileName = Path.GetFileName(referenceFile);
+            if (fileName.StartsWith('.'))
+            {
+                continue;
+            }
+
+            if (MigrationLayout.IsPatchDescriptionFile(fileName))
+            {
+                continue;
+            }
+
+            var relativeToPatch = Path.GetRelativePath(referencePatchDir, referenceFile)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            var stackRelativePath = NormalizeRepoCategoryPath(relativeToPatch);
+            if (string.IsNullOrEmpty(stackRelativePath))
+            {
+                continue;
+            }
+
+            var stackFile = Path.Combine(stackPatchDir, stackRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(stackFile))
+            {
+                errors.Add(
+                    $"{stackPatchKey}: missing '{stackRelativePath}' (required by reference patch '{referenceName}').");
             }
         }
     }
@@ -258,26 +314,4 @@ public static class ProgressionRepoStructureValidator
 
         return false;
     }
-
-    private static string? FindExpansionDir(string repoRoot, string expansion)
-    {
-        if (!Directory.Exists(repoRoot))
-        {
-            return null;
-        }
-
-        return Directory.EnumerateDirectories(repoRoot)
-            .FirstOrDefault(dir => string.Equals(
-                Path.GetFileName(dir),
-                FormatExpansionFolder(expansion),
-                StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string FormatExpansionFolder(string expansion) => expansion.ToLowerInvariant() switch
-    {
-        "classic" => "Classic",
-        "tbc" => "Tbc",
-        "wotlk" => "Wotlk",
-        _ => expansion,
-    };
 }

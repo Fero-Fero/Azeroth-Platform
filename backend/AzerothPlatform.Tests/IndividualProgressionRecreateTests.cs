@@ -166,10 +166,68 @@ public sealed class IndividualProgressionRecreateTests
             var result = await service.ValidatePatchesAsync(stackId);
 
             result.Passed.Should().BeTrue();
+            result.Mode.Should().Be(PatchValidationMode.ConfigOnly);
             result.Errors.Should().BeEmpty();
             result.KeyChecks.Should().BeEmpty();
             result.PatchCount.Should().Be(0);
             result.ExpectedPatchCount.Should().Be(0);
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ValidatePatchesAsync_config_only_without_mip_module()
+    {
+        var stackId = "validate-no-mip";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-validate-no-mip-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, stackId);
+        try
+        {
+            await using var db = CreateDbContext(new ManagedStackEntity
+            {
+                Id = stackId,
+                StackName = stackId,
+                AppliedPatchLevel = 0,
+                ModuleIdsJson = "[]",
+            });
+            var service = CreateSyncService(db, buildsPath);
+
+            var patchKey = "patch 1.0 Test";
+            var configDir = MigrationLayout.ConfigDir(stackRoot, patchKey);
+            Directory.CreateDirectory(configDir);
+            await File.WriteAllTextAsync(Path.Combine(configDir, "worldserver.json"), """{"SomeKey":"1"}""");
+
+            var etcDir = MigrationLayout.EtcDir(stackRoot);
+            Directory.CreateDirectory(etcDir);
+            await File.WriteAllTextAsync(Path.Combine(etcDir, "worldserver.conf"), "SomeKey = 0\n");
+
+            var serverConfig = new Mock<IServerConfigService>();
+            serverConfig
+                .Setup(s => s.ReadAsync(stackId, "worldserver.conf", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ServerConfigContentDto { Content = "SomeKey = 0\n" });
+
+            var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
+            var migrations = Options.Create(new MigrationOptions());
+            var httpClientFactory = new Mock<IHttpClientFactory>();
+            var serviceWithConfig = new IndividualProgressionSyncService(
+                db,
+                serverConfig.Object,
+                httpClientFactory.Object,
+                docker,
+                migrations,
+                NullLogger<IndividualProgressionSyncService>.Instance);
+
+            var result = await serviceWithConfig.ValidatePatchesAsync(stackId);
+
+            result.Mode.Should().Be(PatchValidationMode.ConfigOnly);
+            result.Passed.Should().BeTrue();
+            result.KeyChecks.Should().ContainSingle(check => check.Key == "SomeKey");
         }
         finally
         {

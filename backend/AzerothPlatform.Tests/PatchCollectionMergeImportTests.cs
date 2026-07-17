@@ -333,6 +333,7 @@ public sealed class PatchCollectionMergeImportTests
         var remoteEngine = new Mock<IRemoteEngineService>();
         var ipSync = new Mock<IIndividualProgressionSyncService>();
         var serverConfig = new Mock<IServerConfigService>();
+        var stackRegistry = new Mock<IStackRegistryService>();
 
         return new MigrationService(
             db,
@@ -343,6 +344,7 @@ public sealed class PatchCollectionMergeImportTests
             remoteEngine.Object,
             ipSync.Object,
             serverConfig.Object,
+            stackRegistry.Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

@@ -219,6 +219,57 @@ public sealed class ProgressionRepoStructureValidatorTests
     }
 
     [Fact]
+    public void Validate_accepts_custom_category_folder()
+    {
+        using var repo = new TempDirectory();
+        using var stack = new TempDirectory();
+
+        Directory.CreateDirectory(Path.Combine(repo.Path, "Classic"));
+        var patchName = "1.0 Start";
+        var referenceDir = Path.Combine(repo.Path, "Classic", patchName);
+        Directory.CreateDirectory(Path.Combine(referenceDir, "customdata"));
+        File.WriteAllText(Path.Combine(referenceDir, "description.md"), "Reference patch");
+        File.WriteAllText(Path.Combine(referenceDir, "customdata", "notes.txt"), "extra");
+
+        var stackKey = "patch 1.0 Start";
+        var stackDir = Path.Combine(stack.Path, "migrations", stackKey);
+        Directory.CreateDirectory(Path.Combine(stackDir, "customdata"));
+        File.WriteAllText(Path.Combine(stackDir, "description.md"), "Stack patch");
+        File.WriteAllText(Path.Combine(stackDir, "progression.json"), "{}");
+        File.WriteAllText(Path.Combine(stackDir, "customdata", "notes.txt"), "extra");
+
+        var errors = new List<string>();
+        ProgressionRepoStructureValidator.Validate(stack.Path, repo.Path, errors);
+
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_reports_missing_reference_file()
+    {
+        using var repo = new TempDirectory();
+        using var stack = new TempDirectory();
+
+        Directory.CreateDirectory(Path.Combine(repo.Path, "Classic"));
+        var patchName = "1.0 Start";
+        var referenceDir = Path.Combine(repo.Path, "Classic", patchName);
+        Directory.CreateDirectory(Path.Combine(referenceDir, "lua"));
+        File.WriteAllText(Path.Combine(referenceDir, "description.md"), "Reference patch");
+        File.WriteAllText(Path.Combine(referenceDir, "lua", "bootstrap.lua"), "print('hi')");
+
+        var stackKey = "patch 1.0 Start";
+        var stackDir = Path.Combine(stack.Path, "migrations", stackKey);
+        Directory.CreateDirectory(Path.Combine(stackDir, "lua"));
+        File.WriteAllText(Path.Combine(stackDir, "description.md"), "Stack patch");
+        File.WriteAllText(Path.Combine(stackDir, "progression.json"), "{}");
+
+        var errors = new List<string>();
+        ProgressionRepoStructureValidator.Validate(stack.Path, repo.Path, errors);
+
+        errors.Should().Contain(error => error.Contains("lua/bootstrap.lua"));
+    }
+
+    [Fact]
     public void Validate_passes_when_stack_matches_reference_layout()
     {
         using var repo = new TempDirectory();
@@ -271,6 +322,7 @@ public sealed class ProgressionRepoStructureValidatorTests
         Directory.CreateDirectory(Path.Combine(patchDir, "mpq"));
         File.WriteAllText(Path.Combine(patchDir, "description.md"), "Stack patch");
         File.WriteAllText(Path.Combine(patchDir, "progression.json"), "{}");
+        File.WriteAllText(Path.Combine(patchDir, "mpq", "mpq.json"), "{}");
 
         if (includeConfig)
         {

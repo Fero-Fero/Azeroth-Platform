@@ -87,11 +87,19 @@ public sealed class IndividualProgressionKeyCheckDto
     public string? Error { get; set; }
 }
 
+public enum PatchValidationMode
+{
+    ConfigOnly,
+    Full,
+}
+
 public sealed class IndividualProgressionValidationResultDto
 {
     public bool Passed { get; set; }
 
     public bool IsCurrent { get; set; }
+
+    public PatchValidationMode Mode { get; set; }
 
     public DateTimeOffset? ValidatedAt { get; set; }
 
@@ -140,6 +148,9 @@ public sealed class ProgressionOptionalFilesLogDto
 {
     public List<ProgressionOptionalFileEntryDto> Entries { get; set; } = new();
     public DateTimeOffset LastSyncAt { get; set; }
+
+    /// <summary>Expected progression patch keys from the last successful sync (repo layout snapshot).</summary>
+    public List<string> LastKnownPatchKeys { get; set; } = new();
 }
 
 /// <summary>An optional file that the user previously ignored and may re-prompt for.</summary>
@@ -159,6 +170,13 @@ public sealed class ProgressionSyncResultDto
 
     /// <summary>Optional files that need user confirmation before being added.</summary>
     public List<ProgressionSyncPendingFileDto> PendingOptionalFiles { get; set; } = new();
+
+    /// <summary>Stack patch keys created from the progression repository during this sync.</summary>
+    public List<string> NewlyCreatedPatchKeys { get; set; } = new();
+
+    public bool ReapplyAllRecommended { get; set; }
+
+    public string? ReapplyAllReason { get; set; }
 
     public List<string> Log { get; set; } = new();
     public bool Success { get; set; }

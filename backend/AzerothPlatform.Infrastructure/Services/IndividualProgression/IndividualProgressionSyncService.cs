@@ -258,23 +258,31 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         string stackId,
         CancellationToken cancellationToken = default)
     {
-        var stack = await EnsureModuleInstalledAsync(stackId, cancellationToken);
+        var stack = await _dbContext.ManagedStacks.AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Stack not found: {stackId}");
+
         var stackRoot = GetStackRoot(stackId);
-        var settings = await LoadSettingsAsync(stackRoot, cancellationToken);
-        if (!settings.Bootstrapped)
+        var moduleIds = JsonSerializer.Deserialize<List<string>>(stack.ModuleIdsJson, JsonOptions) ?? [];
+        var hasMip = StackHasModule(moduleIds);
+        IndividualProgressionSettingsDto? settings = null;
+        if (hasMip)
         {
-            throw new InvalidOperationException("Prepare server-wide progression before running patch validation.");
+            settings = await LoadSettingsAsync(stackRoot, cancellationToken);
         }
+
+        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
+        var fullMode = hasMip && settings is { Bootstrapped: true } && Directory.Exists(repoPath);
+        var mode = fullMode ? PatchValidationMode.Full : PatchValidationMode.ConfigOnly;
 
         var errors = new List<string>();
         var keyChecks = new List<IndividualProgressionKeyCheckDto>();
-        var repoPath = ResolveProgressionRepoDirectory(stackRoot);
-        var patchCount = CountProgressionPatches(stackRoot);
-        var expectedPatchCount = Directory.Exists(repoPath)
+        var patchCount = fullMode ? CountProgressionPatches(stackRoot) : 0;
+        var expectedPatchCount = fullMode && Directory.Exists(repoPath)
             ? ProgressionRepoAlignment.CountExpectedPatches(repoPath)
             : 0;
 
-        if (Directory.Exists(repoPath))
+        if (fullMode)
         {
             var missingPatchCount = ProgressionRepoAlignment.CountMissingPatches(repoPath, stackRoot);
             if (missingPatchCount > 0)
@@ -297,34 +305,46 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             keyChecks,
             cancellationToken);
 
-        var buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
         var passed = errors.Count == 0
             && (keyChecks.Count == 0 || keyChecks.All(check => check.Exists && check.CanRead));
-        if (passed && buildFingerprint is null)
+
+        string? buildFingerprint = null;
+        if (fullMode)
         {
-            passed = false;
-            errors.Add("Server build fingerprint is unavailable. Rebuild the server, then run validation again.");
+            buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
+            if (passed && buildFingerprint is null)
+            {
+                passed = false;
+                errors.Add("Server build fingerprint is unavailable. Rebuild the server, then run validation again.");
+            }
         }
 
-        if (passed)
+        if (fullMode && settings is not null)
         {
-            settings.ValidationBuildFingerprint = buildFingerprint;
-            settings.ValidationPassedAt = DateTimeOffset.UtcNow;
-        }
-        else
-        {
-            settings.ValidationBuildFingerprint = null;
-            settings.ValidationPassedAt = null;
-        }
+            if (passed)
+            {
+                settings.ValidationBuildFingerprint = buildFingerprint;
+                settings.ValidationPassedAt = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                settings.ValidationBuildFingerprint = null;
+                settings.ValidationPassedAt = null;
+            }
 
-        await PersistSettingsAsync(stackRoot, settings, cancellationToken);
+            await PersistSettingsAsync(stackRoot, settings, cancellationToken);
+        }
 
         return new IndividualProgressionValidationResultDto
         {
             Passed = passed,
-            IsCurrent = passed && IndividualProgressionBuildFingerprint.IsCurrent(settings, stack),
-            ValidatedAt = settings.ValidationPassedAt,
-            BuildFingerprint = settings.ValidationBuildFingerprint,
+            IsCurrent = fullMode
+                && passed
+                && settings is not null
+                && IndividualProgressionBuildFingerprint.IsCurrent(settings, stack),
+            Mode = mode,
+            ValidatedAt = fullMode ? settings?.ValidationPassedAt : DateTimeOffset.UtcNow,
+            BuildFingerprint = fullMode ? settings?.ValidationBuildFingerprint : null,
             PatchCount = patchCount,
             ExpectedPatchCount = expectedPatchCount,
             Errors = errors,
@@ -630,7 +650,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         string stackId,
         CancellationToken cancellationToken = default)
     {
-        await EnsureModuleInstalledAsync(stackId, cancellationToken);
+        var stack = await EnsureModuleInstalledAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         var result = new ProgressionSyncResultDto();
         var progressStore = new ProgressionSyncProgressStore(stackRoot);
@@ -708,10 +728,14 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                 await progressStore.ReportAsync("Preparing patches", 42, orphanMessage, cancellationToken);
             }
 
+            var createdPatchKeys = new List<string>();
             var templatesPrepared = ProgressionRepoPatchSeeder.Seed(
                 repoDir,
                 stackRoot,
-                onlyMissing: !initialSync);
+                onlyMissing: !initialSync,
+                createdPatchKeys);
+
+            result.NewlyCreatedPatchKeys.AddRange(createdPatchKeys);
 
             if (initialSync)
             {
@@ -732,7 +756,35 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
                 result.Log.Add("Update sync: only managed progression patches are updated; custom patches are left unchanged.");
             }
 
+            if (!initialSync && createdPatchKeys.Count > 0)
+            {
+                await CopyRepoPatchesAsync(
+                    repoDir,
+                    stackRoot,
+                    result,
+                    initialSync: false,
+                    progressStore,
+                    cancellationToken,
+                    limitToPatchKeys: createdPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+            }
+
             await CopyRepoPatchesAsync(repoDir, stackRoot, result, initialSync, progressStore, cancellationToken);
+
+            if (createdPatchKeys.Count > 0)
+            {
+                var settings = await LoadSettingsAsync(stackRoot, cancellationToken);
+                settings.ValidationBuildFingerprint = null;
+                settings.ValidationPassedAt = null;
+                await PersistSettingsAsync(stackRoot, settings, cancellationToken);
+            }
+
+            if (createdPatchKeys.Count > 0 && stack.AppliedPatchLevel > 0)
+            {
+                result.ReapplyAllRecommended = true;
+                result.ReapplyAllReason =
+                    $"Progression sync added {createdPatchKeys.Count} new patch(es). Reapply all patches so SQL, DBC, config, and launcher changes from the new tiers take effect.";
+                result.Log.Add(result.ReapplyAllReason);
+            }
 
             var mappingCount = Math.Max(1, mapping.Mappings.Count);
             for (var i = 0; i < mapping.Mappings.Count; i++)
@@ -748,6 +800,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             }
 
             log.LastSyncAt = DateTimeOffset.UtcNow;
+            log.LastKnownPatchKeys = ProgressionRepoAlignment.EnumerateExpectedPatchKeys(repoDir).ToList();
             await PersistSyncLogAsync(stackRoot, log, cancellationToken);
             result.Success = true;
 

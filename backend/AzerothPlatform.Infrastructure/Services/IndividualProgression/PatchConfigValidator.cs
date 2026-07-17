@@ -9,8 +9,6 @@ namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
 /// </summary>
 internal static class PatchConfigValidator
 {
-    private const string ProgressionMetadataFileName = "progression.json";
-
     public static async Task ValidateAsync(
         string stackId,
         string stackRoot,
@@ -28,11 +26,6 @@ internal static class PatchConfigValidator
         foreach (var patchDir in Directory.EnumerateDirectories(migrationsRoot))
         {
             var patchKey = Path.GetFileName(patchDir);
-            if (!File.Exists(Path.Combine(patchDir, ProgressionMetadataFileName)))
-            {
-                continue;
-            }
-
             var configDir = MigrationLayout.ConfigDir(stackRoot, patchKey);
             if (!Directory.Exists(configDir))
             {
@@ -42,6 +35,12 @@ internal static class PatchConfigValidator
             foreach (var jsonFile in Directory.EnumerateFiles(configDir, "*.json", SearchOption.TopDirectoryOnly))
             {
                 var jsonFileName = Path.GetFileName(jsonFile);
+                if (string.Equals(jsonFileName, PatchLauncherConfig.ConfigFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    await ValidateLauncherConfigAsync(patchKey, jsonFile, errors, cancellationToken);
+                    continue;
+                }
+
                 var baseName = Path.GetFileNameWithoutExtension(jsonFile);
                 var configSource = $"config/{jsonFileName}";
                 var relativeConf = PatchServerConfigResolver.ResolveRelativeConfPath(stackRoot, baseName);
@@ -122,6 +121,20 @@ internal static class PatchConfigValidator
                     keyChecks.Add(check);
                 }
             }
+        }
+    }
+
+    private static async Task ValidateLauncherConfigAsync(
+        string patchKey,
+        string jsonFilePath,
+        ICollection<string> errors,
+        CancellationToken cancellationToken)
+    {
+        var configSource = $"config/{PatchLauncherConfig.ConfigFileName}";
+        var json = await File.ReadAllTextAsync(jsonFilePath, cancellationToken);
+        if (!PatchLauncherConfig.TryParseTheme(json, out _, out var parseError))
+        {
+            errors.Add($"{patchKey}: failed to parse {configSource}: {parseError}");
         }
     }
 }

@@ -455,6 +455,11 @@ export const patchApi = {
       `/stacks/${stackId}/migrations/individual-progression/bootstrap`
     ),
 
+  validatePatches: (stackId: string) =>
+    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionValidationResult>(
+      `/stacks/${stackId}/migrations/validate-patches`
+    ),
+
   validateIndividualProgressionPatches: (stackId: string) =>
     apiClient.post<import('@/types/individual-progression.types').IndividualProgressionValidationResult>(
       `/stacks/${stackId}/migrations/individual-progression/validate-patches`

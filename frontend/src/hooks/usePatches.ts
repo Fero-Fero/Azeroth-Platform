@@ -273,7 +273,7 @@ export function useBootstrapIndividualProgression(stackId: string) {
 export function useValidateIndividualProgressionPatches(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => patchApi.validateIndividualProgressionPatches(stackId),
+    mutationFn: () => patchApi.validatePatches(stackId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: patchKeys.all })
       queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId) })

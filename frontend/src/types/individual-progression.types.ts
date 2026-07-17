@@ -41,9 +41,12 @@ export interface IndividualProgressionKeyCheck {
   error?: string | null
 }
 
+export type PatchValidationMode = 'ConfigOnly' | 'Full'
+
 export interface IndividualProgressionValidationResult {
   passed: boolean
   isCurrent: boolean
+  mode: PatchValidationMode
   validatedAt?: string | null
   buildFingerprint?: string | null
   patchCount: number
@@ -96,6 +99,9 @@ export interface ProgressionSyncResult {
   copiedFiles: number
   skippedOptional: number
   pendingOptionalFiles: ProgressionSyncPendingFile[]
+  newlyCreatedPatchKeys: string[]
+  reapplyAllRecommended: boolean
+  reapplyAllReason?: string | null
   log: string[]
   success: boolean
   error?: string | null

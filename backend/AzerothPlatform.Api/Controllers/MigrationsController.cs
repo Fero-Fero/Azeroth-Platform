@@ -150,12 +150,17 @@ public class MigrationsController : ControllerBase
         => Execute(() => _individualProgression.RecreateMissingPatchesAsync(stackId, cancellationToken));
 
     /// <summary>
-    /// Verifies the stack has all Individual Progression patch templates and that progression config keys
-    /// can be read and updated. Required after importing patch content and after each server recompile.
+    /// Verifies patch templates and config overrides. When Individual Progression is bootstrapped and
+    /// Azeroth-Platform-Progression is synced, validates folder structure against the repository as well.
     /// </summary>
+    [HttpPost("validate-patches")]
+    public Task<IActionResult> ValidatePatches(string stackId, CancellationToken cancellationToken)
+        => Execute(() => _individualProgression.ValidatePatchesAsync(stackId, cancellationToken));
+
+    /// <summary>Backward-compatible alias for <see cref="ValidatePatches"/>.</summary>
     [HttpPost("individual-progression/validate-patches")]
     public Task<IActionResult> ValidateIndividualProgressionPatches(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.ValidatePatchesAsync(stackId, cancellationToken));
+        => ValidatePatches(stackId, cancellationToken);
 
     /// <summary>Captures the server_dbc baseline from the running stack's data volume.</summary>
     [HttpPost("init-baseline")]

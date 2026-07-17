@@ -845,7 +845,15 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     (overview?.currentLevel ?? 0) === 0 &&
     !isApplying &&
     !overview?.individualProgressionBootstrapped
-  const showValidationPanel = ipBootstrapped
+  const showValidationPanel = true
+  const validationMode = validationResult?.mode ?? (ipBootstrapped ? 'Full' : 'ConfigOnly')
+  const validationPanelPositive =
+    ipValidationCurrent ||
+    (validationResult?.passed === true && validationResult.mode === 'ConfigOnly')
+  const validationModeDescription =
+    validationMode === 'Full'
+      ? 'Validates patch folders against Azeroth-Platform-Progression and checks config overrides.'
+      : 'Validates config override keys against live server configs.'
   const progressionPatchCountMismatch =
     expectedProgressionPatchCount > 0 &&
     (validationResult?.patchCount ?? overview?.individualProgressionPatchCount ?? 0) !==
@@ -1031,20 +1039,21 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       {showValidationPanel && (
         <section
           className={`rounded-lg border px-5 py-4 shadow-sm ${
-            ipValidationCurrent ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'
+            validationPanelPositive ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'
           }`}
         >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900">Patch validation</p>
-              {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && (
+              <p className="mt-1 max-w-2xl text-sm text-gray-600">{validationModeDescription}</p>
+              {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && validationMode === 'Full' && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-green-800">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
                   Validation passed for the current server build (
                   {new Date(overview.individualProgressionValidationPassedAt).toLocaleString()}).
                 </p>
               )}
-              {patchApplyBlocked && (
+              {patchApplyBlocked && validationMode === 'Full' && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-amber-800">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Patch apply is blocked until validation passes.
@@ -1144,7 +1153,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       )}
 
       {ipBootstrapped && (
-        <ProgressionSyncPanel stackId={stackId} />
+        <ProgressionSyncPanel stackId={stackId} onReapplyAllRecommended={() => setConfirmReapply(true)} />
       )}
 
       {actionError && (
