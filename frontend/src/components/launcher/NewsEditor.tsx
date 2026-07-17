@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
-import DOMPurify from 'dompurify'
 import {
   Bold,
   Italic,
@@ -30,6 +29,11 @@ import {
 import type { LauncherNewsItemDto } from '@/types/launcher.types'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import { NEWS_ARTICLE_TEMPLATES, type NewsArticleTemplate } from './newsTemplates'
+import {
+  NewsPreviewModeTabs,
+  NewsPreviewPanel,
+  type NewsPreviewMode,
+} from './NewsArticlePreview'
 import './newsContent.css'
 
 /** Selectable content tags (rendered as a colored corner ribbon on the news cards). */
@@ -117,6 +121,7 @@ export default function NewsEditor({
   const [draft, setDraft] = useState<LauncherNewsItemDto[]>(items)
   const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
   const [detailTab, setDetailTab] = useState<'edit' | 'preview'>('edit')
+  const [previewMode, setPreviewMode] = useState<NewsPreviewMode>('article')
   const [bust, setBust] = useState(0)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -151,6 +156,7 @@ export default function NewsEditor({
   const selectArticle = (id: string) => {
     setSelectedId(id)
     setDetailTab('edit')
+    setPreviewMode('article')
   }
 
   const editor = useEditor({
@@ -297,11 +303,6 @@ export default function NewsEditor({
       }
     }
   }, [])
-
-  const previewHtml = useMemo(
-    () => (selected ? DOMPurify.sanitize(selected.html || '') : ''),
-    [selected],
-  )
 
   const coverUrl = selected?.imageUrl
     ? `${selected.imageUrl}${selected.imageUrl.includes('?') ? '&' : '?'}v=${bust}`
@@ -692,26 +693,23 @@ export default function NewsEditor({
             </div>
                   </>
                 ) : (
-                  <div
-                    className="overflow-hidden rounded-lg border border-gray-800 bg-gray-900 shadow-inner"
-                    style={{ ['--news-accent' as string]: accentColor }}
-                  >
-                    {coverUrl && (
-                      <img src={coverUrl} alt="" className="aspect-video w-full object-cover" />
-                    )}
-                    <div className="p-5">
-                      {selected.tag && (
-                        <span
-                          className="mb-2 inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white"
-                          style={{ backgroundColor: NEWS_TAG_COLORS[selected.tag] ?? '#555' }}
-                        >
-                          {selected.tag}
-                        </span>
-                      )}
-                      <div className="text-xl font-bold text-white">{selected.title || 'Untitled'}</div>
-                      {selected.date && <div className="mb-3 text-xs text-gray-400">{selected.date}</div>}
-                      <div className="news-content" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-                    </div>
+                  <div className="space-y-4">
+                    <NewsPreviewModeTabs
+                      mode={previewMode}
+                      onModeChange={setPreviewMode}
+                      variant="light"
+                    />
+                    <NewsPreviewPanel
+                      mode={previewMode}
+                      accentColor={accentColor}
+                      article={{
+                        title: selected.title || 'Untitled',
+                        date: selected.date,
+                        tag: selected.tag,
+                        html: selected.html || '',
+                        coverUrl,
+                      }}
+                    />
                   </div>
                 )}
               </div>

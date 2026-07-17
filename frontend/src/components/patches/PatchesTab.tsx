@@ -39,6 +39,7 @@ import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
 import type { IndividualProgressionValidationResult } from '@/types/individual-progression.types'
+import { useLauncherConfig, useLauncherTemplates } from '@/hooks/useLauncher'
 
 interface PatchesTabProps {
   stackId: string
@@ -232,6 +233,13 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const { data: overview, isLoading, error } = usePatchOverview(stackId)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const { data: detail } = usePatchDetail(stackId, selectedKey)
+  const { data: launcherConfig } = useLauncherConfig()
+  const { data: launcherTemplates } = useLauncherTemplates()
+
+  const newsPreviewAccent = useMemo(() => {
+    const themeId = detail?.launcherTheme || launcherConfig?.template || 'wotlk'
+    return launcherTemplates?.find((template) => template.id === themeId)?.accentColor ?? '#4fa8d8'
+  }, [detail?.launcherTheme, launcherConfig?.template, launcherTemplates])
 
   const createMutation = useCreatePatch(stackId)
   const importMutation = useImportPatchCollection(stackId)
@@ -1920,6 +1928,7 @@ Flat layout also works:
         patchKey={selectedKey}
         open={showPatchNewsPreview}
         onClose={() => setShowPatchNewsPreview(false)}
+        accentColor={newsPreviewAccent}
       />
 
       {confirmApply && applyProgressionPreview && (

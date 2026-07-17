@@ -165,14 +165,51 @@ export default function PatchNewsEditor({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-      <div>
-        <h4 className="text-sm font-semibold text-gray-900">Player-facing news article</h4>
-        <p className="mt-1 text-xs text-gray-500">
-          Saved to <span className="font-mono">news/article.json</span> and{' '}
-          <span className="font-mono">news/article.html</span>. Published to the launcher and armory
-          when this patch is applied.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900">Player-facing news article</h4>
+          <p className="mt-1 text-xs text-gray-500">
+            Saved to <span className="font-mono">news/article.json</span> and{' '}
+            <span className="font-mono">news/article.html</span>. Published to the launcher and armory
+            when this patch is applied.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={!dirty || saveMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Save news article
+          </button>
+          <button
+            type="button"
+            onClick={onPreview}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Eye className="h-4 w-4" />
+            Preview
+          </button>
+          {saved && (
+            <span className="inline-flex items-center gap-1 text-sm text-green-600">
+              <CheckCircle2 className="h-4 w-4" /> Saved
+            </span>
+          )}
+          {dirty && !saveMutation.isPending && (
+            <span className="text-sm text-gray-400">Unsaved changes</span>
+          )}
+        </div>
       </div>
+
+      {saveError && (
+        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{saveError}</div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="block">
@@ -263,42 +300,6 @@ export default function PatchNewsEditor({
           className="mt-1.5 w-full resize-y rounded-md border border-gray-300 bg-gray-50/50 p-3 font-mono text-xs leading-relaxed text-gray-800 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
         />
       </label>
-
-      {saveError && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{saveError}</div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={!dirty || saveMutation.isPending}
-          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saveMutation.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          Save news article
-        </button>
-        <button
-          type="button"
-          onClick={onPreview}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          <Eye className="h-4 w-4" />
-          Preview
-        </button>
-        {saved && (
-          <span className="inline-flex items-center gap-1 text-sm text-green-600">
-            <CheckCircle2 className="h-4 w-4" /> Saved
-          </span>
-        )}
-        {dirty && !saveMutation.isPending && (
-          <span className="text-sm text-gray-400">Unsaved changes</span>
-        )}
-      </div>
     </div>
   )
 }

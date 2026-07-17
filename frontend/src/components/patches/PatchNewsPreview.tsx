@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
-import { LayoutGrid, Loader2, Newspaper, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Loader2, X } from 'lucide-react'
 import { usePatchNewsPreview } from '@/hooks/usePatches'
 import { usePatchNewsPreviewMedia } from '@/hooks/usePatchNewsPreviewMedia'
 import {
-  LauncherNewsCardPreview,
-  LauncherNewsReadingPreview,
+  NewsPreviewModeTabs,
+  NewsPreviewPanel,
+  type NewsPreviewMode,
 } from '@/components/launcher/NewsArticlePreview'
 
 interface PatchNewsPreviewProps {
@@ -12,17 +13,17 @@ interface PatchNewsPreviewProps {
   patchKey: string | null
   open: boolean
   onClose: () => void
+  accentColor?: string
 }
-
-type PreviewMode = 'card' | 'article'
 
 export default function PatchNewsPreview({
   stackId,
   patchKey,
   open,
   onClose,
+  accentColor = '#4fa8d8',
 }: PatchNewsPreviewProps) {
-  const [mode, setMode] = useState<PreviewMode>('article')
+  const [mode, setMode] = useState<NewsPreviewMode>('article')
   const { data: preview, isLoading, isError, error } = usePatchNewsPreview(stackId, patchKey, open)
   const { coverUrl, html, loadingMedia } = usePatchNewsPreviewMedia(preview, open)
 
@@ -32,20 +33,23 @@ export default function PatchNewsPreview({
     }
   }, [open, patchKey])
 
+  const article = useMemo(() => {
+    if (!preview?.available) {
+      return null
+    }
+
+    return {
+      title: preview.title ?? 'Untitled',
+      date: preview.date,
+      tag: preview.tag,
+      html: html || preview.html || '',
+      coverUrl,
+    }
+  }, [coverUrl, html, preview])
+
   if (!open) {
     return null
   }
-
-  const article =
-    preview?.available && html
-      ? {
-          title: preview.title ?? 'Untitled',
-          date: preview.date,
-          tag: preview.tag,
-          html,
-          coverUrl,
-        }
-      : null
 
   const showContentLoading = isLoading || (preview?.available && loadingMedia)
 
@@ -96,31 +100,8 @@ export default function PatchNewsPreview({
         </div>
 
         {preview?.available && (
-          <div className="flex gap-1 border-b border-gray-800 bg-gray-900/50 px-5">
-            <button
-              type="button"
-              onClick={() => setMode('article')}
-              className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors -mb-px ${
-                mode === 'article'
-                  ? 'border-blue-500 text-blue-300'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <Newspaper className="h-4 w-4" />
-              Full article
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('card')}
-              className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors -mb-px ${
-                mode === 'card'
-                  ? 'border-blue-500 text-blue-300'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Card
-            </button>
+          <div className="px-5">
+            <NewsPreviewModeTabs mode={mode} onModeChange={setMode} variant="dark" />
           </div>
         )}
 
@@ -143,14 +124,8 @@ export default function PatchNewsPreview({
             </p>
           )}
 
-          {!showContentLoading && article && mode === 'card' && (
-            <div className="launcher-news-card-preview-host">
-              <LauncherNewsCardPreview article={article} />
-            </div>
-          )}
-
-          {!showContentLoading && article && mode === 'article' && (
-            <LauncherNewsReadingPreview article={article} />
+          {!showContentLoading && article && (
+            <NewsPreviewPanel article={article} mode={mode} accentColor={accentColor} />
           )}
 
           {!showContentLoading && preview?.available && (
