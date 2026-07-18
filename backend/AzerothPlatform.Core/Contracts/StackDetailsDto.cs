@@ -77,4 +77,20 @@ public class StackDetailsDto
     /// The operator must recompile before these modules (and their SQL/config) take effect.
     /// </summary>
     public List<string> ModulesPendingRebuild { get; set; } = new();
+
+    /// <summary>
+    /// True when this external stack's encrypted SSH key cannot be decrypted (e.g. secret-protection.key
+    /// was lost after a data-volume prune). The operator must reconnect with a fresh private key.
+    /// </summary>
+    public bool NeedsExternalReconnect { get; set; }
+
+    /// <summary>Explanation shown when <see cref="NeedsExternalReconnect"/> is true.</summary>
+    public string? ExternalReconnectReason { get; set; }
+
+    /// <summary>
+    /// True after at least one worldserver build has completed successfully. When false, the stack
+    /// detail UI stays on a setup/retry screen until the initial build succeeds. Failed later
+    /// rebuilds do not clear this flag.
+    /// </summary>
+    public bool HasCompletedBuild { get; set; }
 }

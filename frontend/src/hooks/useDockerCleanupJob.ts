@@ -86,6 +86,7 @@ export function useDockerCleanupJob() {
 
   const invalidateDockerQueries = () => {
     queryClient.invalidateQueries({ queryKey: dockerKeys.disk })
+    queryClient.invalidateQueries({ queryKey: dockerKeys.engineOverview })
     queryClient.invalidateQueries({ queryKey: ['stacks'] })
     queryClient.invalidateQueries({ queryKey: ['stack'] })
     queryClient.invalidateQueries({ queryKey: ['stack', 'docker'] })

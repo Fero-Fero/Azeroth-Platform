@@ -210,30 +210,36 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
 
     public async Task<ArmoryAssetsInfoDto> UploadDataAsync(string stackId, Stream archiveStream, CancellationToken cancellationToken = default)
     {
-        var dataPath = _options.DataPathFor(stackId);
-        await ExtractIntoAsync(archiveStream, dataPath, DataMarkerFolders, cancellationToken);
-
-        // Refresh the stack's assets volume so the running/next stack serves the new dataset.
-        // Best-effort: a seeding hiccup must not fail the upload.
+        var tempDataPath = Path.Combine(Path.GetTempPath(), "azp-armory-data", stackId, Guid.NewGuid().ToString("N"));
         try
         {
-            await RefreshAssetsVolumeAsync(stackId, dataPath, cancellationToken);
+            await ExtractIntoAsync(archiveStream, tempDataPath, DataMarkerFolders, cancellationToken);
+
+            try
+            {
+                await RefreshAssetsVolumeAsync(stackId, tempDataPath, replaceContents: true, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to refresh the armory assets volume for stack {StackId} after data upload.", stackId);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogWarning(ex, "Failed to refresh the armory assets volume for stack {StackId} after data upload.", stackId);
+            TryDeleteDir(tempDataPath);
         }
 
         return BuildInfo(stackId);
     }
 
     /// <summary>
-    /// Pushes the on-disk dataset into the stack's armory-assets Docker volume and makes it world-readable,
-    /// mirroring what stack start does. Deployment-aware: external stacks seed the remote engine over SSH,
-    /// not just the local daemon (which the nginx sidecar there would never see). When the stack row is not
-    /// found (e.g. uploaded before creation completed), falls back to seeding the local daemon.
+    /// Pushes the on-disk dataset into the stack's armory-assets Docker volume and makes it world-readable.
     /// </summary>
-    private async Task RefreshAssetsVolumeAsync(string stackId, string dataPath, CancellationToken cancellationToken)
+    private async Task RefreshAssetsVolumeAsync(
+        string stackId,
+        string dataPath,
+        bool replaceContents,
+        CancellationToken cancellationToken)
     {
         var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
 
@@ -243,6 +249,12 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             .AsNoTracking()
             .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
 
+        if (replaceContents)
+        {
+            await _remoteEngine.EnsureVolumeExistsAsync(stack, volumeName, cancellationToken);
+            await _remoteEngine.ClearVolumeContentsAsync(stack, volumeName, cancellationToken);
+        }
+
         if (stack is null)
         {
             await _remoteEngine.SeedLocalVolumeAsync(volumeName, dataPath, cancellationToken);
@@ -250,8 +262,6 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         }
 
         await _remoteEngine.SeedVolumeAsync(stack, volumeName, dataPath, cancellationToken);
-        // nginx (uid 101) must be able to read the served tree even if the extracted files carried
-        // restrictive permissions — otherwise textures/models 403 and equipped armor fails to render.
         await _remoteEngine.SetVolumeWorldReadableAsync(stack, volumeName, cancellationToken);
     }
 

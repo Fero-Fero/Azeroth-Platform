@@ -390,6 +390,16 @@ public sealed class RemoteEngineService : IRemoteEngineService
     }
 
     public async Task DeleteVolumePathsAsync(ManagedStackEntity stack, string volumeName, IEnumerable<string> relativePaths, CancellationToken cancellationToken = default)
+        => await DeleteVolumePathsCoreAsync(stack, volumeName, relativePaths, cancellationToken);
+
+    public Task DeleteLocalVolumePathsAsync(string volumeName, IEnumerable<string> relativePaths, CancellationToken cancellationToken = default)
+        => DeleteVolumePathsCoreAsync(stack: null, volumeName, relativePaths, cancellationToken);
+
+    private async Task DeleteVolumePathsCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        IEnumerable<string> relativePaths,
+        CancellationToken cancellationToken)
     {
         // Normalise to safe, volume-relative paths: forward slashes, no leading slash, no traversal.
         var paths = (relativePaths ?? Enumerable.Empty<string>())
@@ -402,7 +412,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return;
         }
 
-        var contextArg = await ContextArgAsync(stack, cancellationToken);
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
         // rm -f each path inside a throwaway container mounting the volume at /dest. Each path is
         // single-quoted so names with spaces are one argument to the container's rm.
         var targets = string.Join(" ", paths.Select(p => "/dest/" + ShellQuote(p)));
@@ -484,6 +494,185 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         return files;
+    }
+
+    public Task<IReadOnlyList<VolumeDirectoryEntry>> ListVolumeDirectoryAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+        => ListVolumeDirectoryCoreAsync(stack, volumeName, relativePath, cancellationToken);
+
+    public Task<VolumeTreeSummary> GetVolumeTreeSummaryAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default)
+        => GetVolumeTreeSummaryCoreAsync(stack, volumeName, cancellationToken);
+
+    public async Task ClearVolumeContentsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default)
+    {
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        await RunAsync("docker", $"{contextArg}volume create {volumeName}", cancellationToken, throwOnError: false);
+        var command =
+            $"docker {contextArg}run --rm -v {volumeName}:/dest alpine:3.20 " +
+            "sh -c \"find /dest -mindepth 1 -maxdepth 1 -exec rm -rf {} +\"";
+        var (exit, _, stderr) = await RunShellAsync(command, cancellationToken);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException($"Failed to clear volume '{volumeName}': {stderr}");
+        }
+    }
+
+    private async Task<IReadOnlyList<VolumeDirectoryEntry>> ListVolumeDirectoryCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        var (inspectExit, _, _) = await RunAsync(
+            "docker",
+            $"{contextArg}volume inspect {volumeName}",
+            cancellationToken,
+            throwOnError: false);
+        if (inspectExit != 0)
+        {
+            return [];
+        }
+
+        var subdir = SanitizeVolumeSubdir(relativePath);
+        var target = string.IsNullOrEmpty(subdir) ? "/dest" : $"/dest/{subdir}";
+        var command =
+            $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
+            $"sh -c \"if [ ! -d '{target}' ]; then exit 2; fi; " +
+            $"find '{target}' -mindepth 1 -maxdepth 1 -printf '%f\\t%d\\t%s\\n' 2>/dev/null\"";
+        var (exit, output, _) = await RunShellAsync(command, cancellationToken);
+        if (exit == 2)
+        {
+            return [];
+        }
+
+        if (exit != 0)
+        {
+            return [];
+        }
+
+        var parent = NormalizeVolumeRelative(relativePath);
+        var entries = new List<VolumeDirectoryEntry>();
+        foreach (var raw in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = raw.Split('\t');
+            if (parts.Length < 3 || string.IsNullOrWhiteSpace(parts[0]))
+            {
+                continue;
+            }
+
+            var name = parts[0];
+            if (name is "." or "..")
+            {
+                continue;
+            }
+
+            var isDirectory = parts[1].Trim() == "4";
+            long.TryParse(parts[2].Trim(), out var sizeBytes);
+            var rel = string.IsNullOrEmpty(parent) ? name : $"{parent}/{name}";
+            entries.Add(new VolumeDirectoryEntry
+            {
+                Name = name,
+                RelativePath = rel,
+                IsDirectory = isDirectory,
+                SizeBytes = isDirectory ? 0 : sizeBytes,
+            });
+        }
+
+        foreach (var entry in entries.Where(e => e.IsDirectory))
+        {
+            var childTarget = string.IsNullOrEmpty(subdir) ? $"/dest/{entry.Name}" : $"/dest/{subdir}/{entry.Name}";
+            var countCommand =
+                $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
+                $"sh -c \"find '{childTarget}' -mindepth 1 -maxdepth 1 2>/dev/null | wc -l\"";
+            var (countExit, countOut, _) = await RunShellAsync(countCommand, cancellationToken);
+            if (countExit == 0 && int.TryParse(countOut.Trim(), out var count))
+            {
+                entry.ItemCount = count;
+            }
+        }
+
+        entries.Sort((a, b) =>
+            a.IsDirectory != b.IsDirectory
+                ? (a.IsDirectory ? -1 : 1)
+                : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+        return entries;
+    }
+
+    private async Task<VolumeTreeSummary> GetVolumeTreeSummaryCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken)
+    {
+        var summary = new VolumeTreeSummary();
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        var (inspectExit, _, _) = await RunAsync(
+            "docker",
+            $"{contextArg}volume inspect {volumeName}",
+            cancellationToken,
+            throwOnError: false);
+        if (inspectExit != 0)
+        {
+            return summary;
+        }
+
+        summary.VolumeExists = true;
+        var command =
+            $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
+            "sh -c \"" +
+            "files=$(find /dest -type f ! -name .hashcache.json ! -name .manifest.json 2>/dev/null | wc -l); " +
+            "bytes=$(du -sb /dest 2>/dev/null | cut -f1); " +
+            "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
+            "mpq=0; test -d /dest/Data && find /dest/Data -maxdepth 1 -name '*.MPQ' -print -quit | grep -q . && mpq=1; " +
+            "echo \\\"$files\\t$bytes\\t$wow\\t$mpq\\\"\"";
+        var (exit, output, _) = await RunShellAsync(command, cancellationToken);
+        if (exit != 0)
+        {
+            return summary;
+        }
+
+        var line = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        if (line is null)
+        {
+            return summary;
+        }
+
+        var parts = line.Split('\t');
+        if (parts.Length >= 4)
+        {
+            int.TryParse(parts[0].Trim(), out var fileCount);
+            long.TryParse(parts[1].Trim(), out var totalBytes);
+            summary.FileCount = fileCount;
+            summary.TotalBytes = totalBytes;
+            summary.HasWowExe = parts[2].Trim() == "1";
+            summary.HasDataMpq = parts[3].Trim() == "1";
+        }
+
+        return summary;
+    }
+
+    private static string NormalizeVolumeRelative(string? relativePath)
+        => string.IsNullOrWhiteSpace(relativePath)
+            ? string.Empty
+            : relativePath.Replace('\\', '/').Trim('/');
+
+    public async Task EnsureVolumeExistsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default)
+    {
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        await RunAsync("docker", $"{contextArg}volume create {volumeName}", cancellationToken, throwOnError: false);
     }
 
     public async Task SetVolumeOwnershipAsync(ManagedStackEntity stack, string volumeName, int uid, int gid, CancellationToken cancellationToken = default)

@@ -75,6 +75,7 @@ public sealed class DockerCleanupJobService : IDockerCleanupJobService
             var docker = scope.ServiceProvider.GetRequiredService<IStackDockerService>();
 
             var before = await docker.GetDiskUsageAsync(CancellationToken.None);
+            var reclaimBreakdown = await docker.GetReclaimableBreakdownAsync(CancellationToken.None);
             lock (Gate)
             {
                 if (Job is null)
@@ -82,7 +83,7 @@ public sealed class DockerCleanupJobService : IDockerCleanupJobService
                     return;
                 }
 
-                Job.EstimatedReclaimableBytes = EstimateReclaimableBytes(action, before);
+                Job.EstimatedReclaimableBytes = EstimateReclaimableBytes(action, before, reclaimBreakdown);
             }
 
             Publish(status);
@@ -101,12 +102,17 @@ public sealed class DockerCleanupJobService : IDockerCleanupJobService
         }
     }
 
-    private static long EstimateReclaimableBytes(DockerCleanupJobAction action, DockerDiskUsageDto usage) =>
+    private static long EstimateReclaimableBytes(
+        DockerCleanupJobAction action,
+        DockerDiskUsageDto usage,
+        DockerReclaimableBreakdownDto reclaimBreakdown) =>
         action switch
         {
             DockerCleanupJobAction.CleanupOldBuilds =>
-                usage.DockerImagesReclaimableBytes,
-            _ => usage.ReclaimableBytes,
+                reclaimBreakdown.DanglingImageBytes
+                + reclaimBreakdown.UnusedTaggedImageBytes
+                + reclaimBreakdown.ObsoleteBuildDirBytes,
+            _ => reclaimBreakdown.ListedReclaimableBytes,
         };
 
     private void Complete(bool success, string message, string? error, DockerCleanupResultDto? result)

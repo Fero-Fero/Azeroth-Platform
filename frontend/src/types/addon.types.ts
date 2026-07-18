@@ -26,5 +26,7 @@ export interface AddonCatalogEntryDto {
   installed: boolean
   recommended: boolean
   relatedModuleIds?: string[]
+  relatedServerTypes?: string[]
   suggested?: boolean
+  parentAddonId?: string | null
 }

@@ -193,6 +193,36 @@ try
     app.UseDefaultFiles();
     app.UseStaticFiles();
 
+    // Missing hashed bundles under /assets must 404 anonymously. If the request falls through to the
+    // global FallbackPolicy (RequireAuthenticatedUser), browsers load lazy chunks without a JWT and
+    // get 401 + empty/wrong MIME — which surfaces as "disallowed MIME type" on module import.
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/assets", out _))
+        {
+            var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+            var webRoot = env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot");
+            var assetsRoot = Path.GetFullPath(Path.Combine(webRoot, "assets"));
+            var relative = context.Request.Path.Value!.TrimStart('/');
+            var candidate = Path.GetFullPath(Path.Combine(webRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+            if (!candidate.StartsWith(assetsRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !candidate.Equals(assetsRoot, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            if (!File.Exists(candidate))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                context.Response.ContentType = "text/plain";
+                return;
+            }
+        }
+
+        await next();
+    });
+
     // Use CORS
     app.UseCors("AllowFrontend");
 
@@ -215,9 +245,29 @@ try
     app.MapHub<ArmoryProgressHub>("/hubs/armory-progress");
     app.MapHub<StackProgressHub>("/hubs/stack-progress");
 
-    // Fallback to index.html for client-side routing (SPA). Public: the shell is anonymous and the
-    // client-side app calls the (protected) API with the admin token after login.
-    app.MapFallbackToFile("index.html").AllowAnonymous();
+    // Fallback to index.html for client-side routing (SPA). Only for extensionless paths — if a hashed
+    // bundle under /assets is missing (stale deploy / cache mismatch), return 404 instead of serving
+    // HTML, which browsers reject as a JS module with a MIME/type error.
+    app.MapFallback(async (HttpContext context) =>
+    {
+        var requestPath = context.Request.Path.Value ?? string.Empty;
+        if (Path.HasExtension(requestPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+        var indexPath = Path.Combine(env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot"), "index.html");
+        if (!File.Exists(indexPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        context.Response.ContentType = "text/html; charset=utf-8";
+        await context.Response.SendFileAsync(indexPath);
+    }).AllowAnonymous();
 
     app.Run();
 }

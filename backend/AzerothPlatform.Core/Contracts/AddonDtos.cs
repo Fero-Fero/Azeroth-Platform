@@ -63,7 +63,12 @@ public sealed class AddonCatalogEntryDto
     public List<string> RelatedModuleIds { get; set; } = new();
 
     /// <summary>
-    /// True when a related stack module is installed and this addon is not yet present.
+    /// Server type ids (e.g. <c>IndividualProgression</c>) that make this addon a contextual suggestion.
+    /// </summary>
+    public List<string> RelatedServerTypes { get; set; } = new();
+
+    /// <summary>
+    /// True when a related stack module or server type applies and this addon is not yet present.
     /// Only set for stack-scoped catalog requests.
     /// </summary>
     public bool Suggested { get; set; }
@@ -73,6 +78,12 @@ public sealed class AddonCatalogEntryDto
     /// folder name (e.g. GitHub zips that do not match the WoW AddOns folder name).
     /// </summary>
     public string? InstallAsFolder { get; set; }
+
+    /// <summary>
+    /// When set, this entry is a child of another catalog addon. The UI hides it until the parent
+    /// is selected and can auto-select it alongside the parent.
+    /// </summary>
+    public string? ParentAddonId { get; set; }
 }
 
 /// <summary>

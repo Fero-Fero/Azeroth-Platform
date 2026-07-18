@@ -275,6 +275,10 @@ export interface StackDetailsDto {
   armoryRunning: boolean
   /** Module IDs saved on the stack but not yet compiled into the worldserver build. */
   modulesPendingRebuild?: string[]
+  needsExternalReconnect?: boolean
+  externalReconnectReason?: string | null
+  /** False until the first worldserver build completes successfully. */
+  hasCompletedBuild?: boolean
 }
 
 export interface SoapCredentialsDto {

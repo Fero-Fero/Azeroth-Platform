@@ -4,7 +4,7 @@ import { BranchCombobox } from '@/components/wizard/common/BranchCombobox'
 import { FormField } from '@/components/wizard/common/FormField'
 import type { WizardForm } from '@/components/wizard/types'
 import { useRepositoryBranches, useServerTypes } from '@/hooks/useModules'
-import { requiredModuleIdsForServerType } from '@/lib/server-type-modules'
+import { mergeRequiredModuleIds } from '@/lib/server-type-modules'
 import { cn } from '@/lib/utils'
 import { ServerType } from '@/types/stack.types'
 
@@ -110,8 +110,11 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
                 onClick={() => {
                   if (serverType === id) return
                   setValue('serverType', id as ServerType, { shouldDirty: true, shouldValidate: true })
-                  const required = requiredModuleIdsForServerType(id as ServerType, serverTypes)
-                  setValue('moduleIds', required, { shouldDirty: true })
+                  setValue(
+                    'moduleIds',
+                    mergeRequiredModuleIds(watch('moduleIds') ?? [], id as ServerType, serverTypes),
+                    { shouldDirty: true },
+                  )
                 }}
                 className={cn(
                   'flex items-start gap-3 rounded-lg border-2 p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',

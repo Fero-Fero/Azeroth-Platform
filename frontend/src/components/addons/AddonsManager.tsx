@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Upload, Trash2, Loader2, Package, Download, Check, ExternalLink } from 'lucide-react'
 import {
   useAddons,
@@ -7,6 +7,12 @@ import {
   useAddonCatalog,
   useInstallCatalogAddon,
 } from '@/hooks/useAddons'
+import {
+  catalogEntrySort,
+  orderCatalogForDisplay,
+  sortCatalogIdsForInstall,
+  toggleCatalogSelection,
+} from '@/lib/addon-catalog'
 import type { AddonCatalogEntryDto } from '@/types/addon.types'
 
 interface AddonsManagerProps {
@@ -42,19 +48,68 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [pendingInstall, setPendingInstall] = useState<string | null>(null)
+  const [selectedCatalogIds, setSelectedCatalogIds] = useState<Set<string>>(() => new Set())
+  const [batchInstallProgress, setBatchInstallProgress] = useState<string | null>(null)
 
-  const busy = upload.isPending || remove.isPending || install.isPending
+  const busy = upload.isPending || remove.isPending || install.isPending || batchInstallProgress !== null
 
   const handleInstall = async (addonId: string) => {
     setMessage(null)
     setPendingInstall(addonId)
     try {
       await install.mutateAsync(addonId)
+      setSelectedCatalogIds((current) => {
+        const next = new Set(current)
+        next.delete(addonId)
+        return next
+      })
     } catch (e) {
       setMessage(extractError(e, `Failed to install addon.`))
     } finally {
       setPendingInstall(null)
     }
+  }
+
+  const handleToggleCatalogSelection = (addonId: string) => {
+    const catalogEntries = catalog.data ?? []
+    setSelectedCatalogIds((current) => toggleCatalogSelection(addonId, catalogEntries, current))
+  }
+
+  const handleInstallSelected = async () => {
+    const catalogEntries = catalog.data ?? []
+    const toInstall = sortCatalogIdsForInstall(
+      [...selectedCatalogIds].filter((id) => {
+        const entry = catalogEntries.find((item) => item.id === id)
+        return entry && !entry.installed
+      }),
+      catalogEntries,
+    )
+
+    if (toInstall.length === 0) {
+      return
+    }
+
+    setMessage(null)
+    for (let index = 0; index < toInstall.length; index++) {
+      const addonId = toInstall[index]!
+      const entry = catalogEntries.find((item) => item.id === addonId)
+      setBatchInstallProgress(`Installing ${entry?.name ?? addonId} (${index + 1}/${toInstall.length})…`)
+      setPendingInstall(addonId)
+      try {
+        await install.mutateAsync(addonId)
+        setSelectedCatalogIds((current) => {
+          const next = new Set(current)
+          next.delete(addonId)
+          return next
+        })
+      } catch (e) {
+        setMessage(extractError(e, `Failed to install ${entry?.name ?? addonId}.`))
+        break
+      } finally {
+        setPendingInstall(null)
+      }
+    }
+    setBatchInstallProgress(null)
   }
 
   const handleFiles = async (files: FileList | File[]) => {
@@ -96,7 +151,22 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
   }
 
   const addons = [...(data?.addons ?? [])].sort(recommendedFirst)
-  const catalogEntries = [...(catalog.data ?? [])].sort(catalogEntrySort)
+  const catalogEntries = useMemo(
+    () => [...(catalog.data ?? [])].sort(catalogEntrySort),
+    [catalog.data],
+  )
+  const visibleCatalogEntries = useMemo(
+    () => orderCatalogForDisplay(catalogEntries, selectedCatalogIds),
+    [catalogEntries, selectedCatalogIds],
+  )
+  const selectedPendingCount = useMemo(
+    () =>
+      [...selectedCatalogIds].filter((id) => {
+        const entry = catalogEntries.find((item) => item.id === id)
+        return entry && !entry.installed
+      }).length,
+    [catalogEntries, selectedCatalogIds],
+  )
   const suggestedCallout = catalogEntries.find((entry) => entry.suggested && !entry.installed)
 
   return (
@@ -220,8 +290,34 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
 
         {suggestedCallout && (
           <div className="border-b border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-900">
-            <strong>{suggestedCallout.name}</strong> pairs with a module installed on this stack — install it
-            for in-game control of dungeon clears.
+            <strong>{suggestedCallout.name}</strong> is recommended for this stack — select it in the
+            catalog below and install.
+          </div>
+        )}
+
+        {selectedPendingCount > 0 && (
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+            <span className="text-sm text-gray-600">
+              {selectedPendingCount} addon{selectedPendingCount === 1 ? '' : 's'} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleInstallSelected()}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {batchInstallProgress ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {batchInstallProgress}
+                </>
+              ) : (
+                <>
+                  <Download className="h-3.5 w-3.5" />
+                  Install selected
+                </>
+              )}
+            </button>
           </div>
         )}
 
@@ -233,54 +329,16 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
           <div className="px-4 py-6 text-sm text-red-600">Failed to load the addon catalog.</div>
         ) : (
           <ul className="divide-y divide-gray-100">
-            {catalogEntries.map((entry) => (
-              <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-800">{entry.name}</span>
-                    {entry.recommended && <RecommendedBadge />}
-                    {entry.suggested && <SuggestedBadge />}
-                    <span className="text-[10px] uppercase tracking-wide bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">
-                      {entry.category}
-                    </span>
-                    {entry.website && (
-                      <a
-                        href={entry.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-gray-400 hover:text-blue-600"
-                        title="Open project page"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                  </div>
-                  <p className="text-gray-500 mt-0.5 line-clamp-2">{entry.description}</p>
-                </div>
-                <button
-                  onClick={() => handleInstall(entry.id)}
-                  disabled={busy}
-                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    entry.installed
-                      ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                      : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40'
-                  }`}
-                  title={entry.installed ? 'Reinstall / update' : 'Install addon'}
-                >
-                  {pendingInstall === entry.id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : entry.installed ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5" />
-                  )}
-                  {pendingInstall === entry.id
-                    ? 'Installing…'
-                    : entry.installed
-                    ? 'Installed'
-                    : 'Install'}
-                </button>
-              </li>
+            {visibleCatalogEntries.map((entry) => (
+              <CatalogEntryRow
+                key={entry.id}
+                entry={entry}
+                busy={busy}
+                pendingInstall={pendingInstall}
+                selected={selectedCatalogIds.has(entry.id)}
+                onToggleSelect={() => handleToggleCatalogSelection(entry.id)}
+                onInstall={() => void handleInstall(entry.id)}
+              />
             ))}
           </ul>
         )}
@@ -289,14 +347,95 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
   )
 }
 
-function recommendedFirst<T extends { recommended?: boolean; name: string }>(a: T, b: T) {
-  if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
-  return a.name.localeCompare(b.name)
+interface CatalogEntryRowProps {
+  entry: AddonCatalogEntryDto
+  busy: boolean
+  pendingInstall: string | null
+  selected: boolean
+  onToggleSelect: () => void
+  onInstall: () => void
 }
 
-function catalogEntrySort(a: AddonCatalogEntryDto, b: AddonCatalogEntryDto) {
+function CatalogEntryRow({
+  entry,
+  busy,
+  pendingInstall,
+  selected,
+  onToggleSelect,
+  onInstall,
+}: CatalogEntryRowProps) {
+  const isChild = !!entry.parentAddonId
+
+  return (
+    <li
+      className={`flex items-start justify-between gap-4 px-4 py-3 text-sm ${
+        isChild ? 'bg-gray-50/80 pl-10' : ''
+      }`}
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <input
+          type="checkbox"
+          checked={entry.installed || selected}
+          disabled={busy || entry.installed}
+          onChange={onToggleSelect}
+          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+          aria-label={`Select ${entry.name}`}
+        />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-gray-800">{entry.name}</span>
+            {entry.recommended && <RecommendedBadge />}
+            {entry.suggested && <SuggestedBadge />}
+            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
+              {entry.category}
+            </span>
+            {entry.website && (
+              <a
+                href={entry.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-400 hover:text-blue-600"
+                title="Open project page"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-gray-500">{entry.description}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onInstall}
+        disabled={busy || (!entry.installed && !!entry.parentAddonId && !selected)}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+          entry.installed
+            ? 'bg-green-50 text-green-700 hover:bg-green-100'
+            : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40'
+        }`}
+        title={
+          entry.installed
+            ? 'Reinstall / update'
+            : selected
+              ? 'Install this addon'
+              : 'Select the checkbox first'
+        }
+      >
+        {pendingInstall === entry.id ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : entry.installed ? (
+          <Check className="h-3.5 w-3.5" />
+        ) : (
+          <Download className="h-3.5 w-3.5" />
+        )}
+        {pendingInstall === entry.id ? 'Installing…' : entry.installed ? 'Installed' : 'Install'}
+      </button>
+    </li>
+  )
+}
+
+function recommendedFirst<T extends { recommended?: boolean; name: string }>(a: T, b: T) {
   if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
-  if (!!a.suggested !== !!b.suggested) return a.suggested ? -1 : 1
   return a.name.localeCompare(b.name)
 }
 

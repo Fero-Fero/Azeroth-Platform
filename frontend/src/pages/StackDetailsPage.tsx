@@ -37,6 +37,8 @@ import RealmlistOverrideField from '@/components/launcher/RealmlistOverrideField
 import ArmoryNetworkField from '@/components/launcher/ArmoryNetworkField'
 import StackNewsTab from '@/components/launcher/StackNewsTab'
 import DockerTab from '@/components/docker/DockerTab'
+import ExternalReconnectPanel from '@/components/stacks/ExternalReconnectPanel'
+import InitialBuildRequiredPanel from '@/components/stacks/InitialBuildRequiredPanel'
 import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import ModuleSetupWarnings from '@/components/modules/ModuleSetupWarnings'
@@ -381,6 +383,15 @@ function StackDetailsPageContent() {
     },
   })
 
+  const retryInitialBuildMutation = useMutation({
+    mutationFn: () => buildApi.start(stackId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
+      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
+      navigate(`/stacks/${stackId}/build`)
+    },
+  })
+
   const checkUpdatesMutation = useMutation({
     mutationFn: () => stackApi.checkUpdates(stackId!),
     onSuccess: () => {
@@ -462,6 +473,23 @@ function StackDetailsPageContent() {
           </button>
         </div>
       </div>
+    )
+  }
+
+  const hasCompletedBuild =
+    stack.hasCompletedBuild === true ||
+    (stack.hasCompletedBuild === undefined && !!stack.updateStatus?.currentCoreSha)
+
+  if (!hasCompletedBuild) {
+    return (
+      <InitialBuildRequiredPanel
+        stack={stack}
+        stackId={stackId!}
+        onRetryBuild={() => retryInitialBuildMutation.mutate()}
+        isRetrying={retryInitialBuildMutation.isPending}
+        onDelete={() => deleteMutation.mutate()}
+        isDeleting={deleteMutation.isPending}
+      />
     )
   }
 
@@ -978,6 +1006,10 @@ function StackDetailsPageContent() {
           </p>
         </div>
       )}
+
+      <div className="mb-8">
+        <ExternalReconnectPanel stack={stack} />
+      </div>
 
       {/* Module setup warnings */}
       <ModuleSetupWarnings stack={stack} />

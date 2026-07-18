@@ -21,6 +21,28 @@ public class DockerController : ControllerBase
         _cleanupJobService = cleanupJobService;
     }
 
+    [HttpGet("overview")]
+    public async Task<ActionResult<DockerEngineOverviewDto>> GetEngineOverview(CancellationToken cancellationToken)
+        => Ok(await _stackDockerService.GetEngineOverviewAsync(cancellationToken));
+
+    [HttpDelete("volumes/{volumeName}")]
+    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteEngineVolume(
+        string volumeName,
+        CancellationToken cancellationToken)
+    {
+        var result = await _stackDockerService.DeleteEngineVolumeAsync(Uri.UnescapeDataString(volumeName), cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpDelete("images/{imageId}")]
+    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteEngineImage(
+        string imageId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _stackDockerService.DeleteEngineImageAsync(Uri.UnescapeDataString(imageId), cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpGet("disk")]
     public async Task<ActionResult<DockerDiskUsageDto>> GetDiskUsage(CancellationToken cancellationToken)
         => Ok(await _stackDockerService.GetDiskUsageAsync(cancellationToken));
@@ -36,4 +58,33 @@ public class DockerController : ControllerBase
     [HttpGet("cleanup/status")]
     public ActionResult<DockerCleanupJobStatusDto?> GetCleanupStatus()
         => Ok(_cleanupJobService.GetStatus());
+
+    [HttpGet("manager/files")]
+    public async Task<ActionResult<DockerManagerFilesDto>> GetManagerFiles(
+        [FromQuery] string? path,
+        CancellationToken cancellationToken)
+        => Ok(await _stackDockerService.GetManagerFilesAsync(path ?? string.Empty, cancellationToken));
+
+    [HttpDelete("manager/files")]
+    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteManagerFile(
+        [FromQuery] string path,
+        CancellationToken cancellationToken)
+    {
+        var result = await _stackDockerService.DeleteManagerFileAsync(path, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("manager/cleanup-mirrors")]
+    public async Task<ActionResult<DockerManagerMirrorCleanupResultDto>> CleanupManagerMirrors(
+        CancellationToken cancellationToken)
+        => Ok(await _stackDockerService.CleanupManagerMirrorsAsync(cancellationToken));
+
+    [HttpPost("manager/migrate-client-mirrors")]
+    public async Task<ActionResult<DockerManagerMirrorCleanupResultDto>> MigrateClientMirrors(
+        CancellationToken cancellationToken)
+        => Ok(await _stackDockerService.MigrateClientMirrorsToVolumesAsync(cancellationToken));
+
+    [HttpGet("platform-keys")]
+    public async Task<ActionResult<DockerPlatformKeysDto>> GetPlatformKeys(CancellationToken cancellationToken)
+        => Ok(await _stackDockerService.GetPlatformKeysStatusAsync(cancellationToken));
 }

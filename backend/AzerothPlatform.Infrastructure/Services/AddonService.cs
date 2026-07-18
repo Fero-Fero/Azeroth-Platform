@@ -97,6 +97,72 @@ public sealed class AddonService : IAddonService
             InstallAsFolder = "DungeonClear",
             RelatedModuleIds = ["mod-dungeon-clear"],
         },
+        new()
+        {
+            Id = "atlas-loot-individual-progression",
+            Name = "AtlasLoot Individual Progression",
+            Description = "Restored loot tables for Naxxramas 40-man, Onyxia's Lair 40-man, and Kazzak for progressive servers running through Vanilla, TBC, and WotLK.",
+            Category = "UI",
+            DownloadUrl = "https://github.com/Day36512/Atlas-Loot-Individual-Progression-3.3.5/raw/main/Atlas-Loot-Individual-Progression-3.3.5.zip",
+            Website = "https://github.com/Day36512/Atlas-Loot-Individual-Progression-3.3.5",
+            Folders = ["AtlasLoot"],
+            RelatedModuleIds = ["mod-individual-progression"],
+            RelatedServerTypes = [nameof(ServerType.IndividualProgression)],
+        },
+        new()
+        {
+            Id = "wotlk-storyline",
+            Name = "Storyline (WotLK)",
+            Description = "Immersive quest dialogue UI — backport of the Storyline addon for WotLK 3.3.5a.",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/Fero-Fero/WotLK-Storyline/archive/refs/heads/master.zip",
+            Website = "https://github.com/Fero-Fero/WotLK-Storyline",
+            Folders = ["Storyline"],
+            InstallAsFolder = "Storyline",
+        },
+        new()
+        {
+            Id = "ai-voiceover",
+            Name = "AI VoiceOver",
+            Description = "AI-generated voice-over for quest dialogues on the 3.3.5a client. Select one or more data packs below for the expansions you need.",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOver-WoW_3.3.5.zip",
+            Website = "https://github.com/celguar/wow-voiceover",
+            Folders = ["AI_VoiceOver"],
+        },
+        new()
+        {
+            Id = "ai-voiceover-data-vanilla",
+            Name = "AI VoiceOver — Vanilla Sounds",
+            Description = "Voice-over data pack for Vanilla quest content (~1.4 GB).",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_Vanilla.zip",
+            Website = "https://github.com/celguar/wow-voiceover",
+            Folders = ["AI_VoiceOverData_Vanilla"],
+            ParentAddonId = "ai-voiceover",
+        },
+        new()
+        {
+            Id = "ai-voiceover-data-tbc",
+            Name = "AI VoiceOver — TBC Sounds",
+            Description = "Voice-over data pack for The Burning Crusade quest content (~700 MB).",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_TBC.zip",
+            Website = "https://github.com/celguar/wow-voiceover",
+            Folders = ["AI_VoiceOverData_TBC"],
+            ParentAddonId = "ai-voiceover",
+        },
+        new()
+        {
+            Id = "ai-voiceover-data-wotlk",
+            Name = "AI VoiceOver — WotLK Sounds",
+            Description = "Voice-over data pack for Wrath of the Lich King quest content (~750 MB).",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_WoTLK.zip",
+            Website = "https://github.com/celguar/wow-voiceover",
+            Folders = ["AI_VoiceOverData_WoTLK"],
+            ParentAddonId = "ai-voiceover",
+        },
     ];
 
     private readonly ClientDistributionOptions _clientOptions;
@@ -176,7 +242,7 @@ public sealed class AddonService : IAddonService
     public async Task<IReadOnlyList<AddonCatalogEntryDto>> GetCatalogAsync(string? stackId, CancellationToken cancellationToken = default)
     {
         var addonsDir = ResolveAddonsDir(stackId);
-        var stackModuleIds = await LoadStackModuleIdsAsync(stackId, cancellationToken);
+        var (stackModuleIds, stackServerType) = await LoadStackContextAsync(stackId, cancellationToken);
 
         var catalog = BuiltInAddons
             .Select(a =>
@@ -184,8 +250,7 @@ public sealed class AddonService : IAddonService
                 var installed = a.Folders.Count > 0 && a.Folders.Any(f => Directory.Exists(Path.Combine(addonsDir, f)));
                 var suggested = !string.IsNullOrWhiteSpace(stackId)
                     && !installed
-                    && a.RelatedModuleIds.Count > 0
-                    && a.RelatedModuleIds.Any(id => stackModuleIds.Contains(id, StringComparer.OrdinalIgnoreCase));
+                    && IsSuggestedForStack(a, stackModuleIds, stackServerType);
 
                 return new AddonCatalogEntryDto
                 {
@@ -200,7 +265,9 @@ public sealed class AddonService : IAddonService
                     Installed = installed,
                     Recommended = a.Recommended,
                     RelatedModuleIds = a.RelatedModuleIds,
+                    RelatedServerTypes = a.RelatedServerTypes,
                     Suggested = suggested,
+                    ParentAddonId = a.ParentAddonId,
                 };
             })
             .OrderByDescending(a => a.Recommended)
@@ -253,26 +320,59 @@ public sealed class AddonService : IAddonService
 
     // ===== Helpers =====
 
-    private async Task<HashSet<string>> LoadStackModuleIdsAsync(string? stackId, CancellationToken cancellationToken)
+    private async Task<(HashSet<string> ModuleIds, ServerType? ServerType)> LoadStackContextAsync(
+        string? stackId,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(stackId))
         {
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return (new HashSet<string>(StringComparer.OrdinalIgnoreCase), null);
         }
 
-        var json = await _dbContext.ManagedStacks
+        var stack = await _dbContext.ManagedStacks
             .AsNoTracking()
-            .Where(stack => stack.Id == stackId)
-            .Select(stack => stack.ModuleIdsJson)
+            .Where(entry => entry.Id == stackId)
+            .Select(entry => new { entry.ModuleIdsJson, entry.ServerType })
             .SingleOrDefaultAsync(cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(json))
+        if (stack is null)
         {
-            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return (new HashSet<string>(StringComparer.OrdinalIgnoreCase), null);
         }
 
-        var moduleIds = JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? [];
-        return moduleIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> moduleIds;
+        if (string.IsNullOrWhiteSpace(stack.ModuleIdsJson))
+        {
+            moduleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            var parsed = JsonSerializer.Deserialize<List<string>>(stack.ModuleIdsJson, JsonOptions) ?? [];
+            moduleIds = parsed.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return (moduleIds, stack.ServerType);
+    }
+
+    private static bool IsSuggestedForStack(
+        AddonCatalogEntryDto entry,
+        HashSet<string> stackModuleIds,
+        ServerType? stackServerType)
+    {
+        if (entry.RelatedModuleIds.Count > 0
+            && entry.RelatedModuleIds.Any(id => stackModuleIds.Contains(id, StringComparer.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (stackServerType is null || entry.RelatedServerTypes.Count == 0)
+        {
+            return false;
+        }
+
+        var serverTypeName = stackServerType.Value.ToString();
+        return entry.RelatedServerTypes.Any(
+            related => string.Equals(related, serverTypeName, StringComparison.OrdinalIgnoreCase));
     }
 
     private string ResolveAddonsDir(string? stackId)

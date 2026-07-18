@@ -38,6 +38,12 @@ export default function Layout() {
               >
                 Global News
               </Link>
+              <Link
+                to="/docker"
+                className="text-gray-600 hover:text-gray-900 transition"
+              >
+                Docker
+              </Link>
             </div>
             <div className="flex items-center gap-3">
               <Link

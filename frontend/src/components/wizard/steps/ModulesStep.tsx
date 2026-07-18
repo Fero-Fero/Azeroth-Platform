@@ -6,8 +6,10 @@ import { applyModuleToggle, isModuleLocked, moduleLockReason } from '@/lib/modul
 import {
   isServerTypeRequiredModule,
   mergeRequiredModuleIds,
+  sortModulesForDisplay,
 } from '@/lib/server-type-modules'
 import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
+import { ServerType } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 
 interface ModulesStepProps {
@@ -39,11 +41,14 @@ export function ModulesStep({ form }: ModulesStepProps) {
     }
   }, [modules, selectedIds, serverType, serverTypes, setValue])
 
-  const filtered = (modules ?? []).filter(
-    (module) =>
-      module.name.toLowerCase().includes(search.toLowerCase()) ||
-      module.description.toLowerCase().includes(search.toLowerCase())
-  ).sort(recommendedFirst)
+  const filtered = sortModulesForDisplay(
+    (modules ?? []).filter(
+      (module) =>
+        module.name.toLowerCase().includes(search.toLowerCase()) ||
+        module.description.toLowerCase().includes(search.toLowerCase()),
+    ),
+    { serverType, serverTypes, selectedIds },
+  )
 
   // Module-specific env var defaults to inject when a module is toggled on
   const MODULE_ENV_DEFAULTS: Record<string, Record<string, string>> = {
@@ -83,11 +88,26 @@ export function ModulesStep({ form }: ModulesStepProps) {
         </p>
       </div>
 
-      {selectedIds.includes(INDIVIDUAL_PROGRESSION_MODULE_ID) && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">
+      {serverType === ServerType.IndividualProgression && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 space-y-2">
+          {selectedIds.includes(INDIVIDUAL_PROGRESSION_MODULE_ID) && (
+            <p className="text-violet-800">
+              After creating the stack, use <strong>Sync with mod-individual-progression</strong> on the{' '}
+              <strong>Patches</strong> tab to simulate progression.
+            </p>
+          )}
           <p className="text-violet-800">
-            After creating the stack, use <strong>Sync with mod-individual-progression</strong> on the{' '}
-            <strong>Patches</strong> tab to simulate progression.
+            Install <strong>AtlasLoot Individual Progression</strong> from the <strong>Addons</strong> tab after
+            creation — it restores Naxx 40, Ony 40, and Kazzak loot tables for progressive progression.{' '}
+            <a
+              href="https://github.com/Day36512/Atlas-Loot-Individual-Progression-3.3.5"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-violet-700 underline hover:text-violet-900"
+            >
+              GitHub project
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            </a>
           </p>
         </div>
       )}
@@ -197,11 +217,6 @@ export function ModulesStep({ form }: ModulesStepProps) {
       )}
     </div>
   )
-}
-
-function recommendedFirst<T extends { recommended?: boolean; name: string }>(a: T, b: T) {
-  if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
-  return a.name.localeCompare(b.name)
 }
 
 function RecommendedBadge() {

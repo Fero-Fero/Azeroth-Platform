@@ -27,6 +27,7 @@ public sealed class StackDockerService : IStackDockerService
     private readonly ClientDistributionOptions _clientOptions;
     private readonly ArmoryAssetsOptions _armoryAssetsOptions;
     private readonly string _buildsPath;
+    private readonly string? _managerDataVolumeName;
     private readonly ILogger<StackDockerService> _logger;
 
     public StackDockerService(
@@ -50,10 +51,16 @@ public sealed class StackDockerService : IStackDockerService
         _logger = logger;
 
         var configuredPath = dockerOptions.Value.BuildsPath;
+        _managerDataVolumeName = string.IsNullOrWhiteSpace(dockerOptions.Value.DataVolumeName)
+            ? null
+            : dockerOptions.Value.DataVolumeName.Trim();
         _buildsPath = Path.IsPathRooted(configuredPath)
             ? configuredPath
             : Path.GetFullPath(configuredPath);
+        _managerDataRoot = Path.GetDirectoryName(_buildsPath.TrimEnd(Path.DirectorySeparatorChar)) ?? _buildsPath;
     }
+
+    private readonly string _managerDataRoot;
 
     private const double DiskWarningThresholdPercent = 65.0;
 
@@ -95,6 +102,143 @@ public sealed class StackDockerService : IStackDockerService
 
         usage.IsWarning = usage.UsedPercent >= DiskWarningThresholdPercent;
         return usage;
+    }
+
+    public async Task<DockerReclaimableBreakdownDto> GetReclaimableBreakdownAsync(CancellationToken cancellationToken = default)
+    {
+        var diskUsage = await GetDiskUsageAsync(cancellationToken);
+        var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
+        var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
+        var activeImageRefs = await GetAllContainerImageRefsAsync(string.Empty, cancellationToken);
+        var danglingImages = await ListDanglingImagesAsync(string.Empty, cancellationToken);
+        var allPlatformImages = await ListAllPlatformImagesAsync(
+            string.Empty,
+            activeImageRefs,
+            managedStackIds,
+            anyClientEnabled,
+            cancellationToken);
+        var obsoleteBuildDirs = await ListObsoleteBuildDirsAsync(managedStackIds, cancellationToken);
+        return BuildReclaimableBreakdown(diskUsage, danglingImages, allPlatformImages, obsoleteBuildDirs);
+    }
+
+    public async Task<DockerEngineOverviewDto> GetEngineOverviewAsync(CancellationToken cancellationToken = default)
+    {
+        var diskUsage = await GetDiskUsageAsync(cancellationToken);
+        var reclaimableBreakdown = await GetReclaimableBreakdownAsync(cancellationToken);
+        var managedStacks = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .Select(s => new { s.Id, s.StackName })
+            .ToListAsync(cancellationToken);
+        var managedStackIds = managedStacks.Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stackNames = managedStacks.ToDictionary(s => s.Id, s => s.StackName, StringComparer.OrdinalIgnoreCase);
+        var volumeUsage = await GetVolumeUsageAsync(string.Empty, cancellationToken);
+        var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
+        var activeImageRefs = await GetAllContainerImageRefsAsync(string.Empty, cancellationToken);
+
+        var overview = new DockerEngineOverviewDto
+        {
+            DiskUsage = diskUsage,
+            ReclaimableBreakdown = reclaimableBreakdown,
+            ReclaimableBytes = reclaimableBreakdown.ListedReclaimableBytes,
+        };
+        overview.ManagerVolume = await GetManagerVolumeBreakdownAsync(cancellationToken);
+
+        var volumeEntries = volumeUsage
+            .Select(kvp => BuildEngineVolumeEntry(kvp.Key, kvp.Value.SizeBytes, kvp.Value.Links, managedStackIds))
+            .OrderByDescending(v => v.SizeBytes ?? 0)
+            .ToList();
+
+        overview.VolumeGroups = GroupEngineVolumes(volumeEntries, stackNames);
+        overview.TotalVolumeBytes = volumeEntries.Sum(v => v.SizeBytes ?? 0);
+        overview.DeletableVolumeCount = volumeEntries.Count(v => v.IsDeletable);
+        overview.DeletableVolumeBytes = volumeEntries.Where(v => v.IsDeletable).Sum(v => v.SizeBytes ?? 0);
+
+        overview.Images = await ListEngineImagesAsync(managedStackIds, anyClientEnabled, activeImageRefs, cancellationToken);
+        overview.TotalImageBytes = overview.Images.Sum(i => i.SizeBytes);
+
+        return overview;
+    }
+
+    public async Task<StackDockerDeleteResultDto> DeleteEngineVolumeAsync(
+        string volumeName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(volumeName))
+        {
+            return new StackDockerDeleteResultDto { Success = false, Message = "Volume name is required." };
+        }
+
+        var overview = await GetEngineOverviewAsync(cancellationToken);
+        var volume = overview.VolumeGroups
+            .SelectMany(g => g.Volumes)
+            .FirstOrDefault(v => string.Equals(v.Name, volumeName, StringComparison.OrdinalIgnoreCase));
+        if (volume is null)
+        {
+            return new StackDockerDeleteResultDto { Success = false, Message = "Volume was not found on the Docker engine." };
+        }
+
+        if (!volume.IsDeletable)
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = volume.Detail ?? "Volume is protected and cannot be deleted.",
+            };
+        }
+
+        await _remoteEngine.RemoveLocalVolumeAsync(volumeName, cancellationToken);
+        _logger.LogInformation("Removed engine volume {Volume} via global Docker admin.", volumeName);
+        return new StackDockerDeleteResultDto
+        {
+            Success = true,
+            Message = $"Removed volume {volumeName}.",
+            FreedBytes = volume.SizeBytes ?? 0,
+        };
+    }
+
+    public async Task<StackDockerDeleteResultDto> DeleteEngineImageAsync(
+        string imageId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(imageId))
+        {
+            return new StackDockerDeleteResultDto { Success = false, Message = "Image id is required." };
+        }
+
+        var overview = await GetEngineOverviewAsync(cancellationToken);
+        var image = overview.Images.FirstOrDefault(i =>
+            string.Equals(i.Id, imageId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(i.Reference, imageId, StringComparison.OrdinalIgnoreCase));
+        if (image is null)
+        {
+            return new StackDockerDeleteResultDto { Success = false, Message = "Image was not found on the Docker engine." };
+        }
+
+        if (!image.IsDeletable)
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = "Image is protected and cannot be deleted.",
+            };
+        }
+
+        var (exitCode, _, stderr) = await RunDockerAsync($"rmi -f {image.Id}", cancellationToken);
+        if (exitCode != 0)
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = string.IsNullOrWhiteSpace(stderr) ? "Failed to remove image." : stderr.Trim(),
+            };
+        }
+
+        return new StackDockerDeleteResultDto
+        {
+            Success = true,
+            Message = $"Removed image {image.Reference}.",
+            FreedBytes = image.SizeBytes,
+        };
     }
 
     public async Task<StackDockerOverviewDto?> GetOverviewAsync(string stackId, CancellationToken cancellationToken = default)
@@ -147,6 +291,14 @@ public sealed class StackDockerService : IStackDockerService
             .ToList();
         var obsoleteBuildDirs = await ListObsoleteBuildDirsAsync(managedStackIds, cancellationToken);
         var danglingImages = await ListDanglingImagesAsync(contextArg, cancellationToken);
+        var reclaimableBreakdown = BuildReclaimableBreakdown(
+            diskUsage,
+            danglingImages,
+            allPlatformImages,
+            obsoleteBuildDirs);
+        var listedReclaimableBytes = reclaimableBreakdown.ListedReclaimableBytes;
+        var deletableUnusedImages = unusedImages.Where(i => !i.IsActive).ToList();
+        var managedBuildDirs = ListManagedBuildDirs(managedStackIds);
         var volumes = await ListStackVolumesAsync(
             stackId,
             project,
@@ -155,18 +307,11 @@ public sealed class StackDockerService : IStackDockerService
             hasContainers,
             stackBusy,
             cancellationToken);
-
-        var deletableUnusedImages = unusedImages.Where(i => !i.IsActive).ToList();
-        var managedBuildDirs = ListManagedBuildDirs(managedStackIds);
         var allManagedVolumes = await ListAllManagedStackVolumesAsync(
             managedStackIds,
             contextArg,
             volumeUsage,
             cancellationToken);
-        var listedReclaimableBytes = diskUsage.DockerBuildCacheReclaimableBytes
-            + danglingImages.Sum(i => i.SizeBytes)
-            + deletableUnusedImages.Sum(i => i.SizeBytes)
-            + obsoleteBuildDirs.Sum(d => d.SizeBytes);
 
         return new StackDockerOverviewDto
         {
@@ -179,18 +324,7 @@ public sealed class StackDockerService : IStackDockerService
                 managedBuildDirs,
                 obsoleteBuildDirs,
                 allManagedVolumes),
-            ReclaimableBreakdown = new DockerReclaimableBreakdownDto
-            {
-                BuildCacheBytes = diskUsage.DockerBuildCacheReclaimableBytes,
-                DanglingImageBytes = danglingImages.Sum(i => i.SizeBytes),
-                DanglingImageCount = danglingImages.Count,
-                UnusedTaggedImageBytes = deletableUnusedImages.Sum(i => i.SizeBytes),
-                UnusedTaggedImageCount = deletableUnusedImages.Count,
-                ObsoleteBuildDirBytes = obsoleteBuildDirs.Sum(d => d.SizeBytes),
-                ObsoleteBuildDirCount = obsoleteBuildDirs.Count,
-                EngineReclaimableBytes = listedReclaimableBytes,
-                ListedReclaimableBytes = listedReclaimableBytes,
-            },
+            ReclaimableBreakdown = reclaimableBreakdown,
             BuildFiles = buildFiles,
             Images = images,
             UnusedImages = unusedImages,
@@ -583,7 +717,7 @@ public sealed class StackDockerService : IStackDockerService
                 ManagerBytes = DirectorySize(gameDir),
                 VolumeName = baseVolume,
                 VolumeBytes = baseUsage.SizeBytes ?? 0,
-                Detail = "The uploaded client exists on manager disk and in a Docker volume by design. Do not delete either copy unless you intend to re-upload or re-seed.",
+                Detail = "Legacy manager client mirror. New uploads go directly to the stack client-base volume; safe to remove when the volume is populated.",
             });
 
             var overlayDir = MigrationLayout.ClientOverlayDir(stackRoot);
@@ -612,7 +746,7 @@ public sealed class StackDockerService : IStackDockerService
                 ManagerBytes = DirectorySize(armoryDir),
                 VolumeName = assetsVolume,
                 VolumeBytes = assetsUsage.SizeBytes ?? 0,
-                Detail = "Armory assets are seeded from manager storage into a Docker volume for serving.",
+                Detail = "Legacy manager armory data mirror. New uploads go directly to the stack armory-assets volume.",
             });
         }
 
@@ -805,6 +939,902 @@ public sealed class StackDockerService : IStackDockerService
         var size = bytes / Math.Pow(1024, order);
         return $"{size:0.#} {units[order]}";
     }
+
+    private async Task<DockerManagerVolumeDto?> GetManagerVolumeBreakdownAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_managerDataVolumeName))
+        {
+            return null;
+        }
+
+        var (inspectExit, _, _) = await RunDockerAsync($"volume inspect {_managerDataVolumeName}", cancellationToken);
+        if (inspectExit != 0)
+        {
+            return new DockerManagerVolumeDto
+            {
+                Name = _managerDataVolumeName,
+                Detail = "Manager data volume was not found on the Docker engine.",
+            };
+        }
+
+        var volumeUsage = await GetVolumeUsageAsync(string.Empty, cancellationToken);
+        volumeUsage.TryGetValue(_managerDataVolumeName, out var usage);
+
+        var command =
+            $"docker run --rm -v {_managerDataVolumeName}:/data:ro alpine:3.20 " +
+            "sh -c \"du -sb /data/* 2>/dev/null || true\"";
+        var (exit, output, _) = await RunHostAsync(command, cancellationToken);
+
+        var directories = new List<DockerVolumeDirectoryEntryDto>();
+        if (exit == 0)
+        {
+            foreach (var raw in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var parts = raw.Split('\t', StringSplitOptions.TrimEntries);
+                if (parts.Length < 2 || !long.TryParse(parts[0], out var sizeBytes))
+                {
+                    continue;
+                }
+
+                var name = Path.GetFileName(parts[1].Trim());
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                directories.Add(new DockerVolumeDirectoryEntryDto
+                {
+                    Name = name,
+                    RelativePath = name,
+                    SizeBytes = sizeBytes,
+                    IsDeletable = await IsManagerPathDeletableAsync(name, cancellationToken),
+                    Detail = await DescribeManagerDataDirectoryAsync(name, cancellationToken),
+                });
+            }
+        }
+
+        directories = directories.OrderByDescending(d => d.SizeBytes).ToList();
+        return new DockerManagerVolumeDto
+        {
+            Name = _managerDataVolumeName,
+            TotalBytes = usage.SizeBytes ?? directories.Sum(d => d.SizeBytes),
+            IsProtected = true,
+            Detail = "Platform database, build checkouts (/stacks), launcher builds, and optional legacy upload mirrors. New client/armory data uploads go directly to stack Docker volumes.",
+            Directories = directories,
+        };
+    }
+
+    private async Task<string?> DescribeManagerDataDirectoryAsync(string name, CancellationToken cancellationToken)
+    {
+        if (name.Equals("client", StringComparison.OrdinalIgnoreCase))
+        {
+            var (ready, blockers) = await EvaluateClientMirrorDeletionAsync("client", cancellationToken);
+            if (!ready)
+            {
+                return "Legacy WoW client mirror on the manager. Do NOT delete until each stack's client-base Docker volume has the full client — use Migrate legacy client mirrors first. "
+                    + string.Join("; ", blockers);
+            }
+
+            return "Legacy WoW client mirror (duplicate). Each stack's client-base volume is verified — safe to remove via Remove legacy stack mirrors.";
+        }
+
+        return DescribeManagerDataDirectory(name);
+    }
+
+    private static string? DescribeManagerDataDirectory(string name) => name switch
+    {
+        "client" => "Legacy WoW client mirror (duplicate). Safe to delete only when every stack's client-base Docker volume is verified.",
+        "armory-assets" => "Armory files on manager: small styling/config plus optional legacy data mirrors under stacks/*/static/data.",
+        "stacks" => "AzerothCore source checkouts for compiling (NOT Docker stack data). Required — do not delete.",
+        "azeroth-platform.db" => "Platform SQLite database.",
+        "launcher-dist" => "Built desktop launcher binaries staged for stacks.",
+        "armory-build" => "Armory image build workspace (temporary).",
+        "launcher-build" => "Launcher build workspace (temporary).",
+        _ => null,
+    };
+
+    private static DockerEngineVolumeEntryDto BuildEngineVolumeEntry(
+        string name,
+        long? sizeBytes,
+        int linkCount,
+        HashSet<string> managedStackIds)
+    {
+        var inferredStackId = InferStackIdFromVolumeName(name);
+        var isManager = IsManagerVolumeName(name);
+        var isAnonymous = IsAnonymousVolumeName(name);
+        var isManagedStack = !string.IsNullOrWhiteSpace(inferredStackId) && managedStackIds.Contains(inferredStackId);
+        var isOrphanStack = !string.IsNullOrWhiteSpace(inferredStackId) && !managedStackIds.Contains(inferredStackId);
+
+        string? detail;
+        var isProtected = isManager || isManagedStack || linkCount > 0;
+        var isDeletable = false;
+        if (isManager)
+        {
+            detail = "Manager or platform infrastructure volume.";
+        }
+        else if (isManagedStack)
+        {
+            detail = linkCount > 0
+                ? "Active stack data volume."
+                : "Stack data volume (no containers currently linked).";
+        }
+        else if (isOrphanStack)
+        {
+            detail = linkCount > 0
+                ? "Volume from a deleted stack still linked to a container — remove the container first."
+                : "Orphan volume from a deleted stack.";
+            isDeletable = linkCount == 0;
+            isProtected = linkCount > 0;
+        }
+        else if (isAnonymous)
+        {
+            detail = linkCount > 0
+                ? "Anonymous Docker volume in use."
+                : "Unused anonymous volume (safe to remove).";
+            isDeletable = linkCount == 0;
+            isProtected = linkCount > 0;
+        }
+        else
+        {
+            detail = linkCount > 0
+                ? "Named volume in use by another compose project or service."
+                : "Unused named volume from another project (remove if not needed).";
+            isDeletable = linkCount == 0;
+            isProtected = linkCount > 0;
+        }
+
+        return new DockerEngineVolumeEntryDto
+        {
+            Name = name,
+            SizeBytes = sizeBytes,
+            LinkCount = linkCount,
+            IsProtected = isProtected,
+            IsDeletable = isDeletable,
+            Detail = detail,
+        };
+    }
+
+    private static List<DockerEngineVolumeGroupDto> GroupEngineVolumes(
+        List<DockerEngineVolumeEntryDto> volumes,
+        IReadOnlyDictionary<string, string> stackNames)
+    {
+        var groups = new List<DockerEngineVolumeGroupDto>();
+
+        var manager = volumes.Where(v => IsManagerVolumeName(v.Name)).ToList();
+        if (manager.Count > 0)
+        {
+            groups.Add(new DockerEngineVolumeGroupDto
+            {
+                Category = "Manager",
+                TotalBytes = manager.Sum(v => v.SizeBytes ?? 0),
+                Volumes = manager,
+            });
+        }
+
+        foreach (var stackId in volumes
+                     .Select(v => InferStackIdFromVolumeName(v.Name))
+                     .Where(id => !string.IsNullOrWhiteSpace(id))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(id => id, StringComparer.OrdinalIgnoreCase))
+        {
+            var stackVolumes = volumes
+                .Where(v => string.Equals(InferStackIdFromVolumeName(v.Name), stackId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (stackVolumes.Count == 0)
+            {
+                continue;
+            }
+
+            var isManaged = stackNames.ContainsKey(stackId!);
+            groups.Add(new DockerEngineVolumeGroupDto
+            {
+                Category = isManaged ? "Managed stack" : "Orphan stack",
+                StackId = stackId,
+                StackName = isManaged ? stackNames[stackId!] : null,
+                TotalBytes = stackVolumes.Sum(v => v.SizeBytes ?? 0),
+                Volumes = stackVolumes,
+            });
+        }
+
+        var anonymous = volumes.Where(v => IsAnonymousVolumeName(v.Name)).ToList();
+        if (anonymous.Count > 0)
+        {
+            groups.Add(new DockerEngineVolumeGroupDto
+            {
+                Category = "Anonymous",
+                TotalBytes = anonymous.Sum(v => v.SizeBytes ?? 0),
+                Volumes = anonymous,
+            });
+        }
+
+        var other = volumes
+            .Where(v => !IsManagerVolumeName(v.Name)
+                && string.IsNullOrWhiteSpace(InferStackIdFromVolumeName(v.Name))
+                && !IsAnonymousVolumeName(v.Name))
+            .ToList();
+        if (other.Count > 0)
+        {
+            groups.Add(new DockerEngineVolumeGroupDto
+            {
+                Category = "Other projects",
+                TotalBytes = other.Sum(v => v.SizeBytes ?? 0),
+                Volumes = other,
+            });
+        }
+
+        return groups;
+    }
+
+    private async Task<List<DockerEngineImageDto>> ListEngineImagesAsync(
+        HashSet<string> managedStackIds,
+        bool anyClientEnabled,
+        HashSet<string> activeImageRefs,
+        CancellationToken cancellationToken)
+    {
+        var images = new List<DockerEngineImageDto>();
+        var (exitCode, output, _) = await RunDockerAsync("images --no-trunc --format \"{{json .}}\"", cancellationToken);
+        if (exitCode != 0)
+        {
+            return images;
+        }
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            DockerImageRow? row;
+            try
+            {
+                row = JsonSerializer.Deserialize<DockerImageRow>(line);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (row is null || string.IsNullOrWhiteSpace(row.ID))
+            {
+                continue;
+            }
+
+            var reference = BuildReference(row.Repository, row.Tag);
+            var sizeBytes = await GetImageSizeBytesAsync(string.Empty, row.ID, cancellationToken)
+                ?? ParseHumanSize(row.Size);
+            var ownerStackId = ResolveOwnerStackId(row.Repository, row.Tag);
+            var containerCount = await GetImageContainerCountAsync(row.ID, cancellationToken);
+            var referencedByContainer = activeImageRefs.Contains(reference)
+                || activeImageRefs.Contains(row.ID)
+                || activeImageRefs.Any(r => r.Contains(row.ID, StringComparison.OrdinalIgnoreCase));
+            var category = ClassifyEngineImageCategory(reference, ownerStackId);
+            var (isProtected, isDeletable) = ClassifyEngineImageDeletable(
+                reference,
+                row.Tag,
+                ownerStackId,
+                category,
+                managedStackIds,
+                anyClientEnabled,
+                containerCount,
+                referencedByContainer);
+
+            images.Add(new DockerEngineImageDto
+            {
+                Id = row.ID,
+                Reference = reference,
+                SizeBytes = sizeBytes,
+                Category = category,
+                OwnerStackId = ownerStackId,
+                ContainerCount = containerCount,
+                IsProtected = isProtected,
+                IsDeletable = isDeletable,
+            });
+        }
+
+        return images
+            .OrderByDescending(i => i.IsProtected)
+            .ThenBy(i => i.Category, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(i => i.SizeBytes)
+            .ToList();
+    }
+
+    private async Task<int> GetImageContainerCountAsync(string imageId, CancellationToken cancellationToken)
+    {
+        var (exitCode, output, _) = await RunDockerAsync(
+            $"ps -a --filter ancestor={imageId} -q",
+            cancellationToken);
+        return exitCode == 0
+            ? output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length
+            : 0;
+    }
+
+    private static string ClassifyEngineImageCategory(string reference, string? ownerStackId)
+    {
+        if (reference.StartsWith("azeroth-platform:", StringComparison.OrdinalIgnoreCase)
+            && !reference.StartsWith("azeroth-platform-armory-", StringComparison.OrdinalIgnoreCase)
+            && !reference.StartsWith("azeroth-platform-client:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Manager";
+        }
+
+        if (reference.StartsWith("azeroth-platform-client:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Shared client";
+        }
+
+        if (reference.StartsWith("caddy:", StringComparison.OrdinalIgnoreCase)
+            || reference.StartsWith("tecnativa/docker-socket-proxy:", StringComparison.OrdinalIgnoreCase)
+            || reference.StartsWith("moby/buildkit:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Manager infrastructure";
+        }
+
+        if (!string.IsNullOrWhiteSpace(ownerStackId)
+            || reference.StartsWith("acore/", StringComparison.OrdinalIgnoreCase)
+            || reference.StartsWith("localhost/acore/", StringComparison.OrdinalIgnoreCase)
+            || reference.StartsWith("azeroth-platform-armory-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Stack";
+        }
+
+        if (reference.StartsWith("<none>", StringComparison.OrdinalIgnoreCase) || reference.Contains("<none>"))
+        {
+            return "Dangling";
+        }
+
+        return "Other";
+    }
+
+    private static (bool IsProtected, bool IsDeletable) ClassifyEngineImageDeletable(
+        string reference,
+        string tag,
+        string? ownerStackId,
+        string category,
+        HashSet<string> managedStackIds,
+        bool anyClientEnabled,
+        int containerCount,
+        bool referencedByContainer)
+    {
+        if (containerCount > 0 || referencedByContainer)
+        {
+            return (true, false);
+        }
+
+        if (category is "Manager" or "Manager infrastructure")
+        {
+            return (true, false);
+        }
+
+        if (category == "Shared client")
+        {
+            return (anyClientEnabled && managedStackIds.Count > 0, !anyClientEnabled);
+        }
+
+        if (category == "Stack" && !string.IsNullOrWhiteSpace(ownerStackId) && managedStackIds.Contains(ownerStackId))
+        {
+            return (true, false);
+        }
+
+        if (category == "Dangling" || tag is "<none>" or "")
+        {
+            return (false, true);
+        }
+
+        if (category == "Other" || category == "Stack")
+        {
+            return (containerCount > 0, containerCount == 0);
+        }
+
+        return (true, false);
+    }
+
+    public async Task<DockerManagerFilesDto> GetManagerFilesAsync(string relativePath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var normalized = NormalizeManagerRelativePath(relativePath);
+        var dto = new DockerManagerFilesDto { Path = normalized };
+        var target = ResolveManagerPath(normalized);
+        if (target is null || !Directory.Exists(target))
+        {
+            return dto;
+        }
+
+        dto.Exists = true;
+        foreach (var dir in Directory.EnumerateDirectories(target))
+        {
+            var name = Path.GetFileName(dir);
+            var rel = CombineManagerRelative(normalized, name);
+            dto.Entries.Add(new DockerManagerFileEntryDto
+            {
+                Name = name,
+                RelativePath = rel,
+                IsDirectory = true,
+                SizeBytes = 0,
+                IsDeletable = await IsManagerPathDeletableAsync(rel, cancellationToken),
+                Detail = DescribeManagerEntry(rel, isDirectory: true),
+            });
+        }
+
+        foreach (var file in Directory.EnumerateFiles(target))
+        {
+            var name = Path.GetFileName(file);
+            var rel = CombineManagerRelative(normalized, name);
+            long size = 0;
+            try { size = new FileInfo(file).Length; } catch { /* ignore */ }
+            dto.Entries.Add(new DockerManagerFileEntryDto
+            {
+                Name = name,
+                RelativePath = rel,
+                IsDirectory = false,
+                SizeBytes = size,
+                IsDeletable = await IsManagerPathDeletableAsync(rel, cancellationToken),
+                Detail = DescribeManagerEntry(rel, isDirectory: false),
+            });
+        }
+
+        dto.Entries.Sort((a, b) =>
+            a.IsDirectory != b.IsDirectory
+                ? (a.IsDirectory ? -1 : 1)
+                : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+        return dto;
+    }
+
+    public async Task<StackDockerDeleteResultDto> DeleteManagerFileAsync(string relativePath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var normalized = NormalizeManagerRelativePath(relativePath);
+        if (!IsManagerPathDeletableCandidate(normalized))
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = "This manager data path is protected and cannot be deleted.",
+            };
+        }
+
+        if (IsClientLegacyMirrorPath(normalized))
+        {
+            var (allowed, blockers) = await EvaluateClientMirrorDeletionAsync(normalized, cancellationToken);
+            if (!allowed)
+            {
+                return new StackDockerDeleteResultDto
+                {
+                    Success = false,
+                    Message = "Refusing to delete legacy client data on the manager: "
+                        + string.Join("; ", blockers)
+                        + " Upload the client on each stack's Client tab (or use Migrate legacy client mirrors) before removing the manager copy.",
+                };
+            }
+        }
+
+        var target = ResolveManagerPath(normalized);
+        if (target is null || (!Directory.Exists(target) && !File.Exists(target)))
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = "Path was not found on the manager data volume.",
+            };
+        }
+
+        long freed = 0;
+        try
+        {
+            if (Directory.Exists(target))
+            {
+                freed = DirectorySize(target);
+                Directory.Delete(target, recursive: true);
+            }
+            else
+            {
+                freed = new FileInfo(target).Length;
+                File.Delete(target);
+            }
+        }
+        catch (Exception ex)
+        {
+            return new StackDockerDeleteResultDto
+            {
+                Success = false,
+                Message = $"Failed to delete: {ex.Message}",
+            };
+        }
+
+        _logger.LogInformation("Removed manager data path {Path} ({Bytes} bytes).", normalized, freed);
+        return new StackDockerDeleteResultDto
+        {
+            Success = true,
+            Message = $"Removed {normalized}.",
+            FreedBytes = freed,
+        };
+    }
+
+    public async Task<DockerManagerMirrorCleanupResultDto> MigrateClientMirrorsToVolumesAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new DockerManagerMirrorCleanupResultDto();
+        var stacks = await _dbContext.ManagedStacks.AsNoTracking().Where(s => s.ClientEnabled).ToListAsync(cancellationToken);
+
+        foreach (var stack in stacks)
+        {
+            var volumeName = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
+            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
+            if (ClientBaseVolumeLooksPopulated(summary))
+            {
+                continue;
+            }
+
+            var mirror = _clientOptions.StackGameDir(stack.Id);
+            if (!Directory.Exists(mirror) || !LooksLikeWoWClientRoot(mirror))
+            {
+                result.RemovedLabels.Add($"No manager mirror to migrate ({stack.StackName})");
+                continue;
+            }
+
+            try
+            {
+                await _remoteEngine.EnsureVolumeExistsAsync(stack, volumeName, cancellationToken);
+                await _remoteEngine.ClearVolumeContentsAsync(stack, volumeName, cancellationToken);
+                await _remoteEngine.SeedVolumeAsync(stack, volumeName, mirror, cancellationToken);
+                result.RemovedPaths++;
+                result.RemovedLabels.Add($"Migrated client mirror → {volumeName} ({stack.StackName})");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to migrate client mirror for stack {StackId}.", stack.Id);
+                result.RemovedLabels.Add($"Migration failed ({stack.StackName}): {ex.Message}");
+            }
+        }
+
+        result.Success = true;
+        result.Message = result.RemovedPaths > 0
+            ? $"Migrated {result.RemovedPaths} legacy client mirror(s) into stack Docker volumes. You can remove the manager client/ tree once every stack is verified."
+            : result.RemovedLabels.Count > 0
+                ? "No client mirrors were migrated. " + string.Join("; ", result.RemovedLabels)
+                : "Every client-enabled stack already has a populated client-base volume.";
+        return result;
+    }
+
+    public async Task<DockerManagerMirrorCleanupResultDto> CleanupManagerMirrorsAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new DockerManagerMirrorCleanupResultDto();
+        var stacks = await _dbContext.ManagedStacks.AsNoTracking().ToListAsync(cancellationToken);
+
+        foreach (var stack in stacks)
+        {
+            if (stack.ClientEnabled)
+            {
+                var mirror = Path.Combine(_clientOptions.RootPath, "stacks", stack.Id, "game");
+                if (Directory.Exists(mirror))
+                {
+                    var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(
+                        stack,
+                        DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id),
+                        cancellationToken);
+                    if (ClientBaseVolumeLooksPopulated(summary))
+                    {
+                        var freed = DirectorySize(mirror);
+                        Directory.Delete(mirror, recursive: true);
+                        result.FreedBytes += freed;
+                        result.RemovedPaths++;
+                        result.RemovedLabels.Add($"Client mirror ({stack.StackName})");
+                    }
+                }
+            }
+
+            if (stack.ArmoryEnabled)
+            {
+                var dataMirror = _armoryAssetsOptions.DataPathFor(stack.Id);
+                if (Directory.Exists(dataMirror))
+                {
+                    var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id);
+                    if (await _remoteEngine.VolumeExistsAsync(stack, volumeName, cancellationToken))
+                    {
+                        var files = await _remoteEngine.ListVolumeFilesAsync(stack, volumeName, cancellationToken);
+                        if (files.Count > 0)
+                        {
+                            var freed = DirectorySize(dataMirror);
+                            Directory.Delete(dataMirror, recursive: true);
+                            result.FreedBytes += freed;
+                            result.RemovedPaths++;
+                            result.RemovedLabels.Add($"Armory data mirror ({stack.StackName})");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove entire legacy client/ tree when every client-enabled stack has files in its client-base volume.
+        var clientRoot = _clientOptions.RootPath;
+        if (Directory.Exists(clientRoot))
+        {
+            var clientStacks = stacks.Where(s => s.ClientEnabled).ToList();
+            var allVolumesReady = clientStacks.Count == 0;
+            if (clientStacks.Count > 0)
+            {
+                allVolumesReady = true;
+                foreach (var stack in clientStacks)
+                {
+                    var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(
+                        stack,
+                        DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id),
+                        cancellationToken);
+                    if (!ClientBaseVolumeLooksPopulated(summary))
+                    {
+                        allVolumesReady = false;
+                        break;
+                    }
+                }
+            }
+
+            if (allVolumesReady && Directory.EnumerateFileSystemEntries(clientRoot).Any())
+            {
+                var freed = DirectorySize(clientRoot);
+                Directory.Delete(clientRoot, recursive: true);
+                result.FreedBytes += freed;
+                result.RemovedPaths++;
+                result.RemovedLabels.Add("Legacy client mirror (entire client/ tree)");
+            }
+        }
+
+        result.Success = true;
+        result.Message = result.RemovedPaths > 0
+            ? $"Removed {result.RemovedPaths} legacy manager mirror(s). Freed about {FormatBytesShort(result.FreedBytes)}."
+            : "No legacy manager mirrors were found (or stack volumes were not verified).";
+        return result;
+    }
+
+    public Task<DockerPlatformKeysDto> GetPlatformKeysStatusAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var keys = new[]
+        {
+            ("secret-protection.key", "Encrypts external-stack SSH keys and other secrets at rest."),
+            ("jwt-signing.key", "Signs admin login tokens. Regenerating it logs everyone out."),
+            ("manifest-signing.key", "Signs client file manifests for the launcher. Regenerating it requires clients to re-fetch config."),
+        };
+
+        var dto = new DockerPlatformKeysDto
+        {
+            Detail = "These files live on the manager data volume. Do not prune this volume without backing them up.",
+        };
+
+        foreach (var (name, detail) in keys)
+        {
+            var path = Path.Combine(_managerDataRoot, name);
+            dto.Keys.Add(new DockerPlatformKeyStatusDto
+            {
+                Name = name,
+                Present = File.Exists(path),
+                Detail = detail,
+            });
+        }
+
+        return Task.FromResult(dto);
+    }
+
+    private static string NormalizeManagerRelativePath(string? relativePath)
+        => string.IsNullOrWhiteSpace(relativePath)
+            ? string.Empty
+            : relativePath.Replace('\\', '/').Trim('/');
+
+    private static string CombineManagerRelative(string parent, string name)
+        => string.IsNullOrEmpty(parent) ? name : $"{parent}/{name}";
+
+    private string? ResolveManagerPath(string normalizedRelative)
+    {
+        var root = Path.GetFullPath(_managerDataRoot);
+        var combined = string.IsNullOrEmpty(normalizedRelative)
+            ? root
+            : Path.GetFullPath(Path.Combine(root, normalizedRelative.Replace('/', Path.DirectorySeparatorChar)));
+        if (combined != root && !combined.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return combined;
+    }
+
+    private string? ToManagerRelative(string absolutePath)
+    {
+        var root = Path.GetFullPath(_managerDataRoot);
+        var full = Path.GetFullPath(absolutePath);
+        if (full == root)
+        {
+            return string.Empty;
+        }
+
+        var prefix = root + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return full[prefix.Length..].Replace(Path.DirectorySeparatorChar, '/');
+    }
+
+    private async Task<bool> IsManagerPathDeletableAsync(string normalizedRelative, CancellationToken cancellationToken)
+    {
+        if (!IsManagerPathDeletableCandidate(normalizedRelative))
+        {
+            return false;
+        }
+
+        if (IsClientLegacyMirrorPath(normalizedRelative))
+        {
+            var (allowed, _) = await EvaluateClientMirrorDeletionAsync(normalizedRelative, cancellationToken);
+            return allowed;
+        }
+
+        return true;
+    }
+
+    private static bool IsManagerPathDeletableCandidate(string normalizedRelative)
+    {
+        if (string.IsNullOrEmpty(normalizedRelative))
+        {
+            return false;
+        }
+
+        var rel = normalizedRelative.Replace('\\', '/').Trim('/');
+        if (rel.Equals("azeroth-platform.db", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!rel.Contains('/') && rel.EndsWith(".key", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (rel.StartsWith("stacks/", StringComparison.OrdinalIgnoreCase)
+            || rel.Equals("stacks", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (IsClientLegacyMirrorPath(rel))
+        {
+            return true;
+        }
+
+        if (IsArmoryLegacyDataMirrorPath(rel))
+        {
+            return true;
+        }
+
+        if (rel.StartsWith("launcher-build", StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith("armory-build", StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith("launcher-dist", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsClientLegacyMirrorPath(string rel)
+        => rel.Equals("client", StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith("client/", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<(bool Allowed, List<string> Blockers)> EvaluateClientMirrorDeletionAsync(
+        string normalizedRelative,
+        CancellationToken cancellationToken)
+    {
+        var blockers = new List<string>();
+        var stacks = await _dbContext.ManagedStacks.AsNoTracking().Where(s => s.ClientEnabled).ToListAsync(cancellationToken);
+        if (stacks.Count == 0)
+        {
+            return (true, blockers);
+        }
+
+        IEnumerable<ManagedStackEntity> affected = stacks;
+        if (TryParseClientMirrorStackId(normalizedRelative, out var stackId))
+        {
+            affected = stacks.Where(s => s.Id.Equals(stackId, StringComparison.OrdinalIgnoreCase));
+            if (!affected.Any())
+            {
+                return (true, blockers);
+            }
+        }
+
+        foreach (var stack in affected)
+        {
+            var volumeName = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
+            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
+            if (ClientBaseVolumeLooksPopulated(summary))
+            {
+                continue;
+            }
+
+            blockers.Add(
+                $"{stack.StackName}: acore-{stack.Id}-client-base is missing Wow.exe/Data MPQs ({summary.FileCount} files, {FormatBytesShort(summary.TotalBytes)})");
+        }
+
+        return (blockers.Count == 0, blockers);
+    }
+
+    private static bool TryParseClientMirrorStackId(string normalizedRelative, out string stackId)
+    {
+        stackId = string.Empty;
+        var rel = normalizedRelative.Replace('\\', '/').Trim('/');
+        const string prefix = "client/stacks/";
+        if (!rel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = rel[prefix.Length..];
+        var slash = rest.IndexOf('/');
+        stackId = slash >= 0 ? rest[..slash] : rest;
+        return !string.IsNullOrWhiteSpace(stackId);
+    }
+
+    private static bool ClientBaseVolumeLooksPopulated(VolumeTreeSummary summary)
+        => summary.HasWowExe || summary.HasDataMpq;
+
+    private static bool LooksLikeWoWClientRoot(string dir)
+        => Directory.EnumerateFiles(dir, "Wow.exe").Any()
+            || Directory.EnumerateFiles(dir, "WoW.exe").Any()
+            || (Directory.Exists(Path.Combine(dir, "Data"))
+                && Directory.EnumerateFiles(Path.Combine(dir, "Data"), "*.MPQ").Any());
+
+    /// <summary>
+    /// Legacy armory 3D dataset mirror paths. Styling/config under static/ (outside data/) stays protected.
+    /// </summary>
+    private static bool IsArmoryLegacyDataMirrorPath(string rel)
+    {
+        if (!rel.StartsWith("armory-assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // armory-assets/stacks/{id}/static/data/...
+        const string prefix = "armory-assets/stacks/";
+        if (!rel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = rel[prefix.Length..];
+        var staticDataIdx = rest.IndexOf("/static/data", StringComparison.OrdinalIgnoreCase);
+        return staticDataIdx >= 0;
+    }
+
+    private static string? DescribeManagerEntry(string relativePath, bool isDirectory)
+    {
+        if (relativePath.StartsWith("client/", StringComparison.OrdinalIgnoreCase)
+            || relativePath.Equals("client", StringComparison.OrdinalIgnoreCase))
+        {
+            return isDirectory
+                ? "Legacy client upload mirror on the manager. Only removable when that stack's client-base Docker volume is verified."
+                : "Legacy client mirror file.";
+        }
+
+        if (IsArmoryLegacyDataMirrorPath(relativePath.Replace('\\', '/').Trim('/')))
+        {
+            return "Legacy armory 3D data mirror (safe to remove when the armory-assets volume has the dataset).";
+        }
+
+        if (relativePath.StartsWith("armory-assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Armory styling/config on manager (still used for image rebuilds until fully volume-based).";
+        }
+
+        if (relativePath.StartsWith("stacks/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AzerothCore build checkout — protected.";
+        }
+
+        if (relativePath.EndsWith(".key", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Platform signing/encryption key — protected.";
+        }
+
+        return null;
+    }
+
+    private static bool IsManagerVolumeName(string volumeName) =>
+        volumeName.StartsWith("azeroth-platform-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAnonymousVolumeName(string volumeName) =>
+        volumeName.Length == 64 && Regex.IsMatch(volumeName, @"^[a-f0-9]+$", RegexOptions.IgnoreCase);
 
     private StackDockerBuildFilesDto DescribeBuildFiles(
         string stackId,
@@ -1087,6 +2117,32 @@ public sealed class StackDockerService : IStackDockerService
         }
 
         return dirs.OrderByDescending(d => d.SizeBytes).ToList();
+    }
+
+    private static DockerReclaimableBreakdownDto BuildReclaimableBreakdown(
+        DockerDiskUsageDto diskUsage,
+        List<StackDockerImageDto> danglingImages,
+        List<StackDockerImageDto> allPlatformImages,
+        List<DockerObsoleteBuildDirDto> obsoleteBuildDirs)
+    {
+        var deletableUnusedImages = allPlatformImages.Where(i => !i.IsActive).ToList();
+        var listedReclaimableBytes = diskUsage.DockerBuildCacheReclaimableBytes
+            + danglingImages.Sum(i => i.SizeBytes)
+            + deletableUnusedImages.Sum(i => i.SizeBytes)
+            + obsoleteBuildDirs.Sum(d => d.SizeBytes);
+
+        return new DockerReclaimableBreakdownDto
+        {
+            BuildCacheBytes = diskUsage.DockerBuildCacheReclaimableBytes,
+            DanglingImageBytes = danglingImages.Sum(i => i.SizeBytes),
+            DanglingImageCount = danglingImages.Count,
+            UnusedTaggedImageBytes = deletableUnusedImages.Sum(i => i.SizeBytes),
+            UnusedTaggedImageCount = deletableUnusedImages.Count,
+            ObsoleteBuildDirBytes = obsoleteBuildDirs.Sum(d => d.SizeBytes),
+            ObsoleteBuildDirCount = obsoleteBuildDirs.Count,
+            EngineReclaimableBytes = listedReclaimableBytes,
+            ListedReclaimableBytes = listedReclaimableBytes,
+        };
     }
 
     private async Task<List<StackDockerVolumeDto>> ListAllManagedStackVolumesAsync(

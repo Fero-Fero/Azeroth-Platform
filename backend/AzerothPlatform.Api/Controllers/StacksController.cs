@@ -101,6 +101,23 @@ public class StacksController : ControllerBase
         return updatedStack is null ? NotFound() : Ok(updatedStack);
     }
 
+    [HttpPost("{stackId}/reconnect-external")]
+    public async Task<ActionResult<StackDetailsDto>> ReconnectExternal(
+        string stackId,
+        [FromBody] DeploymentConfigDto deployment,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stack = await _stackService.ReconnectExternalAsync(stackId, deployment, cancellationToken);
+            return stack is null ? NotFound() : Ok(stack);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("{stackId}")]
     public async Task<IActionResult> Delete(string stackId, CancellationToken cancellationToken)
     {

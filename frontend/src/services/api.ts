@@ -2,6 +2,7 @@ import axios from 'axios'
 import type { 
   StackConfigurationDto, 
   StackDetailsDto,
+  DeploymentConfigDto,
   BuildStatusDto,
   ModuleDto,
   SaveModuleRequest,
@@ -86,6 +87,9 @@ export const stackApi = {
   // Update stack configuration
   updateConfig: (stackId: string, config: StackConfigurationDto) => 
     apiClient.put<StackDetailsDto>(`/stacks/${stackId}`, config),
+
+  reconnectExternal: (stackId: string, deployment: DeploymentConfigDto) =>
+    apiClient.post<StackDetailsDto>(`/stacks/${stackId}/reconnect-external`, deployment),
   
   // Delete stack
   delete: (stackId: string) => apiClient.delete(`/stacks/${stackId}`),
@@ -192,7 +196,19 @@ export const stackApi = {
 }
 
 export const dockerApi = {
+  getOverview: () => apiClient.get<import('@/types/docker.types').DockerEngineOverviewDto>('/docker/overview'),
+
   getDiskUsage: () => apiClient.get<import('@/types/docker.types').DockerDiskUsageDto>('/docker/disk'),
+
+  deleteEngineVolume: (volumeName: string) =>
+    apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>(
+      `/docker/volumes/${encodeURIComponent(volumeName)}`,
+    ),
+
+  deleteEngineImage: (imageId: string) =>
+    apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>(
+      `/docker/images/${encodeURIComponent(imageId)}`,
+    ),
 
   cleanupUnused: () =>
     apiClient.post<import('@/types/docker.types').DockerCleanupJobStatus>('/docker/cleanup'),
@@ -200,6 +216,29 @@ export const dockerApi = {
     apiClient.post<import('@/types/docker.types').DockerCleanupJobStatus>('/docker/cleanup/old-builds'),
   cleanupStatus: () =>
     apiClient.get<import('@/types/docker.types').DockerCleanupJobStatus | null>('/docker/cleanup/status'),
+
+  getManagerFiles: (path?: string) =>
+    apiClient.get<import('@/types/docker.types').DockerManagerFilesDto>('/docker/manager/files', {
+      params: path ? { path } : undefined,
+    }),
+
+  deleteManagerFile: (path: string) =>
+    apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>('/docker/manager/files', {
+      params: { path },
+    }),
+
+  cleanupManagerMirrors: () =>
+    apiClient.post<import('@/types/docker.types').DockerManagerMirrorCleanupResultDto>(
+      '/docker/manager/cleanup-mirrors',
+    ),
+
+  migrateClientMirrors: () =>
+    apiClient.post<import('@/types/docker.types').DockerManagerMirrorCleanupResultDto>(
+      '/docker/manager/migrate-client-mirrors',
+    ),
+
+  getPlatformKeys: () =>
+    apiClient.get<import('@/types/docker.types').DockerPlatformKeysDto>('/docker/platform-keys'),
 }
 
 // Build API

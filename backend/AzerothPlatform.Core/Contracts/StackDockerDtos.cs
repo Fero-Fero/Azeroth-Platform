@@ -193,6 +193,74 @@ public sealed class DockerVolumeCleanupResultDto
     public int DeletedFiles { get; set; }
 }
 
+/// <summary>Global Docker engine overview for the manager admin UI.</summary>
+public sealed class DockerEngineOverviewDto
+{
+    public DockerDiskUsageDto? DiskUsage { get; set; }
+    public DockerReclaimableBreakdownDto? ReclaimableBreakdown { get; set; }
+    /// <summary>
+    /// Space that &quot;Reclaim disk space&quot; can actually free (build cache, dangling layers, unused images,
+    /// orphaned checkouts). Excludes Docker volumes — delete those separately on this page.
+    /// </summary>
+    public long ReclaimableBytes { get; set; }
+    public DockerManagerVolumeDto? ManagerVolume { get; set; }
+    public List<DockerEngineVolumeGroupDto> VolumeGroups { get; set; } = [];
+    public List<DockerEngineImageDto> Images { get; set; } = [];
+    public long TotalVolumeBytes { get; set; }
+    public long TotalImageBytes { get; set; }
+    public int DeletableVolumeCount { get; set; }
+    public long DeletableVolumeBytes { get; set; }
+}
+
+public sealed class DockerManagerVolumeDto
+{
+    public string Name { get; set; } = string.Empty;
+    public long TotalBytes { get; set; }
+    public bool IsProtected { get; set; } = true;
+    public string Detail { get; set; } = string.Empty;
+    public List<DockerVolumeDirectoryEntryDto> Directories { get; set; } = [];
+}
+
+public sealed class DockerVolumeDirectoryEntryDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public bool IsDeletable { get; set; }
+    public string? Detail { get; set; }
+}
+
+public sealed class DockerEngineVolumeGroupDto
+{
+    public string Category { get; set; } = string.Empty;
+    public string? StackId { get; set; }
+    public string? StackName { get; set; }
+    public long TotalBytes { get; set; }
+    public List<DockerEngineVolumeEntryDto> Volumes { get; set; } = [];
+}
+
+public sealed class DockerEngineVolumeEntryDto
+{
+    public string Name { get; set; } = string.Empty;
+    public long? SizeBytes { get; set; }
+    public int LinkCount { get; set; }
+    public bool IsProtected { get; set; }
+    public bool IsDeletable { get; set; }
+    public string? Detail { get; set; }
+}
+
+public sealed class DockerEngineImageDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Reference { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string? OwnerStackId { get; set; }
+    public int ContainerCount { get; set; }
+    public bool IsProtected { get; set; }
+    public bool IsDeletable { get; set; }
+}
+
 /// <summary>Phase of the global Docker disk-reclaim background job.</summary>
 public enum DockerCleanupJobPhase
 {
@@ -229,4 +297,43 @@ public sealed class DockerCleanupJobStatusDto
 
     [System.Text.Json.Serialization.JsonInclude]
     public bool IsRunning => Phase == DockerCleanupJobPhase.Running;
+}
+
+public sealed class DockerManagerFileEntryDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public bool IsDirectory { get; set; }
+    public long SizeBytes { get; set; }
+    public bool IsDeletable { get; set; }
+    public string? Detail { get; set; }
+}
+
+public sealed class DockerManagerFilesDto
+{
+    public string Path { get; set; } = string.Empty;
+    public bool Exists { get; set; }
+    public List<DockerManagerFileEntryDto> Entries { get; set; } = [];
+}
+
+public sealed class DockerPlatformKeyStatusDto
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Present { get; set; }
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class DockerPlatformKeysDto
+{
+    public List<DockerPlatformKeyStatusDto> Keys { get; set; } = [];
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class DockerManagerMirrorCleanupResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public long FreedBytes { get; set; }
+    public int RemovedPaths { get; set; }
+    public List<string> RemovedLabels { get; set; } = [];
 }

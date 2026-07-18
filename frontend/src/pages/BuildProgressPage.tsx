@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { CheckCircle2, XCircle, Loader2, Terminal, AlertCircle } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Terminal, AlertCircle, Ban } from 'lucide-react'
 import { useBuildProgress } from '@/hooks/useBuildProgress'
 import { buildApi } from '@/services/api'
 import { BuildPhase } from '@/types/stack.types'
@@ -14,11 +14,17 @@ const PHASE_LABELS: Record<BuildPhase, string> = {
   [BuildPhase.Failed]: 'Failed',
 }
 
+function isCancelledMessage(message: string | null): boolean {
+  return message?.toLowerCase().includes('cancelled') ?? false
+}
+
 export default function BuildProgressPage() {
   const { stackId } = useParams<{ stackId: string }>()
   const navigate = useNavigate()
   const { progress, isComplete, error } = useBuildProgress(stackId ?? null)
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,12 +34,22 @@ export default function BuildProgressPage() {
   }, [progress.logs, autoScrollLogs])
 
   const handleCancel = async () => {
-    if (!stackId) return
+    if (!stackId || isCancelling || isComplete) return
 
+    setCancelError(null)
+    setIsCancelling(true)
     try {
       await buildApi.cancel(stackId)
     } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      setCancelError(
+        status === 404
+          ? 'No active build found to cancel.'
+          : 'Failed to cancel build. Try again or refresh the page.',
+      )
       console.error('Failed to cancel build:', err)
+    } finally {
+      setIsCancelling(false)
     }
   }
 
@@ -55,17 +71,45 @@ export default function BuildProgressPage() {
     )
   }
 
-  const isFailed = error !== null || progress.phase === BuildPhase.Failed
-  const isSuccess = isComplete && !isFailed
+  const isCancelled = isCancelledMessage(error)
+  const isFailed = !isCancelled && (error !== null || progress.phase === BuildPhase.Failed)
+  const isSuccess = isComplete && !isFailed && !isCancelled
+  const isBuilding = !isComplete
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Build Progress</h1>
-        <p className="mt-1 text-gray-500">
-          Building your AzerothCore stack...
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Build Progress</h1>
+          <p className="mt-1 text-gray-500">Building your AzerothCore stack…</p>
+        </div>
+        {isBuilding && (
+          <button
+            type="button"
+            onClick={() => void handleCancel()}
+            disabled={isCancelling}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+          >
+            {isCancelling ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cancelling…
+              </>
+            ) : (
+              <>
+                <Ban className="h-4 w-4" />
+                Cancel build
+              </>
+            )}
+          </button>
+        )}
       </div>
+
+      {cancelError && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {cancelError}
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* Status Card */}
@@ -73,18 +117,21 @@ export default function BuildProgressPage() {
           <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {!isComplete && (
+                {isBuilding && (
                   <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
                 )}
                 {isSuccess && (
                   <CheckCircle2 className="h-6 w-6 text-green-600" />
+                )}
+                {isCancelled && (
+                  <Ban className="h-6 w-6 text-amber-600" />
                 )}
                 {isFailed && (
                   <XCircle className="h-6 w-6 text-red-600" />
                 )}
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">
-                    {PHASE_LABELS[progress.phase]}
+                    {isCancelled ? 'Build Cancelled' : PHASE_LABELS[progress.phase]}
                   </h2>
                   <p className="text-sm text-gray-500">{progress.step}</p>
                 </div>
@@ -103,15 +150,28 @@ export default function BuildProgressPage() {
               <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                 <div
                   className={`h-full transition-all duration-300 ${
-                    isFailed ? 'bg-red-600' : isSuccess ? 'bg-green-600' : 'bg-blue-600'
+                    isFailed ? 'bg-red-600' : isCancelled ? 'bg-amber-500' : isSuccess ? 'bg-green-600' : 'bg-blue-600'
                   }`}
                   style={{ width: `${progress.percent}%` }}
                 />
               </div>
             </div>
 
+            {/* Cancelled Message */}
+            {isCancelled && error && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="flex gap-3">
+                  <Ban className="h-5 w-5 shrink-0 text-amber-600" />
+                  <div>
+                    <h3 className="font-semibold text-amber-900">Build Cancelled</h3>
+                    <p className="mt-1 text-sm text-amber-800">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Error Message */}
-            {error && (
+            {isFailed && error && (
               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4">
                 <div className="flex gap-3">
                   <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
@@ -140,16 +200,7 @@ export default function BuildProgressPage() {
 
             {/* Actions */}
             <div className="flex flex-wrap gap-3">
-              {!isComplete && (
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  Cancel Build
-                </button>
-              )}
-              {isFailed && (
+              {(isFailed || isCancelled) && (
                 <button
                   type="button"
                   onClick={() => navigate(`/stacks/${stackId}`)}
@@ -203,7 +254,7 @@ export default function BuildProgressPage() {
           <div className="bg-gray-900 p-6">
             <div className="h-96 overflow-y-auto font-mono text-sm">
               {progress.logs.length === 0 ? (
-                <p className="text-gray-500">Waiting for build logs...</p>
+                <p className="text-gray-500">Waiting for build logs…</p>
               ) : (
                 <div className="space-y-1">
                   {progress.logs.map((log, index) => (

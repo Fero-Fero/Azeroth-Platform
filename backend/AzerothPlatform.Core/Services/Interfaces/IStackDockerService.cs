@@ -7,6 +7,11 @@ public interface IStackDockerService
 {
     Task<DockerDiskUsageDto> GetDiskUsageAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Estimates space that global reclaim actions can free (excludes Docker volumes).
+    /// </summary>
+    Task<DockerReclaimableBreakdownDto> GetReclaimableBreakdownAsync(CancellationToken cancellationToken = default);
+
     Task<StackDockerOverviewDto?> GetOverviewAsync(string stackId, CancellationToken cancellationToken = default);
 
     Task<DockerCleanupResultDto> CleanupUnusedAsync(CancellationToken cancellationToken = default);
@@ -29,4 +34,20 @@ public interface IStackDockerService
         string stackId,
         DockerVolumeCleanupRequestDto request,
         CancellationToken cancellationToken = default);
+
+    Task<DockerEngineOverviewDto> GetEngineOverviewAsync(CancellationToken cancellationToken = default);
+
+    Task<StackDockerDeleteResultDto> DeleteEngineVolumeAsync(string volumeName, CancellationToken cancellationToken = default);
+
+    Task<StackDockerDeleteResultDto> DeleteEngineImageAsync(string imageId, CancellationToken cancellationToken = default);
+
+    Task<DockerManagerFilesDto> GetManagerFilesAsync(string relativePath, CancellationToken cancellationToken = default);
+
+    Task<StackDockerDeleteResultDto> DeleteManagerFileAsync(string relativePath, CancellationToken cancellationToken = default);
+
+    Task<DockerManagerMirrorCleanupResultDto> CleanupManagerMirrorsAsync(CancellationToken cancellationToken = default);
+
+    Task<DockerManagerMirrorCleanupResultDto> MigrateClientMirrorsToVolumesAsync(CancellationToken cancellationToken = default);
+
+    Task<DockerPlatformKeysDto> GetPlatformKeysStatusAsync(CancellationToken cancellationToken = default);
 }

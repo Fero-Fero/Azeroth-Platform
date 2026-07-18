@@ -344,6 +344,53 @@ public sealed class StackService : IStackService
         return await MapAsync(stack, cancellationToken);
     }
 
+    public async Task<StackDetailsDto?> ReconnectExternalAsync(
+        string stackId,
+        DeploymentConfigDto deployment,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null)
+        {
+            return null;
+        }
+
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("Only external stacks can be reconnected.");
+        }
+
+        if (string.IsNullOrWhiteSpace(deployment.ExternalHost)
+            || string.IsNullOrWhiteSpace(deployment.ExternalSshUser)
+            || string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey))
+        {
+            throw new InvalidOperationException("Remote host, SSH user, and private key are required to reconnect.");
+        }
+
+        var test = await _remoteEngine.TestConnectionAsync(
+            deployment.ExternalHost.Trim(),
+            deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort,
+            deployment.ExternalSshUser.Trim(),
+            deployment.ExternalSshPrivateKey,
+            cancellationToken);
+        if (!test.Success)
+        {
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(test.Message)
+                ? "Remote connection test failed."
+                : test.Message);
+        }
+
+        stack.ExternalHost = deployment.ExternalHost.Trim();
+        stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
+        stack.ExternalSshUser = deployment.ExternalSshUser.Trim();
+        stack.ExternalSshPrivateKey = _secretProtector.Protect(deployment.ExternalSshPrivateKey);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await _remoteEngine.EnsureContextAsync(stack, cancellationToken);
+        _logger.LogInformation("Reconnected external stack {StackId} to {Host}.", stackId, stack.ExternalHost);
+        return await MapAsync(stack, cancellationToken);
+    }
+
     public async Task<bool> ApplyStackPublicHostAsync(
         string stackId, string host, CancellationToken cancellationToken = default)
     {
@@ -1421,6 +1468,8 @@ public sealed class StackService : IStackService
             runtimeStatus = StackStatus.Starting;
         }
 
+        var externalReconnect = EvaluateExternalReconnect(stack);
+
         return new StackDetailsDto
         {
             StackId = stack.Id,
@@ -1483,8 +1532,36 @@ public sealed class StackService : IStackService
             ArmoryRunning = containers.Any(c =>
                 c.Name.Contains("armory", StringComparison.OrdinalIgnoreCase)
                 && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)),
-            ModulesPendingRebuild = GetModulesPendingRebuild(stack.Id, Deserialize<List<string>>(stack.ModuleIdsJson) ?? [])
+            ModulesPendingRebuild = GetModulesPendingRebuild(stack.Id, Deserialize<List<string>>(stack.ModuleIdsJson) ?? []),
+            NeedsExternalReconnect = externalReconnect.NeedsReconnect,
+            ExternalReconnectReason = externalReconnect.Reason,
+            HasCompletedBuild = stack.LastBuiltAt.HasValue || !string.IsNullOrEmpty(stack.CoreCommitSha),
         };
+    }
+
+    private (bool NeedsReconnect, string? Reason) EvaluateExternalReconnect(ManagedStackEntity stack)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return (false, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            return (true, "SSH credentials are missing. Re-enter the remote engine connection details.");
+        }
+
+        try
+        {
+            _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
+        }
+        catch (CryptographicException)
+        {
+            return (true,
+                "The manager encryption key was lost (often after pruning the data volume). Re-enter the SSH private key to reconnect this external stack.");
+        }
+
+        return (false, null);
     }
 
     /// <summary>
@@ -2088,16 +2165,13 @@ public sealed class StackService : IStackService
         await _remoteEngine.SetVolumeOwnershipAsync(stack, etcVolume, AcoreServiceUid, AcoreServiceGid, cancellationToken);
         await _remoteEngine.SetVolumeOwnershipAsync(stack, logsVolume, AcoreServiceUid, AcoreServiceGid, cancellationToken);
 
-        // Armory 3D model-viewer dataset (per-stack, ~multi-GB): seed the stack's own dataset.
-        if (stack.ArmoryEnabled && ArmoryAssetsSourceDir(stack.Id) is { } assetsDir)
+        // Armory 3D model-viewer dataset lives in the stack's armory-assets volume (uploaded via Armory tab).
+        if (stack.ArmoryEnabled)
         {
             var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id);
-            var assetsExist = await _remoteEngine.VolumeExistsAsync(stack, assetsVolume, cancellationToken);
-            if (!assetsExist)
+            if (!await _remoteEngine.VolumeExistsAsync(stack, assetsVolume, cancellationToken))
             {
-                await _remoteEngine.SeedVolumeAsync(stack, assetsVolume, assetsDir, cancellationToken);
-                // The assets are served read-only by nginx as a non-root user; the seeded tree can carry
-                // restrictive source perms (e.g. 0700 dirs from macOS) that would deny those reads.
+                await _remoteEngine.EnsureVolumeExistsAsync(stack, assetsVolume, cancellationToken);
                 await _remoteEngine.SetVolumeWorldReadableAsync(stack, assetsVolume, cancellationToken);
             }
         }
@@ -2117,18 +2191,10 @@ public sealed class StackService : IStackService
             // Per-stack base client (uploaded on the stack's Client tab). Seed it if the stack has a base
             // uploaded and its volume is not yet populated (skip re-seeding the ~17 GB base on every start;
             // uploads re-seed the volume directly).
-            var baseGameDir = _clientOptions.StackGameDir(stack.Id);
             var baseVolume = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
-            // Always ensure the base volume exists so the compose `external: true` declaration resolves and
-            // `docker compose up` doesn't abort with "external volume not found" — even before any WoW
-            // client has been uploaded on the stack's Client tab. Seed only when the volume is missing:
-            // an empty base dir yields an empty volume (the client file server just serves nothing until a
-            // client is uploaded, which re-seeds this volume directly), and an already-populated base is
-            // never re-seeded here (it can be ~17 GB).
             if (!await _remoteEngine.VolumeExistsAsync(stack, baseVolume, cancellationToken))
             {
-                Directory.CreateDirectory(baseGameDir);
-                await _remoteEngine.SeedVolumeAsync(stack, baseVolume, baseGameDir, cancellationToken);
+                await _remoteEngine.EnsureVolumeExistsAsync(stack, baseVolume, cancellationToken);
             }
 
             var overlayDir = ClientOverlayDir(stackRoot);
@@ -2381,9 +2447,26 @@ public sealed class StackService : IStackService
     /// </summary>
     private (string AssetProxyUrl, bool AssetsAvailable) ResolveArmoryAssets(ManagedStackEntity stack)
     {
-        return ArmoryAssetsSourceDir(stack.Id) is not null
-            ? (_armoryOptions.AssetProxyUrl, true)
-            : (string.Empty, false);
+        if (!stack.ArmoryEnabled)
+        {
+            return (string.Empty, false);
+        }
+
+        // Volume-first: the dataset may exist only in the stack's armory-assets Docker volume.
+        var uploaded = _armoryAssetsOptions.DataPathFor(stack.Id);
+        if (HasArmoryAssetDataset(uploaded))
+        {
+            return (_armoryOptions.AssetProxyUrl, true);
+        }
+
+        var baked = Path.Combine(_armoryOptions.SourcePath, "static", "data");
+        if (HasArmoryAssetDataset(baked))
+        {
+            return (_armoryOptions.AssetProxyUrl, true);
+        }
+
+        // No manager mirror — still wire the sidecar; uploads populate the volume directly.
+        return (_armoryOptions.AssetProxyUrl, true);
     }
 
     /// <summary>

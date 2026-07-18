@@ -158,6 +158,57 @@ public interface IRemoteEngineService
     Task<IReadOnlyList<VolumeFileEntry>> ListLocalVolumeFilesAsync(
         string volumeName,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Lists one directory level inside a volume (paths relative to volume root).</summary>
+    Task<IReadOnlyList<VolumeDirectoryEntry>> ListVolumeDirectoryAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Aggregate stats for a volume tree (file count, total bytes, client markers).</summary>
+    Task<VolumeTreeSummary> GetVolumeTreeSummaryAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Removes all top-level entries inside a volume (not the volume itself).</summary>
+    Task ClearVolumeContentsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes paths inside a local-daemon volume (no stack context).</summary>
+    Task DeleteLocalVolumePathsAsync(
+        string volumeName,
+        IEnumerable<string> relativePaths,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Creates the named volume on the target engine when it does not already exist.</summary>
+    Task EnsureVolumeExistsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>A file or directory inside a Docker named volume (one listing level).</summary>
+public sealed class VolumeDirectoryEntry
+{
+    public string Name { get; set; } = string.Empty;
+    public string RelativePath { get; set; } = string.Empty;
+    public bool IsDirectory { get; set; }
+    public long SizeBytes { get; set; }
+    public int ItemCount { get; set; }
+}
+
+/// <summary>Summary of files stored in a Docker volume.</summary>
+public sealed class VolumeTreeSummary
+{
+    public bool VolumeExists { get; set; }
+    public int FileCount { get; set; }
+    public long TotalBytes { get; set; }
+    public bool HasWowExe { get; set; }
+    public bool HasDataMpq { get; set; }
 }
 
 /// <summary>A file inside a Docker named volume (path relative to volume root).</summary>

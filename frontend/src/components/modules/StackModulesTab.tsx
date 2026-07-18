@@ -10,6 +10,7 @@ import { applyModuleToggle, isModuleLocked, moduleLockReason } from '@/lib/modul
 import {
   isServerTypeRequiredModule,
   mergeRequiredModuleIds,
+  sortModulesForDisplay,
 } from '@/lib/server-type-modules'
 import type { ModuleDto, StackConfigurationDto, StackDetailsDto } from '@/types/stack.types'
 import ModuleCatalogPage from '@/pages/ModuleCatalogPage'
@@ -62,10 +63,17 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
-  const installedModules = selectedIds.map((id) => moduleById.get(id) ?? missingModule(id)).sort(recommendedFirst)
+  const installedModules = sortModulesForDisplay(
+    selectedIds.map((id) => moduleById.get(id) ?? missingModule(id)),
+    {
+      serverType: stack.configuration.serverType,
+      serverTypes,
+      selectedIds,
+    },
+  )
   const availableModules = modules.filter((module) => !selectedSet.has(module.id))
-  const filteredAvailable = availableModules
-    .filter((module) => {
+  const filteredAvailable = sortModulesForDisplay(
+    availableModules.filter((module) => {
       const q = search.trim().toLowerCase()
       if (!q) return true
       return (
@@ -73,8 +81,13 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
         module.id.toLowerCase().includes(q) ||
         module.description.toLowerCase().includes(q)
       )
-    })
-    .sort(recommendedFirst)
+    }),
+    {
+      serverType: stack.configuration.serverType,
+      serverTypes,
+      selectedIds,
+    },
+  )
 
   const builtInAvailable = filteredAvailable.filter((module) => module.isBuiltIn)
   const customAvailable = filteredAvailable.filter((module) => !module.isBuiltIn)
@@ -453,11 +466,6 @@ function missingModule(id: string): ModuleDto {
     isBuiltIn: false,
     recommended: false,
   }
-}
-
-function recommendedFirst<T extends { recommended?: boolean; name: string }>(a: T, b: T) {
-  if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
-  return a.name.localeCompare(b.name)
 }
 
 function RecommendedBadge() {

@@ -16,6 +16,15 @@ public interface IStackService
     Task<StackDetailsDto?> UpdateAsync(string stackId, StackConfigurationDto configuration, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Re-establishes SSH/docker context for an external stack after platform keys were lost. Requires a
+    /// fresh SSH private key and validates the connection before saving.
+    /// </summary>
+    Task<StackDetailsDto?> ReconnectExternalAsync(
+        string stackId,
+        DeploymentConfigDto deployment,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Applies the player-facing host/IP for the whole stack: persisted realmlist override, live
     /// acore_auth.realmlist rows, regenerated runtime artifacts, launcher registry/client data, and
     /// running player-facing services that need recreated to pick up new environment/bind settings.

@@ -153,7 +153,8 @@ export default function StackListPage() {
               <p className="mt-1 text-sm text-amber-900">
                 The Docker engine is {diskUsage.usedPercent.toFixed(1)}% full ({formatBytes(diskUsage.usedBytes)} of{' '}
                 {formatBytes(diskUsage.totalBytes)} used). Old build cache and unused images may be consuming space.
-                Open any stack&apos;s <strong>Advanced → Docker</strong> tab and use <strong>Reclaim disk space</strong>.
+                Open the global <Link to="/docker" className="font-medium text-amber-950 underline">Docker</Link> page
+                or any stack&apos;s <strong>Advanced → Docker</strong> tab and use <strong>Reclaim disk space</strong>.
               </p>
               <div className="mt-3">
                 <DiskUsageBar disk={diskUsage} showDetails={false} />

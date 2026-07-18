@@ -62,9 +62,8 @@ public sealed class ServerTypeCatalogOptions
                 Icon = "trending-up",
                 CoreRepositoryUrl = "https://github.com/Grimfeather/azerothcore-wotlk.git",
                 CoreBranch = "master",
-                // The Grimfeather fork is based on the Playerbots fork, so Playerbots can still be installed.
                 BundledModuleIds = [],
-                RequiredModuleIds = ["mod-individual-progression"]
+                RequiredModuleIds = ["mod-individual-progression", "mod-playerbots"]
             },
             new ServerTypeDefinition
             {

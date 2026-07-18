@@ -154,6 +154,63 @@ export interface DockerVolumeCleanupRequestDto {
   staleOverlayPaths: string[]
 }
 
+export interface DockerEngineOverviewDto {
+  diskUsage?: DockerDiskUsageDto | null
+  reclaimableBreakdown?: DockerReclaimableBreakdownDto | null
+  reclaimableBytes: number
+  managerVolume?: DockerManagerVolumeDto | null
+  volumeGroups: DockerEngineVolumeGroupDto[]
+  images: DockerEngineImageDto[]
+  totalVolumeBytes: number
+  totalImageBytes: number
+  deletableVolumeCount: number
+  deletableVolumeBytes: number
+}
+
+export interface DockerManagerVolumeDto {
+  name: string
+  totalBytes: number
+  isProtected: boolean
+  detail: string
+  directories: DockerVolumeDirectoryEntryDto[]
+}
+
+export interface DockerVolumeDirectoryEntryDto {
+  name: string
+  relativePath: string
+  sizeBytes: number
+  isDeletable: boolean
+  detail?: string | null
+}
+
+export interface DockerEngineVolumeGroupDto {
+  category: string
+  stackId?: string | null
+  stackName?: string | null
+  totalBytes: number
+  volumes: DockerEngineVolumeEntryDto[]
+}
+
+export interface DockerEngineVolumeEntryDto {
+  name: string
+  sizeBytes?: number | null
+  linkCount: number
+  isProtected: boolean
+  isDeletable: boolean
+  detail?: string | null
+}
+
+export interface DockerEngineImageDto {
+  id: string
+  reference: string
+  sizeBytes: number
+  category: string
+  ownerStackId?: string | null
+  containerCount: number
+  isProtected: boolean
+  isDeletable: boolean
+}
+
 export interface StackDockerDeleteResultDto {
   success: boolean
   message: string
@@ -185,4 +242,38 @@ export interface DockerCleanupJobStatus {
   removedImages: number
   removedBuildDirs: number
   isRunning: boolean
+}
+
+export interface DockerManagerFileEntryDto {
+  name: string
+  relativePath: string
+  isDirectory: boolean
+  sizeBytes: number
+  isDeletable: boolean
+  detail?: string | null
+}
+
+export interface DockerManagerFilesDto {
+  path: string
+  exists: boolean
+  entries: DockerManagerFileEntryDto[]
+}
+
+export interface DockerPlatformKeyStatusDto {
+  name: string
+  present: boolean
+  detail: string
+}
+
+export interface DockerPlatformKeysDto {
+  keys: DockerPlatformKeyStatusDto[]
+  detail: string
+}
+
+export interface DockerManagerMirrorCleanupResultDto {
+  success: boolean
+  message: string
+  freedBytes: number
+  removedPaths: number
+  removedLabels: string[]
 }
