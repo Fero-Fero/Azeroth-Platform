@@ -1,0 +1,33 @@
+{{> character-header }}
+
+<div class="armory-panel">
+	<div class="panel-title">Pets <span class="panel-more">{{pets.length}} total</span></div>
+	<div class="panel-body">
+		{{#if pets.length}}
+		<table class="armory-table">
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Species</th>
+					<th>Level</th>
+					<th>Type</th>
+					<th>Status</th>
+				</tr>
+			</thead>
+			<tbody>
+				{{#each pets}}
+				<tr>
+					<td class="pet-name">{{this.name}}</td>
+					<td>{{this.species}}</td>
+					<td>{{this.level}}</td>
+					<td>{{this.petType}}</td>
+					<td>{{this.slotName}}</td>
+				</tr>
+				{{/each}}
+			</tbody>
+		</table>
+		{{else}}
+		<div class="empty-hint">This character has no stored pets.</div>
+		{{/if}}
+	</div>
+</div>

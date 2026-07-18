@@ -2174,6 +2174,12 @@ public sealed class StackService : IStackService
                 await _remoteEngine.EnsureVolumeExistsAsync(stack, assetsVolume, cancellationToken);
                 await _remoteEngine.SetVolumeWorldReadableAsync(stack, assetsVolume, cancellationToken);
             }
+
+            var staticVolume = DockerComposeOverrideGenerator.ArmoryStaticVolumeName(stack.Id);
+            if (!await _remoteEngine.VolumeExistsAsync(stack, staticVolume, cancellationToken))
+            {
+                await _remoteEngine.EnsureVolumeExistsAsync(stack, staticVolume, cancellationToken);
+            }
         }
 
         var stackRoot = Path.GetDirectoryName(repoPath.TrimEnd(Path.DirectorySeparatorChar)) ?? repoPath;

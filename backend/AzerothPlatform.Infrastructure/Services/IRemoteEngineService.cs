@@ -48,6 +48,34 @@ public interface IRemoteEngineService
         string localDestinationDir,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Copies a subdirectory from one named volume into another on the stack's engine without staging
+    /// on the manager host. Both paths are relative to each volume root.
+    /// </summary>
+    Task CopyVolumeSubdirAsync(
+        ManagedStackEntity stack,
+        string sourceVolume,
+        string sourceSubdir,
+        string destVolume,
+        string destSubdir,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Runs a shell script with a volume mounted at <c>/w</c> (working directory <c>/w</c>) on the stack's engine.</summary>
+    Task RunVolumeShellAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string shellScript,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Runs a tool container with a volume subdir as its working directory on the stack engine.</summary>
+    Task<(int ExitCode, string StdOut, string StdErr)> RunToolInVolumeSubdirAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string workSubdir,
+        string image,
+        string toolArgs,
+        CancellationToken cancellationToken = default);
+
     /// <summary>The docker context name used for a given stack (e.g. <c>acore-ext-{id}</c>).</summary>
     string GetContextName(string stackId);
 
@@ -170,6 +198,24 @@ public interface IRemoteEngineService
     Task<VolumeTreeSummary> GetVolumeTreeSummaryAsync(
         ManagedStackEntity? stack,
         string volumeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts files matching <paramref name="filePattern"/> under a volume subdirectory using
+    /// BusyBox-safe <c>find</c> (avoids shell glob limits in large folders such as <c>dbc/</c>).
+    /// </summary>
+    Task<int> CountVolumeFilesAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        string filePattern,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>True when <paramref name="relativePath"/> exists as a directory inside the volume.</summary>
+    Task<bool> VolumeSubdirExistsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
         CancellationToken cancellationToken = default);
 
     /// <summary>Removes all top-level entries inside a volume (not the volume itself).</summary>

@@ -256,16 +256,71 @@ public sealed class ArmoryImageService : IArmoryImageService
         Directory.CreateDirectory(workPath);
         CopyDirectory(_options.SourcePath, workPath);
 
-        // Overlay this stack's uploaded assets on top of the baked source. Everything (web assets plus
-        // the model-viewer dataset under static/data) now lives under a single static/ tree, so one copy
-        // covers it all. The small server-side data (static/data/dbc, static/data/progression) is baked
-        // into the image; the heavy model-viewer assets (mo3/meta/bone/textures) are dropped by ShouldSkip
-        // and served from the stack's assets volume by the armory-assets sidecar instead.
-        var staticPath = _assetsOptions.StaticPathFor(stackId);
-        if (Directory.Exists(staticPath))
+        using (var scope = _scopeFactory.CreateScope())
         {
-            _logger.LogInformation("Overlaying uploaded armory assets for stack {StackId} from {Dir}.", stackId, staticPath);
-            CopyDirectory(staticPath, Path.Combine(workPath, "static"));
+            var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+            var stack = await db.ManagedStacks
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+
+            var staticStaging = Path.Combine(Path.GetTempPath(), "azp-armory-image-static", stackId, Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(staticStaging);
+
+                var staticVolume = DockerComposeOverrideGenerator.ArmoryStaticVolumeName(stackId);
+                var staticSummary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, staticVolume, cancellationToken);
+                if (stack is not null && staticSummary.VolumeExists && staticSummary.FileCount > 0)
+                {
+                    _logger.LogInformation(
+                        "Fetching uploaded armory static bundle for stack {StackId} from volume {Volume}.",
+                        stackId, staticVolume);
+                    await _remoteEngine.FetchVolumeAsync(stack, staticVolume, staticStaging, cancellationToken);
+                }
+                else if (stack is null && staticSummary.VolumeExists && staticSummary.FileCount > 0)
+                {
+                    await _remoteEngine.FetchLocalVolumeAsync(staticVolume, staticStaging, cancellationToken);
+                }
+
+                var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+                var assetsSummary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, assetsVolume, cancellationToken);
+                if (stack is not null && assetsSummary.VolumeExists && assetsSummary.FileCount > 0)
+                {
+                    var dataStaging = Path.Combine(staticStaging, "data");
+                    Directory.CreateDirectory(dataStaging);
+                    foreach (var subdir in new[] { "dbc", "dbc_transmog", "progression" })
+                    {
+                        try
+                        {
+                            await _remoteEngine.FetchVolumeSubdirAsync(
+                                stack, assetsVolume, subdir, Path.Combine(dataStaging, subdir), cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Armory image build: no {Subdir}/ folder in assets volume for stack {StackId}.", subdir, stackId);
+                        }
+                    }
+                }
+
+                // Generated styling/layout files still live on the manager; overlay them last.
+                var managerStatic = _assetsOptions.StaticPathFor(stackId);
+                if (Directory.Exists(managerStatic))
+                {
+                    _logger.LogInformation(
+                        "Overlaying manager-side armory styling assets for stack {StackId} from {Dir}.",
+                        stackId, managerStatic);
+                    CopyDirectory(managerStatic, staticStaging);
+                }
+
+                if (Directory.EnumerateFileSystemEntries(staticStaging).Any())
+                {
+                    CopyDirectory(staticStaging, Path.Combine(workPath, "static"));
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(staticStaging);
+            }
         }
 
         PatchBundledTemplates(Path.Combine(workPath, "static"), stackId);
@@ -917,6 +972,21 @@ public sealed class ArmoryImageService : IArmoryImageService
         var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return parts.Any(p => p is "node_modules" or "build" or ".git" or "logs"
             or "mo3" or "meta" or "bone" or "textures");
+    }
+
+    private static void TryDeleteDirectory(string dir)
+    {
+        try
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup of temp artifacts.
+        }
     }
 
     private static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(string fileName, string arguments, CancellationToken cancellationToken)

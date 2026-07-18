@@ -107,7 +107,8 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
     }
   }
 
-  const dbcPresent = (info?.dataFolders ?? []).includes('dbc')
+  const dbcCsvPresent = (info?.dataFolders ?? []).includes('dbc')
+  const serverDbcsReady = (info?.serverDbcFileCount ?? 0) > 0
 
   if (isLoading) {
     return (
@@ -141,11 +142,12 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
           Upload this stack&rsquo;s armory data bundle (<span className="font-mono">armory.data.zip</span>
           {', '}
           <span className="font-mono">armory.textures.zip</span>) and its static web bundle (
-          <span className="font-mono">armory.static.zip</span>). The data bundle can include the full
-          model-viewer dataset and/or just the <span className="font-mono">progression/</span> folder
-          (dungeon/raid/world boss card artwork for Tracking pages). Data assets are served live by the
-          stack&rsquo;s armory sidecar; static web assets are baked into the armory image, so changing
-          them needs an image rebuild.
+          <span className="font-mono">armory.static.zip</span>). Data and textures uploads merge on the
+          stack&rsquo;s <span className="font-mono">armory-assets</span> volume — uploading one does not
+          remove folders from the other. The data bundle can include the full model-viewer dataset and/or
+          just the <span className="font-mono">progression/</span> folder (dungeon/raid/world boss card
+          artwork for Tracking pages). Data assets are served live by the stack&rsquo;s armory sidecar;
+          static web assets are baked into the armory image, so changing them needs an image rebuild.
         </p>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -156,9 +158,15 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
             </div>
             <div className="rounded-md border bg-gray-50/50 p-4 text-sm">
               <div className="font-medium text-gray-700">Current dataset</div>
-              {info && info.dataFileCount > 0 ? (
+              {info && (info.dataFileCount > 0 || info.dataUploaded || info.dataOnStackVolume) ? (
                 <div className="mt-2 space-y-2 text-gray-600">
                   <div>{info.dataFileCount.toLocaleString()} files · {formatBytes(info.dataSize)}</div>
+                  {info.dataOnStackVolume && (
+                    <p className="text-xs text-green-700">
+                      Stored on this stack&rsquo;s <span className="font-mono">armory-assets</span> Docker volume
+                      (served live by the armory sidecar, not on the manager).
+                    </p>
+                  )}
                   {!info.dataUploaded && (
                     <p className="text-xs text-amber-600">
                       Files are present, but <span className="font-mono">meta/</span> is missing &mdash; the 3D
@@ -215,10 +223,17 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
                   Delete static assets
                 </button>
               </div>
-              {info?.staticUploaded ? (
-                <p className="mt-2 text-gray-600">
-                  {info.staticFileCount.toLocaleString()} files · {formatBytes(info.staticSize)}
-                </p>
+              {info?.staticUploaded || info?.staticOnStackVolume ? (
+                <div className="mt-2 space-y-1 text-gray-600">
+                  <p>
+                    {info.staticFileCount.toLocaleString()} files · {formatBytes(info.staticSize)}
+                  </p>
+                  {info.staticOnStackVolume && (
+                    <p className="text-xs text-green-700">
+                      Stored on this stack&rsquo;s <span className="font-mono">armory-static</span> Docker volume.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <p className="mt-2 text-gray-400">No static bundle uploaded (the image&rsquo;s built-in assets are used).</p>
               )}
@@ -233,11 +248,9 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
           </div>
         </div>
 
-        {info && info.dataFileCount > 0 && (
-          <div className="mt-6">
-            <ArmoryDataBrowser stackId={stackId} />
-          </div>
-        )}
+        <div className="mt-6">
+          <ArmoryDataBrowser stackId={stackId} />
+        </div>
       </section>
 
       {/* Server DBCs */}
@@ -248,32 +261,44 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
         </div>
         <p className="mb-4 text-sm text-gray-500">
           The armory reads DBC data (<span className="font-mono">data/dbc</span>) for richer item, spell
-          and talent tooltips. Sync extracts the DBCs from this stack&rsquo;s running server, converts them
-          to the CSVs the armory needs, bakes them into the armory image and restarts it. The stack must
-          have started at least once so its client data is populated.
+          and talent tooltips. Sync extracts DBCs from this stack&rsquo;s client-data volume, converts them
+          to CSVs on the stack engine, writes them into the armory-assets volume, then rebuilds the armory
+          image. The stack must have started at least once so its client data is populated.
         </p>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm">
-            {dbcPresent ? (
+          <div className="text-sm space-y-1">
+            {serverDbcsReady ? (
               <span className="inline-flex items-center gap-1.5 text-green-700">
-                <CheckCircle2 className="h-4 w-4" /> DBC dataset present
+                <CheckCircle2 className="h-4 w-4" />
+                {info?.serverDbcFileCount.toLocaleString()} server DBC file(s) on stack client-data volume
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-gray-500">
-                <XCircle className="h-4 w-4 text-gray-400" /> No DBC dataset yet &mdash; tooltips will be limited
+                <XCircle className="h-4 w-4 text-gray-400" /> No server DBCs yet — start the stack and wait for client-data-init
               </span>
             )}
+            {dbcCsvPresent ? (
+              <span className="block text-green-700">
+                <CheckCircle2 className="mr-1 inline h-4 w-4" />
+                Armory DBC CSVs present on the stack <span className="font-mono">armory-assets</span> volume
+              </span>
+            ) : serverDbcsReady ? (
+              <span className="block text-gray-500">
+                DBC CSVs not synced yet — use Sync below to convert server DBCs for the armory
+              </span>
+            ) : null}
           </div>
           <button
             onClick={onSyncDbcs}
-            disabled={dbcSyncing}
+            disabled={dbcSyncing || !serverDbcsReady}
+            title={!serverDbcsReady ? 'Start the stack and wait for client-data-init first' : undefined}
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {dbcSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {dbcSyncing
               ? job?.message || 'Syncing DBCs…'
-              : dbcPresent
+              : dbcCsvPresent
                 ? 'Update DBC files & CSVs'
                 : 'Sync DBCs from server'}
           </button>

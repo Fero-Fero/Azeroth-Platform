@@ -9,6 +9,12 @@ export interface ArmoryAssetsInfoDto {
   staticFileCount: number
   dataFolders: string[]
   staticRebuildPending: boolean
+  /** Model-viewer dataset lives on the stack armory-assets Docker volume. */
+  dataOnStackVolume: boolean
+  /** Static web bundle lives on the stack armory-static Docker volume. */
+  staticOnStackVolume: boolean
+  /** .dbc binaries in the stack client-data volume (server DBC source). */
+  serverDbcFileCount: number
 }
 
 export type ArmoryStyleTemplate = 'Classic' | 'Tbc' | 'Wotlk' | 'Custom'

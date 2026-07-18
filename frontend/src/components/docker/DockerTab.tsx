@@ -265,6 +265,8 @@ export default function DockerTab({ stackId }: DockerTabProps) {
         </div>
       )}
 
+      <VolumeAuditSection stackId={stackId} />
+
       <DiskUsageBar disk={data.diskUsage} reclaimableBytes={data.reclaimableBytes} />
 
       <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
@@ -288,7 +290,7 @@ export default function DockerTab({ stackId }: DockerTabProps) {
       </div>
 
       {subTab === 'disk-usage' ? (
-        <DiskUsageSubTab stackId={stackId} data={data} />
+        <DiskUsageSubTab data={data} />
       ) : (
         <ResourcesSubTab
           data={data}
@@ -447,7 +449,7 @@ function ResourcesSubTab({
   )
 }
 
-function DiskUsageSubTab({ stackId, data }: { stackId: string; data: StackDockerOverviewDto }) {
+function DiskUsageSubTab({ data }: { data: StackDockerOverviewDto }) {
   const breakdown = data.diskUsageBreakdown
   const reclaimable = data.reclaimableBreakdown
 
@@ -520,8 +522,6 @@ function DiskUsageSubTab({ stackId, data }: { stackId: string; data: StackDocker
           ))}
         </ResourceSection>
       )}
-
-      <VolumeAuditSection stackId={stackId} />
     </div>
   )
 }

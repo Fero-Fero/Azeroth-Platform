@@ -417,9 +417,16 @@ class DbcReader<T> {
 const dir = path.join(process.cwd(), "static", "data");
 // Full 3.3.5a client DBC dump (CSV). The retail (9.2.0) files used by the Zam 3D
 // viewer (transmog appearances + mounts) have no 3.3.5 equivalent and live in
-// static/data/dbc_transmog/.
-const dbcDir = path.join(dir, "dbc");
-const transmogDir = path.join(dir, "dbc_transmog");
+// static/data/dbc_transmog/ (or on the mounted armory-assets volume at dbc_transmog/).
+function dbcDatasetDir(...segments: string[]): string {
+	const mount = (process.env["ACORE_ARMORY_ASSETS_MOUNT"] ?? "").replace(/\/+$/, "");
+	if (mount) {
+		return path.join(mount, ...segments);
+	}
+	return path.join(dir, ...segments);
+}
+const dbcDir = dbcDatasetDir("dbc");
+const transmogDir = dbcDatasetDir("dbc_transmog");
 export const DbcFiles = {
 	achievement: path.join(dbcDir, "Achievement.csv"),
 	achievementCategory: path.join(dbcDir, "Achievement_Category.csv"),
@@ -559,14 +566,14 @@ export class DbcManager {
 		this._glyphProperties = await this.read<IGlyphProperties>(DbcFiles.glyphProperties, dbcFields.glyphProperties).toArray();
 		this._item = await this.read<IItemDbc>(DbcFiles.item, dbcFields.item).toArray();
 		this._itemRetail = await this.read<IItemRetailDbc>(DbcFiles.itemRetail, dbcFields.itemRetail).toArray();
-		this._itemAppearance = await this.read<IItemAppearanceDbc>(DbcFiles.itemAppearance, dbcFields.itemAppearance).toArray();
-		this._itemModifiedAppearance = await this.read<IItemModifiedAppearanceDbc>(
+		this._itemAppearance = await this.readOptional<IItemAppearanceDbc>(DbcFiles.itemAppearance, dbcFields.itemAppearance).toArray();
+		this._itemModifiedAppearance = await this.readOptional<IItemModifiedAppearanceDbc>(
 			DbcFiles.itemModifiedAppearance,
 			dbcFields.itemModifiedAppearance,
 		).toArray();
 		this._itemDisplayInfo = await this.read<IItemDisplayInfoDbc>(DbcFiles.itemDisplayInfo, dbcFields.itemDisplayInfo).toArray();
-		this._mount = await this.read<IMountDbc>(DbcFiles.mount, dbcFields.mount).toArray();
-		this._mountDisplay = await this.read<IMountXDisplayDbc>(DbcFiles.mountDisplay, dbcFields.mountDisplay).toArray();
+		this._mount = await this.readOptional<IMountDbc>(DbcFiles.mount, dbcFields.mount).toArray();
+		this._mountDisplay = await this.readOptional<IMountXDisplayDbc>(DbcFiles.mountDisplay, dbcFields.mountDisplay).toArray();
         this._skill = await this.read<ISkillDbc>(DbcFiles.skill, dbcFields.skill).toArray();
 		this._spell = await this.read<ISpellDbc>(DbcFiles.spell, dbcFields.spell).toArray();
 		this._spellItemEnchantment = await this.read<ISpellItemEnchantmentDbc>(

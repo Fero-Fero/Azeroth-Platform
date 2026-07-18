@@ -1,0 +1,72 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-skills.css">
+{{> icons }}
+
+{{> layout-grid }}
+
+<div class="skills-grid">
+    {{#if data.professions.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Professions</div>
+        <div class="panel-body">
+            {{#each data.professions}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+
+    {{#if data.secondarySkills.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Secondary Skills</div>
+        <div class="panel-body">
+            {{#each data.secondarySkills}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+
+    {{#if data.weaponSkills.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Weapon Skills</div>
+        <div class="panel-body">
+            {{#each data.weaponSkills}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+
+    {{#if data.classSkills.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Class Skills</div>
+        <div class="panel-body">
+            {{#each data.classSkills}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+
+    {{#if data.armorSkills.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Armor Proficiencies</div>
+        <div class="panel-body">
+            {{#each data.armorSkills}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+
+    {{#if data.languages.length}}
+    <div class="armory-panel skill-category">
+        <div class="panel-title">Languages</div>
+        <div class="panel-body">
+            {{#each data.languages}}
+                {{> skill-bar }}
+            {{/each}}
+        </div>
+    </div>
+    {{/if}}
+</div>

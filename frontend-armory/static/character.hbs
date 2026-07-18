@@ -1,0 +1,454 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character.css">
+{{> icons }}
+<script type="application/javascript" src="{{websiteRoot}}/js/viewer.min.js?v=2"></script>
+
+{{> layout-grid }}
+<p class="stat-approx-note">Approximated from base + equipped gear. Talent, aura and set-bonus effects are not included, so values may differ from the in-game sheet. Health and Mana are exact.</p>
+
+<span data-icon-size="large" class="icon-size is-hidden-mobile"></span>
+<span data-icon-size="medium" class="icon-size is-hidden-tablet"></span>
+
+<div id="item-slot-template" class="item-slot no-link-text">
+	<div class="inventory-slot"></div>
+	<div class="icon"></div>
+	<div class="border"></div>
+	<a target="_blank"></a>
+</div>
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		const $model = $("#model");
+		const $itemSlotTemplate = $("#item-slot-template").detach().removeAttr("id");
+
+		window.WH = {
+			//debug: console.log,
+			debug: () => { },
+		};
+
+		const charData = {{{ JSONstringify data }}};
+		const races = {
+			1: "human",
+			2: "orc",
+			3: "dwarf",
+			4: "nightelf",
+			5: "scourge",
+			6: "tauren",
+			7: "gnome",
+			8: "troll",
+			10: "bloodelf",
+			11: "draenei",
+		};
+		const genders = ["male", "female"];
+
+		// Swap the faction backdrop for a race-specific WotLK character-creation
+		// background, but only once we confirm the race image actually exists.
+		// If it 404s, the faction background set in the markup stays in place.
+		(() => {
+			const raceSlug = races[charData.race];
+			if (!raceSlug) {
+				return;
+			}
+			const url = "{{websiteRoot}}/img/bg/model-race-" + raceSlug + ".jpg";
+			const probe = new Image();
+			probe.onload = () => $("#model-container").addClass("model-bg-race-" + raceSlug);
+			probe.src = url;
+		})();
+
+		if (Cookies.get("disable-3d-viewer") === "1") {
+			$("#3d-viewer-options").hide();
+		} else {
+			$("#cb-enable-3d-viewer").prop("checked", true);
+		}
+		$("#cb-enable-3d-viewer").change(() => {
+			const enabled = $("#cb-enable-3d-viewer").prop("checked");
+
+			if (enabled) {
+				Cookies.remove("disable-3d-viewer");
+				createViewer();
+				$("#3d-viewer-options").slideDown("fast");
+			} else {
+				Cookies.set("disable-3d-viewer", "1");
+				viewer?.destroy();
+				$("#3d-viewer-options").slideUp("fast");
+			}
+		});
+
+		const baseModelItems = charData.characterModelItems ?? [];
+		const transmogModelItems = charData.characterModelTransmogs;
+
+		// Armory defaults to showing all gear; hide toggles are opt-in for the viewer only.
+		$("#cb-hide-helmet").prop("checked", false);
+		$("#cb-hide-cloak").prop("checked", false);
+		$("#cb-hide-tabard").prop("checked", false);
+
+		function useTransmogItems() {
+			return transmogModelItems !== undefined && !$("#cb-hide-transmogs").prop("checked");
+		}
+
+		function buildVisibleModelItems() {
+			const source = (useTransmogItems() ? transmogModelItems : baseModelItems) ?? baseModelItems;
+			const hideHelm = $("#cb-hide-helmet").prop("checked");
+			const hideCloak = $("#cb-hide-cloak").prop("checked");
+			const hideTabard = $("#cb-hide-tabard").prop("checked");
+			return source.filter(
+				([slot, display]) =>
+					display !== -1
+					&& !(slot === 1 && hideHelm)
+					&& !(slot === 16 && hideCloak)
+					&& !(slot === 19 && hideTabard),
+			);
+		}
+
+		$("#cb-hide-helmet").change(() => refreshViewerItems());
+		$("#cb-hide-cloak").change(() => refreshViewerItems());
+		$("#cb-hide-tabard").change(() => refreshViewerItems());
+		if (charData.characterModelTransmogs !== undefined && charData.equipment.some((item) => item.transmog !== null)) {
+			$("#lbl-hide-transmogs").show();
+			$("#list-transmogs-container").show();
+
+			for (const item of charData.equipment) {
+				if (item.transmog !== undefined && item.transmog !== 1) {
+					const $li = $("<li>").appendTo("#list-transmogs ul");
+					$("<a>")
+						.attr("data-tooltip", `Item #${item.transmog}`)
+						.text(`Item #${item.transmog}`)
+						.appendTo($li);
+				}
+			}
+		}
+		$("#cb-hide-transmogs").change(() => refreshViewerItems());
+
+		let viewer;
+		function syncModelItems() {
+			characterModel.items = buildVisibleModelItems();
+		}
+
+		function refreshViewerItems() {
+			syncModelItems();
+			if (!viewer) {
+				return;
+			}
+
+			const slots = new Set([
+				...baseModelItems.map(([slot]) => slot),
+				...(transmogModelItems ?? []).map(([slot]) => slot),
+			]);
+			if (slots.size > 0) {
+				viewer.method("clearSlots", [...slots].join(","));
+			}
+
+			const data = characterModel.items.map(([slot, display]) => ({ slot, display }));
+			if (data.length > 0) {
+				viewer.method("setItems", [data]);
+			}
+		}
+
+		function createViewer() {
+			if (Cookies.get("disable-3d-viewer") === "1") {
+				return;
+			}
+
+			viewer?.destroy();
+			syncModelItems();
+			viewer = new ZamModelViewer(characterModel);
+		}
+
+		const statNames = {
+			0: "Mana", 1: "Health", 3: "Agility", 4: "Strength", 5: "Intellect", 6: "Spirit", 7: "Stamina",
+			12: "Defense Rating", 13: "Dodge Rating", 14: "Parry Rating", 15: "Block Rating",
+			16: "Melee Hit Rating", 17: "Ranged Hit Rating", 18: "Spell Hit Rating",
+			19: "Melee Crit Rating", 20: "Ranged Crit Rating", 21: "Spell Crit Rating",
+			28: "Melee Haste Rating", 29: "Ranged Haste Rating", 30: "Spell Haste Rating",
+			31: "Hit Rating", 32: "Crit Rating", 35: "Resilience Rating", 36: "Haste Rating",
+			37: "Expertise Rating", 38: "Attack Power", 39: "Ranged Attack Power",
+			43: "Mana per 5 sec", 44: "Armor Penetration Rating", 45: "Spell Power",
+			46: "Health per 5 sec", 47: "Spell Penetration", 48: "Block Value",
+		};
+		// Order in which to render stat lines (others are appended afterwards).
+		const statOrder = [4, 3, 7, 5, 6, 45, 38, 39, 32, 31, 36, 37, 44, 35, 12, 13, 14, 15, 43, 46, 47, 48];
+
+		// Primary attributes are shown in white; everything else is shown as a
+		// green "Equip:" effect, mirroring WoW's item tooltips.
+		const primaryStatNames = { 4: "Strength", 3: "Agility", 7: "Stamina", 5: "Intellect", 6: "Spirit", 1: "Health", 0: "Mana" };
+
+		function formatItemStats(equip) {
+			const white = [];
+			const green = [];
+
+			if (equip.armor) {
+				white.push(`${equip.armor} Armor`);
+			}
+
+			const sums = {};
+			for (const s of (equip.stats || [])) {
+				sums[s.type] = (sums[s.type] || 0) + s.value;
+			}
+
+			// Primary attributes (white).
+			for (const type of [4, 3, 7, 5, 6, 1, 0]) {
+				if (sums[type]) {
+					white.push(`+${sums[type]} ${primaryStatNames[type]}`);
+					delete sums[type];
+				}
+			}
+
+			// Resistances (white).
+			const resNames = { holy: "Holy", fire: "Fire", nature: "Nature", frost: "Frost", shadow: "Shadow", arcane: "Arcane" };
+			if (equip.resistance) {
+				for (const k in resNames) {
+					if (equip.resistance[k]) {
+						white.push(`+${equip.resistance[k]} ${resNames[k]} Resistance`);
+					}
+				}
+			}
+
+			// Collapse "all melee/ranged/spell" rating triples into a single line.
+			const collapse = (a, b, c, label) => {
+				if (sums[a] && sums[a] === sums[b] && sums[a] === sums[c]) {
+					green.push(`Equip: Increases ${label} by ${sums[a]}.`);
+					delete sums[a]; delete sums[b]; delete sums[c];
+				}
+			};
+			collapse(19, 20, 21, "critical strike rating");
+			collapse(16, 17, 18, "hit rating");
+			collapse(28, 29, 30, "haste rating");
+
+			const printed = new Set();
+			const pushType = (type) => {
+				if (sums[type] && !printed.has(type)) {
+					const name = (statNames[type] || `Stat ${type}`).toLowerCase();
+					green.push(`Equip: Increases ${name} by ${sums[type]}.`);
+					printed.add(type);
+				}
+			};
+			for (const type of statOrder) {
+				pushType(type);
+			}
+			for (const type of Object.keys(sums)) {
+				pushType(parseInt(type, 10));
+			}
+
+			const lines = [];
+			for (const w of white) {
+				lines.push({ text: w, cls: "tt-white" });
+			}
+			for (const g of green) {
+				lines.push({ text: g, cls: "tt-stat" });
+			}
+			return lines;
+		}
+
+		function createItemSlot(equip, invSlot, icon, quality, name, itemLevel, container) {
+			const $item = $itemSlotTemplate.clone();
+			$item
+				.data("icon", icon)
+				.data("quality", quality)
+				.find(".inventory-slot")
+				.css("background-image", `url("{{websiteRoot}}/img/inventory-slot/${invSlot}.png")`);
+			if (equip !== undefined) {
+				$item.data("item", equip.itemEntry);
+				const $a = $item.find("a");
+				if (name) {
+					$a.attr("data-tooltip", name);
+					if (quality !== undefined && quality !== null) {
+						$a.attr("data-tooltip-quality", quality);
+					}
+					if (itemLevel) {
+						$a.attr("data-tooltip-sub", `Item Level ${itemLevel}`);
+					}
+					if (equip.typeLeft || equip.typeRight) {
+						$a.attr("data-tooltip-type", JSON.stringify({ left: equip.typeLeft || "", right: equip.typeRight || "" }));
+					}
+					const statLines = formatItemStats(equip);
+					if (statLines.length > 0) {
+						$a.attr("data-tooltip-stats", JSON.stringify(statLines));
+					}
+					if (equip.sockets && equip.sockets.length > 0) {
+						$a.attr("data-tooltip-sockets", equip.sockets.join(","));
+					}
+					if (equip.maxDurability) {
+						$a.attr("data-tooltip-durability", equip.maxDurability);
+					}
+					if (equip.requiredLevel) {
+						$a.attr("data-tooltip-reqlevel", equip.requiredLevel);
+					}
+					if (equip.set) {
+						$a.attr("data-tooltip-set", JSON.stringify(equip.set));
+					}
+				}
+			}
+			$item.appendTo($(container));
+		}
+		const invSlotContainers = [
+			{ element: "#equipment-col-left", slots: [0, 1, 2, 14, 4, 3, 18, 8] },
+			{ element: "#equipment-col-right", slots: [9, 5, 6, 7, 10, 11, 12, 13] },
+			{ element: "#equipment-weapons", slots: [15, 16, 17] }
+		];
+		for (const side of invSlotContainers) {
+			for (const slot of side.slots) {
+				const item = charData.equipment.find(item => item.slot === slot);
+				createItemSlot(item, slot, item?.icon?.toLowerCase(), item?.quality, item?.name, item?.itemLevel, side.element);
+			}
+		}
+		const nbItemRows = Math.max($("#equipment-col-left").children().length, $("#equipment-col-right").children().length);
+
+		function onResize(init = false) {
+			const iconSize = $(".icon-size:visible").data("icon-size");
+			const iconSizePx = iconSize === "medium" ? 44 : 68;
+
+			$("#model-container").css("height", (iconSizePx * nbItemRows) + "px");
+
+			$(".item-slot")
+				.removeClass("iconmedium iconlarge")
+				.addClass(`icon${iconSize}`)
+				.each((idx, el) => {
+					const $item = $(el);
+					const item = $item.data("item");
+					const icon = $item.data("icon");
+					const quality = $item.data("quality");
+					if (item !== undefined) {
+						$item.find(".icon").css("background-image", `url("{{websiteRoot}}/img/wow-icons/${iconSize}/${icon}.jpg")`);
+					}
+					if (quality !== undefined) {
+						$item.find(".border").css("background-image", `url("{{websiteRoot}}/img/icon-border/${iconSize}/q${quality}.png")`);
+					}
+				});
+
+			if (!init) {
+				characterModel.aspect = $model.outerWidth() / $model.outerHeight();
+				createViewer();
+			}
+		}
+		onResize(true);
+
+		function setMount(mountId) {
+			if (characterModel.mount.id === mountId) {
+				return;
+			}
+
+			if (mountId !== 0) {
+				const mainHand = charData.equipment.find(e => e.slot === 15);
+				const offHand = charData.equipment.find(e => e.slot === 16);
+				const ranged = charData.equipment.find(e => e.slot === 17);
+
+				characterModel.charCustomization.sheathMain = mainHand !== undefined ? sheathTypes[mainHand.classId][mainHand.subclassId] : undefined;
+				if (offHand !== undefined) {
+					characterModel.charCustomization.sheathOff = sheathTypes[offHand.classId][offHand.subclassId];
+				} else if (ranged !== undefined) {
+					characterModel.charCustomization.sheathOff = sheathTypes[ranged.classId][ranged.subclassId];
+				} else {
+					characterModel.charCustomization.sheathOff = -1;
+				}
+
+				if (characterModel.charCustomization.sheathMain === undefined) {
+					characterModel.charCustomization.sheathMain = 0;
+				}
+				if (characterModel.charCustomization.sheathOff === undefined) {
+					characterModel.charCustomization.sheathOff = 0;
+				}
+			} else {
+				characterModel.charCustomization.sheathMain = -1;
+				characterModel.charCustomization.sheathOff = -1;
+			}
+
+			characterModel.mount.id = mountId;
+			createViewer();
+		}
+
+		function setBackground(file, contentPath = "{{websiteRoot}}/data/") {
+			if (!viewer) {
+				return;
+			}
+
+			const originalContentPath = viewer.options.contentPath;
+			viewer.options.contentPath = contentPath;
+			viewer.options.background = file;
+			viewer.renderer.loadBackground();
+			viewer.options.contentPath = originalContentPath;
+			viewer.options.background = undefined;
+		}
+
+		$("#btn-transmogs").on("click", () => {
+			$("#list-transmogs").slideToggle("fast");
+		});
+
+		const sheathTypes = {
+			2: {
+				// One handed weapons
+				0: 3,
+				4: 3,
+				7: 3,
+				14: 3,
+				15: 3,
+				17: 3,
+				20: 3,
+
+				// Two handed weapons
+				1: 1,
+				5: 1,
+				8: 1,
+
+				// Others
+				10: 2, // Staff
+				6: 1, // Polearm
+				2: 4, // Bow
+				3: 4, // Gun
+				18: 4, // Crossbow
+				13: 0, // Fist weapons
+				19: 3, // Wand
+				20: 1, // Fishing pole
+			},
+			4: {
+				0: 3, // Held in off-hand
+				6: 9, // Shield
+			},
+		};
+
+		const characterModel = {
+			type: ZamModelViewer.WOW,
+			contentPath: "{{ contentPath }}",
+			container: $model,
+			hd: true,
+			transparent: true,
+			aspect: $model.outerWidth() / $model.outerHeight(),
+			charCustomization: {
+				race: charData.race,
+				gender: charData.gender,
+				options: charData.customizationOptions,
+				sheathMain: -1,
+				sheathOff: -1,
+			},
+			cls: charData.class,
+			items: [],
+			models: {
+				type: ZamModelViewer.Wow.Types.CHARACTER,
+				id: `${races[charData.race]}${genders[charData.gender]}`,
+			},
+			mount: {
+				type: ZamModelViewer.Wow.Types.NPC,
+				id: 0,
+			},
+		};
+		createViewer();
+
+		function debounce(func, timeout) {
+			let timer;
+			return (...args) => {
+				clearTimeout(timer);
+				timer = setTimeout(() => { func.apply(this, args); }, timeout);
+			};
+		}
+
+		let windowWidth = $(window).width();
+		$(window).resize(debounce(() => {
+			const newWidth = $(window).width();
+			if (windowWidth === newWidth) {
+				// Do nothing if only the height changed.
+				// This prevents triggering a resize when the navigation bar moves on mobile when scrolling.
+				return;
+			}
+			windowWidth = newWidth;
+			onResize();
+		}, 500));
+	});
+</script>

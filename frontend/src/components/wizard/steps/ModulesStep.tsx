@@ -8,7 +8,6 @@ import {
   mergeRequiredModuleIds,
   sortModulesForDisplay,
 } from '@/lib/server-type-modules'
-import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
 import { ServerType } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 
@@ -90,12 +89,10 @@ export function ModulesStep({ form }: ModulesStepProps) {
 
       {serverType === ServerType.IndividualProgression && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 space-y-2">
-          {selectedIds.includes(INDIVIDUAL_PROGRESSION_MODULE_ID) && (
-            <p className="text-violet-800">
-              After creating the stack, use <strong>Sync with mod-individual-progression</strong> on the{' '}
-              <strong>Patches</strong> tab to simulate progression.
-            </p>
-          )}
+          <p className="text-violet-800">
+            After creating the stack, you will be prompted to <strong>disable playerbots</strong> before
+            your first launch so you can configure patches and progression content first.
+          </p>
           <p className="text-violet-800">
             Install <strong>AtlasLoot Individual Progression</strong> from the <strong>Addons</strong> tab after
             creation — it restores Naxx 40, Ony 40, and Kazzak loot tables for progressive progression.{' '}

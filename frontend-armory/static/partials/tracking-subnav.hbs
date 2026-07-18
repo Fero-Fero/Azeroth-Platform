@@ -1,0 +1,8 @@
+<nav class="char-subnav tracking-subnav">
+	{{#if progressionEnabled}}
+	<a class="char-subnav-tab {{#if (eq page "progression")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/progression">Progression</a>
+	{{/if}}
+	{{#if recordsEnabled}}
+	<a class="char-subnav-tab {{#if (eq page "records")}}is-active{{/if}}" href="{{websiteRoot}}/character/{{realm}}/{{name}}/logs">Logs</a>
+	{{/if}}
+</nav>

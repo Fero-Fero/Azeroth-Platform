@@ -1,0 +1,254 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-progression.css">
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-records.css">
+
+{{> layout-grid }}
+
+{{> tracking-subnav }}
+
+<nav class="char-subnav progression-subnav">
+	<a class="char-subnav-tab progression-tab is-active" data-cat="dungeon" href="#dungeon">Dungeon</a>
+	<a class="char-subnav-tab progression-tab" data-cat="raid" href="#raid">Raid</a>
+	<a class="char-subnav-tab progression-tab" data-cat="world" href="#world">World</a>
+</nav>
+
+<div id="progression-content">
+	<div class="progression-cat is-active" data-cat="dungeon"></div>
+	<div class="progression-cat" data-cat="raid"></div>
+	<div class="progression-cat" data-cat="world"></div>
+</div>
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		const sectionLabels = {
+			classic: "Classic",
+			tbc: "The Burning Crusade",
+			wotlk: "Wrath of the Lich King",
+		};
+		const sectionOrder = ["classic", "tbc", "wotlk"];
+
+		const $tooltip = $('<div id="progression-tooltip"></div>').appendTo(document.body);
+
+		function formatTime(ms) {
+			if (!ms || ms <= 0) {
+				return null;
+			}
+			const totalSeconds = Math.floor(ms / 1000);
+			const hours = Math.floor(totalSeconds / 3600);
+			const minutes = Math.floor((totalSeconds % 3600) / 60);
+			const seconds = totalSeconds % 60;
+			if (hours > 0) {
+				return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+			}
+			const millis = ms % 1000;
+			return `${minutes}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+		}
+
+		function makeBossRow(boss) {
+			const $row = $('<div class="ptt-boss"></div>').toggleClass("done", boss.bestMs > 0);
+			$row.append($('<span class="ptt-boss-name"></span>').text(boss.name));
+			$row.append($('<span class="ptt-boss-time"></span>').text(boss.bestMs > 0 ? formatTime(boss.bestMs) : "—"));
+			return $row;
+		}
+
+		function buildTooltip(raid) {
+			const $inner = $("<div></div>");
+			const $title = $('<div class="ptt-title"></div>').append(document.createTextNode(raid.name));
+			if (raid.difficulty !== null && raid.difficulty !== undefined) {
+				$title.append(document.createTextNode(" ("));
+				$title.append($("<span></span>").html(difficultyLabelHtml(raid.difficulty)));
+				$title.append(document.createTextNode(")"));
+			}
+			$inner.append($title);
+
+			const best = formatTime(raid.clear.bestMs);
+			const last = formatTime(raid.clear.lastMs);
+			let summary;
+			if (raid.clear.completions > 0) {
+				summary = `Best ${best ?? "—"}` + (last ? ` · Last ${last}` : "") + ` · ${raid.clear.completions} ${raid.clear.completions === 1 ? "clear" : "clears"}`;
+			} else {
+				summary = "No recorded clears yet.";
+			}
+			$inner.append($('<div class="ptt-summary"></div>').text(summary));
+
+			const $list = $('<div class="ptt-list"></div>');
+			for (const boss of raid.bosses) {
+				$list.append(makeBossRow(boss));
+			}
+			$inner.append($list);
+			return $inner.html();
+		}
+
+		function makeRaidCard(raid) {
+			const $card = $('<div class="raid-card"></div>');
+			if (raid.image) {
+				$card.css("background-image", `url("${raid.image}")`);
+			} else {
+				$card.addClass("no-image");
+			}
+			if (raid.difficulty !== null && raid.difficulty !== undefined) {
+				$card.attr("data-difficulty", raid.difficulty);
+			}
+			if (raid.clear.completions > 0) {
+				$card.addClass("is-complete");
+			}
+
+			const $overlay = $('<div class="raid-card-overlay"></div>');
+
+			const $name = $('<div class="raid-card-name"></div>').text(raid.name);
+			if (raid.difficulty !== null && raid.difficulty !== undefined) {
+				$name.append($('<span class="raid-card-diff"></span>').html(difficultyLabelHtml(raid.difficulty)));
+			}
+			$overlay.append($name);
+
+			const $bottom = $('<div class="raid-card-bottom"></div>');
+			const best = formatTime(raid.clear.bestMs);
+			if (best !== null) {
+				$bottom.append($('<div class="raid-card-time"></div>').text(best));
+				$bottom.append(
+					$('<div class="raid-card-count"></div>').text(`${raid.clear.completions} ${raid.clear.completions === 1 ? "clear" : "clears"}`),
+				);
+			} else {
+				$bottom.append($('<div class="raid-card-time no-record"></div>').text("No record"));
+			}
+			$overlay.append($bottom);
+
+			$card.append($overlay);
+
+			const tooltipHtml = buildTooltip(raid);
+			$card
+				.on("mouseenter", () => {
+					$tooltip.html(tooltipHtml).addClass("is-visible");
+				})
+				.on("mousemove", (e) => {
+					const pad = 16;
+					let x = e.pageX + pad;
+					let y = e.pageY + pad;
+					const ttWidth = $tooltip.outerWidth();
+					const ttHeight = $tooltip.outerHeight();
+					const winRight = $(window).scrollLeft() + $(window).width();
+					const winBottom = $(window).scrollTop() + $(window).height();
+					if (x + ttWidth > winRight) {
+						x = e.pageX - ttWidth - pad;
+					}
+					if (y + ttHeight > winBottom) {
+						y = e.pageY - ttHeight - pad;
+					}
+					$tooltip.css({ left: `${x}px`, top: `${y}px` });
+				})
+				.on("mouseleave", () => {
+					$tooltip.removeClass("is-visible");
+				});
+
+			return $card;
+		}
+
+		// Unified difficulty scale recorded by the tracker module. Heroic tiers
+		// show the heroic icon between the raid size and the word "Heroic".
+		const heroicIcon = '<img class="diff-heroic-icon" src="{{websiteRoot}}/img/wow-icons/small/heroic.png" alt="Heroic">';
+		function difficultyLabelHtml(diff) {
+			switch (diff) {
+				case 0: return "Normal";
+				case 1: return `${heroicIcon} Heroic`;
+				case 2: return "10 Normal";
+				case 3: return "20 Normal";
+				case 4: return "25 Normal";
+				case 5: return "40 Normal";
+				case 6: return `10 ${heroicIcon} Heroic`;
+				case 7: return `25 ${heroicIcon} Heroic`;
+				default: return `Difficulty ${diff}`;
+			}
+		}
+		// Which difficulty to pre-select when several are available.
+		const difficultyDefaultPref = [2, 6, 4, 7, 5, 3, 1, 0];
+
+		function filterGridByDifficulty($grid, difficulty) {
+			let visible = 0;
+			$grid.find(".raid-card").each(function () {
+				const match = Number($(this).attr("data-difficulty")) === difficulty;
+				$(this).toggle(match);
+				if (match) {
+					visible++;
+				}
+			});
+			$grid.next(".raid-grid-empty").toggle(visible === 0);
+		}
+
+		function makeDifficultySwitch($grid, difficulties) {
+			const $switch = $('<div class="difficulty-switch"></div>');
+			for (const d of difficulties) {
+				$('<button type="button" class="difficulty-btn"></button>')
+					.attr("data-difficulty", d)
+					.html(difficultyLabelHtml(d))
+					.appendTo($switch);
+			}
+			$switch.find(".difficulty-btn").on("click", function () {
+				const difficulty = Number($(this).attr("data-difficulty"));
+				$switch.find(".difficulty-btn").removeClass("is-active");
+				$(this).addClass("is-active");
+				filterGridByDifficulty($grid, difficulty);
+				$tooltip.removeClass("is-visible");
+				return false;
+			});
+			return $switch;
+		}
+
+		function renderCategory(catName, catData) {
+			const $container = $(`.progression-cat[data-cat="${catName}"]`);
+			$container.empty();
+
+			const hasAny = sectionOrder.some((s) => catData[s] && catData[s].length > 0);
+			if (!hasAny) {
+				$container.append($('<div class="progression-empty"></div>').text("No data yet."));
+				return;
+			}
+
+			for (const section of sectionOrder) {
+				const raids = catData[section] || [];
+				if (raids.length === 0) {
+					continue;
+				}
+				$container.append($('<h2 class="progression-section-title is-size-4"></h2>').text(sectionLabels[section]));
+
+				const $grid = $('<div class="raid-grid"></div>');
+				for (const raid of raids) {
+					$grid.append(makeRaidCard(raid));
+				}
+
+				// When entries carry a difficulty (e.g. WotLK raids split into
+				// 10/25 Normal & Heroic cards), show a switch derived from the
+				// difficulties actually present. Single-difficulty content (most
+				// dungeons/world bosses) just shows its grid as-is.
+				const presentDiffs = [...new Set(raids.map((r) => r.difficulty).filter((d) => d !== null && d !== undefined))].sort(
+					(a, b) => a - b
+				);
+				if (presentDiffs.length > 0) {
+					const $switch = makeDifficultySwitch($grid, presentDiffs);
+					$container.append($switch);
+					$container.append($grid);
+					$container.append($('<div class="raid-grid-empty"></div>').text("No content available on this difficulty."));
+					const def = difficultyDefaultPref.find((d) => presentDiffs.includes(d)) ?? presentDiffs[0];
+					$switch.find(`.difficulty-btn[data-difficulty="${def}"]`).addClass("is-active");
+					filterGridByDifficulty($grid, def);
+				} else {
+					$container.append($grid);
+				}
+			}
+		}
+
+		$(".progression-tab").on("click", function () {
+			const cat = $(this).data("cat");
+			$(".progression-tab").removeClass("is-active");
+			$(this).addClass("is-active");
+			$(".progression-cat").removeClass("is-active");
+			$(`.progression-cat[data-cat="${cat}"]`).addClass("is-active");
+			$tooltip.removeClass("is-visible");
+			return false;
+		});
+
+		$.getJSON(`{{websiteRoot}}/character/{{{realm}}}/{{guid}}/records/data`, (data) => {
+			renderCategory("dungeon", data.dungeon);
+			renderCategory("raid", data.raid);
+			renderCategory("world", data.world);
+		});
+	});
+</script>

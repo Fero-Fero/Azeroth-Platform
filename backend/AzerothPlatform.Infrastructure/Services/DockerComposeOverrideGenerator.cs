@@ -78,6 +78,7 @@ public static class DockerComposeOverrideGenerator
         yield return ClientCacheVolumeName(stackId);
         yield return ClientLauncherDistVolumeName(stackId);
         yield return ArmoryAssetsVolumeName(stackId);
+        yield return ArmoryStaticVolumeName(stackId);
         yield return $"{project}_ac-database";
         yield return $"{project}_ac-client-data";
     }
@@ -87,6 +88,12 @@ public static class DockerComposeOverrideGenerator
     /// that stack's own uploaded armory data and served read-only by its <c>armory-assets</c> sidecar.
     /// </summary>
     public static string ArmoryAssetsVolumeName(string stackId) => $"acore-{stackId}-armory-assets";
+
+    /// <summary>
+    /// Per-stack uploaded armory static web bundle (armory.static.zip). Baked into the armory image on
+    /// rebuild; not served live from a sidecar like the model-viewer dataset.
+    /// </summary>
+    public static string ArmoryStaticVolumeName(string stackId) => $"acore-{stackId}-armory-static";
 
     /// <summary>Compose volume key for the per-stack armory asset dataset (resolves to <c>ArmoryAssetsVolumeName(stackId)</c>).</summary>
     public const string ArmoryAssetsVolumeKey = "armory_assets";
@@ -297,6 +304,8 @@ public static class DockerComposeOverrideGenerator
         {
             sb.AppendLine("    depends_on:");
             sb.AppendLine("      - armory-assets");
+            sb.AppendLine("    volumes:");
+            sb.AppendLine($"      - {ArmoryAssetsVolumeKey}:/armory-assets:ro");
         }
 
         sb.AppendLine("    environment:");
@@ -316,6 +325,9 @@ public static class DockerComposeOverrideGenerator
             // (meta/mo3/bone/textures). The armory proxies its /data/* routes to it server-side, so the
             // browser stays same-origin. Blank leaves the viewer to whatever assets exist locally.
             ("ACORE_ARMORY_ASSET_PROXY_URL", armory.AssetProxyUrl),
+            // Read-only mount of the stack's armory-assets volume so DBC CSVs (dbc/, dbc_transmog/)
+            // are loaded live from uploads without rebaking the armory image.
+            ("ACORE_ARMORY_ASSETS_MOUNT", armory.AssetsAvailable ? "/armory-assets" : ""),
             ("ACORE_ARMORY_REALMS__0__NAME", armory.RealmName),
             ("ACORE_ARMORY_REALMS__0__REALM_ID", armory.RealmId.ToString()),
             ("ACORE_ARMORY_REALMS__0__AUTH_DATABASE", "acore_auth"),
@@ -371,6 +383,7 @@ public static class DockerComposeOverrideGenerator
         {
             "ACORE_ARMORY_WEBSITE_URL",
             "ACORE_ARMORY_ASSET_PROXY_URL",
+            "ACORE_ARMORY_ASSETS_MOUNT",
             "ACORE_ARMORY_REALMS__0__NAME",
             "ACORE_ARMORY_REALMS__0__REALM_ID",
             "ACORE_ARMORY_REALMS__0__AUTH_DATABASE",

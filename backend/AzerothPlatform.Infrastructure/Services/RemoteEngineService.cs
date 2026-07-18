@@ -256,7 +256,24 @@ public sealed class RemoteEngineService : IRemoteEngineService
             throw new InvalidOperationException($"Failed to seed volume '{volumeName}': {stderr}");
         }
 
+        await VerifyVolumeNotEmptyAsync(contextArg, volumeName, cancellationToken);
+
         _logger.LogInformation("Seeded volume {Volume}.", volumeName);
+    }
+
+    private async Task VerifyVolumeNotEmptyAsync(string contextArg, string volumeName, CancellationToken cancellationToken)
+    {
+        // Guard against tar streams where stdin never reaches the container (empty volume, exit 0).
+        var script = "find /dest -mindepth 1 -maxdepth 1 2>/dev/null | head -1 | grep -q .";
+        var (exit, _, stderr) = await RunAlpineInVolumeAsync(
+            contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, script, cancellationToken);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException(
+                $"Volume '{volumeName}' appears empty after seeding. " +
+                "The stack Docker engine may not accept streamed uploads; check connectivity and try again. " +
+                stderr.Trim());
+        }
     }
 
     public async Task FetchVolumeAsync(ManagedStackEntity stack, string volumeName, string localDestinationDir, CancellationToken cancellationToken = default)
@@ -509,6 +526,21 @@ public sealed class RemoteEngineService : IRemoteEngineService
         CancellationToken cancellationToken = default)
         => GetVolumeTreeSummaryCoreAsync(stack, volumeName, cancellationToken);
 
+    public Task<int> CountVolumeFilesAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        string filePattern,
+        CancellationToken cancellationToken = default)
+        => CountVolumeFilesCoreAsync(stack, volumeName, relativePath, filePattern, cancellationToken);
+
+    public Task<bool> VolumeSubdirExistsAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+        => VolumeSubdirExistsCoreAsync(stack, volumeName, relativePath, cancellationToken);
+
     public async Task ClearVolumeContentsAsync(
         ManagedStackEntity? stack,
         string volumeName,
@@ -545,11 +577,15 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         var subdir = SanitizeVolumeSubdir(relativePath);
         var target = string.IsNullOrEmpty(subdir) ? "/dest" : $"/dest/{subdir}";
-        var command =
-            $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
-            $"sh -c \"if [ ! -d '{target}' ]; then exit 2; fi; " +
-            $"find '{target}' -mindepth 1 -maxdepth 1 -printf '%f\\t%d\\t%s\\n' 2>/dev/null\"";
-        var (exit, output, _) = await RunShellAsync(command, cancellationToken);
+        var listScript =
+            $"if [ ! -d \"{target}\" ]; then exit 2; fi; " +
+            $"find \"{target}\" -mindepth 1 -maxdepth 1 2>/dev/null | while IFS= read -r p; do " +
+            "n=\"${p##*/}\"; " +
+            "if [ -d \"$p\" ]; then printf \"%s\\t4\\t0\\n\" \"$n\"; " +
+            "elif [ -f \"$p\" ]; then s=$(stat -c %s \"$p\" 2>/dev/null || echo 0); printf \"%s\\t8\\t%s\\n\" \"$n\" \"$s\"; fi; " +
+            "done";
+        var (exit, output, _) = await RunAlpineInVolumeAsync(
+            contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, listScript, cancellationToken);
         if (exit == 2)
         {
             return [];
@@ -570,7 +606,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 continue;
             }
 
-            var name = parts[0];
+            var name = NormalizeVolumeEntryName(parts[0]);
             if (name is "." or "..")
             {
                 continue;
@@ -591,10 +627,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
         foreach (var entry in entries.Where(e => e.IsDirectory))
         {
             var childTarget = string.IsNullOrEmpty(subdir) ? $"/dest/{entry.Name}" : $"/dest/{subdir}/{entry.Name}";
-            var countCommand =
-                $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
-                $"sh -c \"find '{childTarget}' -mindepth 1 -maxdepth 1 2>/dev/null | wc -l\"";
-            var (countExit, countOut, _) = await RunShellAsync(countCommand, cancellationToken);
+            var countScript = $"find \"{childTarget}\" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l";
+            var (countExit, countOut, _) = await RunAlpineInVolumeAsync(
+                contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, countScript, cancellationToken);
             if (countExit == 0 && int.TryParse(countOut.Trim(), out var count))
             {
                 entry.ItemCount = count;
@@ -627,27 +662,31 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         summary.VolumeExists = true;
-        var command =
-            $"docker {contextArg}run --rm -v {volumeName}:/dest:ro alpine:3.20 " +
-            "sh -c \"" +
-            "files=$(find /dest -type f ! -name .hashcache.json ! -name .manifest.json 2>/dev/null | wc -l); " +
+        var summaryScript =
+            "set +e; " +
+            "files=$(find /dest -type f ! -name .hashcache.json ! -name .manifest.json 2>/dev/null | wc -l | tr -d \" \"); " +
             "bytes=$(du -sb /dest 2>/dev/null | cut -f1); " +
+            "[ -n \"$bytes\" ] || bytes=0; " +
             "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
-            "mpq=0; test -d /dest/Data && find /dest/Data -maxdepth 1 -name '*.MPQ' -print -quit | grep -q . && mpq=1; " +
-            "echo \\\"$files\\t$bytes\\t$wow\\t$mpq\\\"\"";
-        var (exit, output, _) = await RunShellAsync(command, cancellationToken);
+            "mpq=0; if test -d /dest/Data; then find /dest/Data -maxdepth 1 -name \"*.MPQ\" -print -quit 2>/dev/null | grep -q . && mpq=1; fi; " +
+            "printf \"AZP_SUMMARY:%s\\t%s\\t%s\\t%s\\n\" \"$files\" \"$bytes\" \"$wow\" \"$mpq\"";
+        var (exit, output, _) = await RunAlpineInVolumeAsync(
+            contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, summaryScript, cancellationToken);
         if (exit != 0)
         {
             return summary;
         }
 
-        var line = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        var line = output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(l => l.StartsWith("AZP_SUMMARY:", StringComparison.Ordinal));
         if (line is null)
         {
             return summary;
         }
 
-        var parts = line.Split('\t');
+        var payload = line["AZP_SUMMARY:".Length..];
+        var parts = payload.Split('\t');
         if (parts.Length >= 4)
         {
             int.TryParse(parts[0].Trim(), out var fileCount);
@@ -659,6 +698,74 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         return summary;
+    }
+
+    private async Task<int> CountVolumeFilesCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        string filePattern,
+        CancellationToken cancellationToken)
+    {
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        var (inspectExit, _, _) = await RunAsync(
+            "docker",
+            $"{contextArg}volume inspect {volumeName}",
+            cancellationToken,
+            throwOnError: false);
+        if (inspectExit != 0)
+        {
+            return 0;
+        }
+
+        var subdir = SanitizeVolumeSubdir(relativePath);
+        var target = string.IsNullOrEmpty(subdir) ? "/dest" : $"/dest/{subdir}";
+        var pattern = string.IsNullOrWhiteSpace(filePattern) ? "*" : filePattern.Trim();
+        if (ContainsShellMeta(pattern))
+        {
+            throw new ArgumentException($"Unsafe file pattern: '{filePattern}'.", nameof(filePattern));
+        }
+
+        var countScript =
+            $"if [ ! -d \"{target}\" ]; then exit 2; fi; " +
+            $"find \"{target}\" -type f -name \"{pattern}\" 2>/dev/null | wc -l | tr -d \" \"";
+        var (exit, output, _) = await RunAlpineInVolumeAsync(
+            contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, countScript, cancellationToken);
+        if (exit != 0)
+        {
+            return 0;
+        }
+
+        return int.TryParse(output.Trim(), out var count) ? count : 0;
+    }
+
+    private async Task<bool> VolumeSubdirExistsCoreAsync(
+        ManagedStackEntity? stack,
+        string volumeName,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        var subdir = SanitizeVolumeSubdir(relativePath);
+        if (string.IsNullOrEmpty(subdir))
+        {
+            return false;
+        }
+
+        var contextArg = stack is null ? string.Empty : await ContextArgAsync(stack, cancellationToken);
+        var (inspectExit, _, _) = await RunAsync(
+            "docker",
+            $"{contextArg}volume inspect {volumeName}",
+            cancellationToken,
+            throwOnError: false);
+        if (inspectExit != 0)
+        {
+            return false;
+        }
+
+        var script = $"test -d \"/dest/{subdir}\"";
+        var (exit, _, _) = await RunAlpineInVolumeAsync(
+            contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, script, cancellationToken);
+        return exit == 0;
     }
 
     private static string NormalizeVolumeRelative(string? relativePath)
@@ -756,6 +863,88 @@ public sealed class RemoteEngineService : IRemoteEngineService
         _logger.LogInformation("Fetched {Subdir} from volume {Volume} for stack {StackId}.", subdir, volumeName, stack.Id);
     }
 
+    public async Task CopyVolumeSubdirAsync(
+        ManagedStackEntity stack,
+        string sourceVolume,
+        string sourceSubdir,
+        string destVolume,
+        string destSubdir,
+        CancellationToken cancellationToken = default)
+    {
+        var srcRel = NormalizeVolumeRelative(sourceSubdir);
+        var dstRel = NormalizeVolumeRelative(destSubdir);
+        if (string.IsNullOrEmpty(srcRel))
+        {
+            throw new ArgumentException("Source subdirectory is required.", nameof(sourceSubdir));
+        }
+
+        if (string.IsNullOrEmpty(dstRel))
+        {
+            throw new ArgumentException("Destination subdirectory is required.", nameof(destSubdir));
+        }
+
+        _ = SanitizeVolumeSubdir(srcRel);
+        _ = SanitizeVolumeSubdir(dstRel);
+
+        var contextArg = await ContextArgAsync(stack, cancellationToken);
+        var command = string.Equals(sourceVolume, destVolume, StringComparison.Ordinal)
+            ? $"docker {contextArg}run --rm -v {sourceVolume}:/w alpine:3.20 " +
+              $"sh -c \"mkdir -p /w/{dstRel} && cp -a /w/{srcRel}/. /w/{dstRel}/\""
+            : $"docker {contextArg}run --rm -v {sourceVolume}:/src:ro -v {destVolume}:/dest alpine:3.20 " +
+              $"sh -c \"mkdir -p /dest/{dstRel} && cp -a /src/{srcRel}/. /dest/{dstRel}/\"";
+
+        var (exit, _, stderr) = await RunShellAsync(command, cancellationToken);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to copy '{srcRel}' to '{dstRel}' on the stack engine: {stderr}");
+        }
+
+        _logger.LogInformation(
+            "Copied volume subdir {Source} -> {Dest} ({SourceVolume} -> {DestVolume}) for stack {StackId}.",
+            srcRel, dstRel, sourceVolume, destVolume, stack.Id);
+    }
+
+    public async Task RunVolumeShellAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string shellScript,
+        CancellationToken cancellationToken = default)
+    {
+        var contextArg = await ContextArgAsync(stack, cancellationToken);
+        var args = new List<string>();
+        AddDockerContextArgs(args, contextArg);
+        args.Add("run");
+        args.Add("--rm");
+        args.Add("-v");
+        args.Add($"{volumeName}:/w");
+        args.Add("-w");
+        args.Add("/w");
+        args.Add("alpine:3.20");
+        args.Add("sh");
+        args.Add("-c");
+        args.Add(shellScript);
+        var (exit, _, stderr) = await RunProcessAsync("docker", args, cancellationToken, throwOnError: false);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException($"Volume shell command failed: {stderr}");
+        }
+    }
+
+    public async Task<(int ExitCode, string StdOut, string StdErr)> RunToolInVolumeSubdirAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string workSubdir,
+        string image,
+        string toolArgs,
+        CancellationToken cancellationToken = default)
+    {
+        var sub = SanitizeVolumeSubdir(workSubdir);
+        var contextArg = await ContextArgAsync(stack, cancellationToken);
+        var args = $"{contextArg}run --rm -v {volumeName}:/w -w /w/{sub} {image} {toolArgs}";
+        return await RunAsync("docker", args, cancellationToken, throwOnError: false);
+    }
+
     /// <summary>
     /// Attempts a daemon-side copy of <paramref name="localSourceDir"/> into <paramref name="volumeName"/>
     /// by mounting both the manager's data volume and the target volume in a helper container. Only
@@ -837,6 +1026,61 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
     private static string ShellQuote(string value) => "'" + (value ?? string.Empty).Replace("'", "'\\''") + "'";
 
+    /// <summary>
+    /// Runs a shell script in a throwaway Alpine container via the docker CLI directly (not
+    /// <see cref="RunShellAsync"/>), so variable expansion inside the script is not broken by a
+    /// second wrapping <c>/bin/sh -c</c>. The script is single-quoted for docker; do not embed
+    /// single quotes in <paramref name="shellScript"/> (use double quotes for paths/literals).
+    /// </summary>
+    private static Task<(int ExitCode, string StdOut, string StdErr)> RunAlpineInVolumeAsync(
+        string contextArg,
+        string volumeName,
+        bool readOnly,
+        string mountAt,
+        string? workDir,
+        string shellScript,
+        CancellationToken cancellationToken)
+    {
+        var args = new List<string>();
+        AddDockerContextArgs(args, contextArg);
+        args.Add("run");
+        args.Add("--rm");
+        if (!string.IsNullOrEmpty(workDir))
+        {
+            args.Add("-w");
+            args.Add(workDir);
+        }
+
+        args.Add("-v");
+        args.Add($"{volumeName}:{mountAt}{(readOnly ? ":ro" : string.Empty)}");
+        args.Add("alpine:3.20");
+        args.Add("sh");
+        args.Add("-c");
+        args.Add(shellScript);
+        return RunProcessAsync("docker", args, cancellationToken, throwOnError: false);
+    }
+
+    private static void AddDockerContextArgs(List<string> args, string contextArg)
+    {
+        var trimmed = (contextArg ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var part in trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            args.Add(part);
+        }
+    }
+
+    private static string NormalizeVolumeEntryName(string raw)
+    {
+        var name = (raw ?? string.Empty).Replace('\\', '/').Trim();
+        var slash = name.LastIndexOf('/');
+        return slash >= 0 ? name[(slash + 1)..] : name;
+    }
+
     // Characters that survive single-quoting only to be re-interpreted by the *outer* host shell that
     // RunShellAsync wraps the whole command in with double quotes (so command-substitution/escapes still
     // fire). Any volume-relative path containing one of these is rejected before it reaches the shell.
@@ -852,8 +1096,12 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private static string SanitizeVolumeSubdir(string subdir)
     {
         var value = (subdir ?? string.Empty).Replace('\\', '/').Trim().Trim('/');
-        if (value.Length == 0
-            || value.StartsWith('/')
+        if (value.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (value.StartsWith('/')
             || value.Split('/').Contains("..")
             || ContainsShellMeta(value))
         {
@@ -1037,6 +1285,47 @@ public sealed class RemoteEngineService : IRemoteEngineService
         if (throwOnError && process.ExitCode != 0)
         {
             throw new InvalidOperationException($"{fileName} {arguments} failed ({process.ExitCode}): {stderr}");
+        }
+
+        return (process.ExitCode, stdout, stderr);
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
+        string fileName,
+        IReadOnlyList<string> argumentList,
+        CancellationToken cancellationToken,
+        bool throwOnError)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        foreach (var arg in argumentList)
+        {
+            process.StartInfo.ArgumentList.Add(arg);
+        }
+
+        process.Start();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (throwOnError && process.ExitCode != 0)
+        {
+            var rendered = argumentList.Count > 0
+                ? $"{fileName} {string.Join(' ', argumentList)}"
+                : fileName;
+            throw new InvalidOperationException($"{rendered} failed ({process.ExitCode}): {stderr}");
         }
 
         return (process.ExitCode, stdout, stderr);

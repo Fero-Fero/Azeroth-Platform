@@ -1,0 +1,163 @@
+#talent-template,
+#talent-tree-template {
+    display: none;
+}
+
+.iconmedium.empty .icon-border {
+    background-position: 0px 0px;
+}
+
+.iconmedium.empty .icon {
+    filter: grayscale(100%);
+    opacity: 0.7;
+}
+
+.iconmedium.notfull .icon-border {
+    background-position: -84px 0px;
+}
+
+.iconmedium.full .icon-border {
+    background-position: -42px 0px;
+}
+
+.iconmedium .icon-border {
+    width: 42px;
+    height: 42px;
+    position: absolute;
+    left: 1px;
+    top: 1px;
+    background-repeat: no-repeat;
+}
+
+.iconmedium a span {
+    display: none;
+}
+
+.iconmedium::after {
+    content: attr(rank);
+    background-color: black;
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    font-size: 14px;
+    padding: 0px 2px;
+    z-index: 4;
+}
+
+.iconmedium.empty::after {
+    display: none;
+}
+
+.iconmedium.full::after,
+.iconmedium.notfull::after {
+    border-radius: 4px;
+    cursor: default;
+    user-select: none;
+    pointer-events: none;
+}
+
+.iconmedium.notfull::after {
+    color: #30ec30;
+    border: 1px solid #30ec30;
+}
+
+.iconmedium.full::after {
+    color: #ffcf00;
+    border: 1px solid #ffcf00;
+}
+
+/* Responsive grid of skill-category panels (WoW Armory style) */
+.skills-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    align-items: start;
+    margin-bottom: 20px;
+}
+
+@media screen and (max-width: 1215px) {
+    .skills-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .skills-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.skill-category {
+    margin-bottom: 0;
+}
+
+/* Individual skill row rendered as a themed progress bar */
+.skill-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    margin-bottom: 6px;
+    padding: 0 10px;
+    /* Silver beveled frame (matches the achievements progress bars) */
+    border: 2px solid #9c988c;
+    border-top-color: #d4d1c5;
+    border-bottom-color: #6e6b61;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #2a1d10, #1a1109);
+    box-shadow: 0 0 0 1px rgba(18, 13, 7, 0.9), 0 1px 3px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.skill-bar:last-child {
+    margin-bottom: 0;
+}
+
+.skill-bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    background-image: linear-gradient(180deg, #9be86a 0%, #5cc23a 45%, #2f8f1e 100%);
+    border-right: 1px solid rgba(40, 90, 25, 0.9);
+    box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.3);
+    z-index: 0;
+}
+
+.skill-bar-name {
+    position: relative;
+    z-index: 1;
+    color: var(--armory-heading);
+    font-weight: bold;
+    font-size: 0.82rem;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.skill-bar-value {
+    position: relative;
+    z-index: 1;
+    margin-left: auto;
+    padding-left: 10px;
+    color: var(--armory-text);
+    font-size: 0.78rem;
+    font-weight: bold;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.skill-bar-max {
+    color: var(--armory-text-muted);
+    font-weight: normal;
+}
+
+#spec-links {
+    margin-bottom: 32px;
+}
+
+.gold-text {
+    color: var(--armory-heading);
+    font-weight: bold;
+}

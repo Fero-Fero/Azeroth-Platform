@@ -70,6 +70,8 @@ interface FileBrowserProps {
   useUpload: (stackId: string) => UseMutationResult<unknown, unknown, { dir: string; file: File }>
   /** Set false for read/delete-only browsers. */
   allowUpload?: boolean
+  /** Set true to hide delete actions (browse-only). */
+  readOnly?: boolean
 }
 
 /**
@@ -85,7 +87,9 @@ export default function FileBrowser({
   useDelete,
   useUpload,
   allowUpload = true,
+  readOnly = false,
 }: FileBrowserProps) {
+  const uploadsEnabled = allowUpload && !readOnly
   const [path, setPath] = useState('')
   const { data, isLoading, isFetching, error } = useBrowse(stackId, path)
   const deleteEntry = useDelete(stackId)
@@ -174,7 +178,7 @@ export default function FileBrowser({
   }
 
   const uploadInto = async (dir: string, files: File[]) => {
-    if (!allowUpload || files.length === 0 || uploading) return
+    if (!uploadsEnabled || files.length === 0 || uploading) return
     setUploadError(null)
     setUploading({ dir, total: files.length, done: 0 })
     try {
@@ -194,7 +198,7 @@ export default function FileBrowser({
 
   // Drop onto the list background => current folder.
   const onContainerDragOver = (e: DragEvent) => {
-    if (!allowUpload || !hasFiles(e) || uploading) return
+    if (!uploadsEnabled || !hasFiles(e) || uploading) return
     e.preventDefault()
     setDragOverPath(path)
   }
@@ -203,7 +207,7 @@ export default function FileBrowser({
     setDragOverPath(null)
   }
   const onContainerDrop = (e: DragEvent) => {
-    if (!allowUpload || !hasFiles(e)) return
+    if (!uploadsEnabled || !hasFiles(e)) return
     e.preventDefault()
     setDragOverPath(null)
     void uploadInto(path, Array.from(e.dataTransfer.files))
@@ -211,13 +215,13 @@ export default function FileBrowser({
 
   // Drop onto a folder row => that subfolder.
   const onFolderDragOver = (e: DragEvent, folderPath: string) => {
-    if (!allowUpload || !hasFiles(e) || uploading) return
+    if (!uploadsEnabled || !hasFiles(e) || uploading) return
     e.preventDefault()
     e.stopPropagation()
     setDragOverPath(folderPath)
   }
   const onFolderDrop = (e: DragEvent, folderPath: string) => {
-    if (!allowUpload || !hasFiles(e)) return
+    if (!uploadsEnabled || !hasFiles(e)) return
     e.preventDefault()
     e.stopPropagation()
     setDragOverPath(null)
@@ -232,7 +236,7 @@ export default function FileBrowser({
         <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
         {isFetching && !isLoading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
       </div>
-      {allowUpload && (
+      {uploadsEnabled && (
         <p className="mb-3 text-xs text-gray-500">
           Drag files onto the list to upload them here, or onto a folder to upload into it.
         </p>
@@ -357,7 +361,8 @@ export default function FileBrowser({
                           <span className="shrink-0 font-mono text-xs text-gray-400">{formatBytes(entry.size)}</span>
                         </div>
                       )}
-                      {entry.isLocked ? (
+                      {!readOnly && (
+                        entry.isLocked ? (
                         <span
                           title={`${entry.name} is locked because its patch has already been applied`}
                           className="mr-1.5 shrink-0 rounded p-1.5 text-gray-300 group-hover:text-gray-400"
@@ -373,7 +378,7 @@ export default function FileBrowser({
                         >
                           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         </button>
-                      )}
+                      ))}
                     </li>
                   )
                 })}
@@ -387,7 +392,7 @@ export default function FileBrowser({
               <Upload className="h-5 w-5 text-gray-300" />
               {searchQuery
                 ? 'No files or folders match your search.'
-                : allowUpload
+                : uploadsEnabled
                 ? 'This folder is empty. Drag files here to upload.'
                 : 'This folder is empty.'}
             </div>

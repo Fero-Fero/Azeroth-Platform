@@ -10,17 +10,12 @@ using Microsoft.Extensions.Options;
 namespace AzerothPlatform.Infrastructure.Services;
 
 /// <summary>
-/// Extracts a stack's live server DBCs and converts the armory-required tables to the CSV files the
-/// armory reads from <c>data/dbc</c>, writing them into the stack's uploaded armory dataset so the next
-/// armory image build bakes them in. Uses the same WDBXEditor tool image and work-volume execution as
-/// the patch pipeline. Only the 3.3.5 tables the armory consumes are converted; the retail transmog
-/// tables (<c>dbc_transmog/</c>) have no server equivalent and are left to the uploaded data bundle.
+/// Extracts a stack's live server DBCs and converts the armory-required tables to CSV files entirely on
+/// the stack's Docker engine (work volume + armory-assets volume). The manager orchestrates containers
+/// but does not persist DBC/CSV artifacts under its data directory.
 /// </summary>
 public sealed class ArmoryDbcService : IArmoryDbcService
 {
-    // The armory's DbcReader loads these CSVs from data/dbc (see frontend-armory .../data/DbcReader.ts).
-    // Each is produced by exporting the same-named server DBC to CSV. Names match the armory's expected
-    // file names exactly (case-sensitive on the armory's Linux filesystem).
     private static readonly string[] RequiredDbcTables =
     [
         "Achievement",
@@ -65,14 +60,12 @@ public sealed class ArmoryDbcService : IArmoryDbcService
         _logger = logger;
     }
 
-    private string DbcDatasetDir(string stackId) => Path.Combine(_assetsOptions.DataPathFor(stackId), "dbc");
-
     private static string DataVolumeName(string stackId) =>
         $"{DockerComposeOverrideGenerator.GetComposeProjectName(stackId)}_ac-client-data";
 
     public bool HasServerDbcs(string stackId)
     {
-        var dir = DbcDatasetDir(stackId);
+        var dir = Path.Combine(_assetsOptions.DataPathFor(stackId), "dbc");
         return Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*.csv").Any();
     }
 
@@ -85,58 +78,55 @@ public sealed class ArmoryDbcService : IArmoryDbcService
             ?? throw new InvalidOperationException($"Stack {stackId} not found.");
 
         var result = new ArmoryDbcSyncResultDto();
-
-        // 1) Pull the live binary DBCs (/data/dbc) from the stack's client-data volume to the manager.
-        var stagingRoot = Path.Combine(Path.GetTempPath(), "armory-dbc", $"{stackId}-{Guid.NewGuid():N}");
-        var serverDbcDir = Path.Combine(stagingRoot, "server_dbc");
-        Directory.CreateDirectory(serverDbcDir);
+        var workVolume = $"acore-armory-dbc-sync-{Guid.NewGuid():N}";
+        var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+        var clientDataVolume = DataVolumeName(stackId);
 
         try
         {
-            _logger.LogInformation("Extracting server DBCs for stack {StackId} from volume {Volume}.", stackId, DataVolumeName(stackId));
-            Report($"Fetching server DBC files from volume {DataVolumeName(stackId)}…");
-            try
-            {
-                await _remoteEngine.FetchVolumeSubdirAsync(stack, DataVolumeName(stackId), "dbc", serverDbcDir, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    "Could not read the server's DBC files. Start the stack at least once so its client data is populated, then try again. " +
-                    ex.Message, ex);
-            }
+            await _remoteEngine.EnsureVolumeExistsAsync(stack, workVolume, cancellationToken);
 
-            var serverDbcs = Directory.Exists(serverDbcDir)
-                ? Directory.EnumerateFiles(serverDbcDir, "*.dbc").ToList()
-                : [];
-            result.ServerDbcCount = serverDbcs.Count;
-            if (serverDbcs.Count == 0)
+            _logger.LogInformation(
+                "Copying server DBCs for stack {StackId} from volume {Volume} into work volume {WorkVolume}.",
+                stackId, clientDataVolume, workVolume);
+            Report($"Copying server DBC binaries from stack volume {clientDataVolume}…");
+            var sourceDbcCount = await _remoteEngine.CountVolumeFilesAsync(
+                stack, clientDataVolume, "dbc", "*.dbc", cancellationToken);
+            if (sourceDbcCount == 0)
             {
                 throw new InvalidOperationException(
-                    "No DBC files were found on the server. Start the stack at least once so its client data is populated, then try again.");
+                    "No DBC files were found in the stack's client-data volume. " +
+                    "Start the stack and wait for the client-data-init container to finish, then try again.");
             }
 
-            Report($"Fetched {serverDbcs.Count} DBC file(s) from the server.");
+            await _remoteEngine.CopyVolumeSubdirAsync(
+                stack, clientDataVolume, "dbc", workVolume, "server_dbc", cancellationToken);
 
-            // 2) Ensure the WDBXEditor tool image exists (built once, then cached).
+            result.ServerDbcCount = await _remoteEngine.CountVolumeFilesAsync(
+                stack, workVolume, "server_dbc", "*.dbc", cancellationToken);
+            if (result.ServerDbcCount == 0)
+            {
+                throw new InvalidOperationException(
+                    "DBC files could not be read from the stack's client-data volume. " +
+                    "Check that the stack's Docker engine is reachable, then try again.");
+            }
+
+            Report($"Found {result.ServerDbcCount} DBC file(s) on the stack.");
+
             Report("Preparing the DBC conversion tool (WDBXEditor)…");
             await _imageService.EnsureWdbxImageAsync(cancellationToken);
 
-            var datasetDbcDir = DbcDatasetDir(stackId);
-            Directory.CreateDirectory(datasetDbcDir);
-
-            // 3) Convert each required table to CSV. Runs WDBXEditor once per table with a minimal work
-            //    dir (just that one .dbc), then copies the produced CSV into the armory dataset.
-            Report($"Converting {RequiredDbcTables.Length} table(s) to CSV…");
+            Report($"Converting {RequiredDbcTables.Length} table(s) to CSV on the stack engine…");
             var index = 0;
             foreach (var table in RequiredDbcTables)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 index++;
 
-                var sourceDbc = serverDbcs.FirstOrDefault(
-                    p => string.Equals(Path.GetFileNameWithoutExtension(p), table, StringComparison.OrdinalIgnoreCase));
-                if (sourceDbc is null)
+                var tableDbcName = $"{table}.dbc";
+                var tablePresent = await _remoteEngine.CountVolumeFilesAsync(
+                    stack, workVolume, "server_dbc", tableDbcName, cancellationToken);
+                if (tablePresent == 0)
                 {
                     result.Failed.Add($"{table}: not present in the server's DBC set");
                     Report($"[{index}/{RequiredDbcTables.Length}] Skipped {table} — not present on the server.");
@@ -145,7 +135,7 @@ public sealed class ArmoryDbcService : IArmoryDbcService
 
                 try
                 {
-                    await ExportTableAsync(stack, stagingRoot, sourceDbc, table, datasetDbcDir, cancellationToken);
+                    await ExportTableOnStackAsync(stack, workVolume, table, cancellationToken);
                     result.Exported.Add($"{table}.csv");
                     Report($"[{index}/{RequiredDbcTables.Length}] Converted {table}.csv");
                 }
@@ -161,6 +151,15 @@ public sealed class ArmoryDbcService : IArmoryDbcService
                 }
             }
 
+            if (result.Exported.Count > 0)
+            {
+                Report("Publishing converted DBC CSVs to the stack armory-assets volume…");
+                await _remoteEngine.EnsureVolumeExistsAsync(stack, assetsVolume, cancellationToken);
+                await _remoteEngine.CopyVolumeSubdirAsync(
+                    stack, workVolume, "csv_out", assetsVolume, "dbc", cancellationToken);
+                await _remoteEngine.SetVolumeWorldReadableAsync(stack, assetsVolume, cancellationToken);
+            }
+
             _logger.LogInformation(
                 "Armory DBC sync for stack {StackId}: {Exported} exported, {Failed} failed.",
                 stackId, result.Exported.Count, result.Failed.Count);
@@ -169,57 +168,38 @@ public sealed class ArmoryDbcService : IArmoryDbcService
         }
         finally
         {
-            TryDeleteDirectory(stagingRoot);
+            await _remoteEngine.RemoveVolumeAsync(stack, workVolume, cancellationToken);
         }
     }
 
-    private async Task ExportTableAsync(
-        ManagedStackEntity stack, string stagingRoot, string sourceDbc, string table, string datasetDbcDir,
-        CancellationToken cancellationToken)
+    private async Task ExportTableOnStackAsync(
+        ManagedStackEntity stack, string workVolume, string table, CancellationToken cancellationToken)
     {
+        var exportDir = $"export/{table}";
         var dbcName = $"{table}.dbc";
         var csvName = $"{table}.csv";
 
-        // Minimal per-table work dir so each tool run seeds/fetches only a single DBC.
-        var workDir = Path.Combine(stagingRoot, "work", table);
-        Directory.CreateDirectory(workDir);
-        try
-        {
-            File.Copy(sourceDbc, Path.Combine(workDir, dbcName), overwrite: true);
+        await _remoteEngine.RunVolumeShellAsync(
+            stack,
+            workVolume,
+            $"mkdir -p {exportDir} && cp server_dbc/{dbcName} {exportDir}/",
+            cancellationToken);
 
-            // WDBXEditor loads the DBC from the work dir (WORKDIR=/work) and writes the CSV alongside it.
-            var toolArgs = $"-export -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -o \"{csvName}\"";
-            var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
-                stack, workDir, _migrationOptions.WdbxImage, toolArgs, cancellationToken);
+        var toolArgs = $"-export -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -o \"{csvName}\"";
+        var run = await _remoteEngine.RunToolInVolumeSubdirAsync(
+            stack, workVolume, exportDir, _migrationOptions.WdbxImage, toolArgs, cancellationToken);
 
-            var producedCsv = Path.Combine(workDir, csvName);
-            if (run.ExitCode != 0 || !File.Exists(producedCsv))
-            {
-                var output = string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr;
-                throw new InvalidOperationException(
-                    string.IsNullOrWhiteSpace(output) ? $"WDBXEditor exited with code {run.ExitCode}." : output.Trim());
-            }
+        if (run.ExitCode != 0)
+        {
+            var output = string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr;
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(output) ? $"WDBXEditor exited with code {run.ExitCode}." : output.Trim());
+        }
 
-            File.Copy(producedCsv, Path.Combine(datasetDbcDir, csvName), overwrite: true);
-        }
-        finally
-        {
-            TryDeleteDirectory(workDir);
-        }
-    }
-
-    private static void TryDeleteDirectory(string dir)
-    {
-        try
-        {
-            if (Directory.Exists(dir))
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-        catch
-        {
-            // Best-effort cleanup of temp artifacts.
-        }
+        await _remoteEngine.RunVolumeShellAsync(
+            stack,
+            workVolume,
+            $"mkdir -p csv_out && test -f {exportDir}/{csvName} && mv {exportDir}/{csvName} csv_out/",
+            cancellationToken);
     }
 }

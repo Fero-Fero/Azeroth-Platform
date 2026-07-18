@@ -3,6 +3,7 @@ using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
+using AzerothPlatform.Infrastructure.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -71,7 +72,7 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
     }
 
     public Task<ArmoryAssetsInfoDto> GetInfoAsync(string stackId, CancellationToken cancellationToken = default)
-        => Task.FromResult(BuildInfo(stackId));
+        => BuildInfoAsync(stackId, cancellationToken);
 
     public Task<ArmoryStylingDto> GetStylingAsync(string stackId, CancellationToken cancellationToken = default)
         => Task.FromResult(ReadStyling(stackId));
@@ -210,38 +211,127 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
 
     public async Task<ArmoryAssetsInfoDto> UploadDataAsync(string stackId, Stream archiveStream, CancellationToken cancellationToken = default)
     {
-        var tempDataPath = Path.Combine(Path.GetTempPath(), "azp-armory-data", stackId, Guid.NewGuid().ToString("N"));
+        var tempDataPath = CreateUploadStagingDir(stackId);
         try
         {
             await ExtractIntoAsync(archiveStream, tempDataPath, DataMarkerFolders, cancellationToken);
 
-            try
+            if (!Directory.Exists(tempDataPath) ||
+                !Directory.EnumerateFileSystemEntries(tempDataPath).Any())
             {
-                await RefreshAssetsVolumeAsync(stackId, tempDataPath, replaceContents: true, cancellationToken);
+                throw new InvalidOperationException(
+                    "The uploaded archive did not contain any armory model-viewer data. " +
+                    "Expected folders such as meta/, mo3/, bone/, textures/, progression/, or dbc/.");
             }
-            catch (Exception ex)
+
+            if (!ContainsAnyDirectory(tempDataPath, DataMarkerFolders) &&
+                !Directory.Exists(Path.Combine(tempDataPath, "progression")))
             {
-                _logger.LogWarning(ex, "Failed to refresh the armory assets volume for stack {StackId} after data upload.", stackId);
+                throw new InvalidOperationException(
+                    "The uploaded archive did not contain a recognizable armory dataset. " +
+                    "Expected top-level folders such as meta/, mo3/, bone/, or textures/ " +
+                    "(or the same folders under a single data/ wrapper).");
             }
+
+            await RefreshAssetsVolumeAsync(stackId, tempDataPath, cancellationToken);
         }
         finally
         {
             TryDeleteDir(tempDataPath);
         }
 
-        return BuildInfo(stackId);
+        var info = await BuildInfoAsync(stackId, cancellationToken);
+        if (!info.DataOnStackVolume && info.DataFileCount == 0)
+        {
+            throw new InvalidOperationException(
+                "Armory data was extracted but could not be verified on the stack's armory-assets volume. " +
+                "Check that the stack's Docker engine is reachable, then try again.");
+        }
+
+        return info;
     }
 
     /// <summary>
     /// Pushes the on-disk dataset into the stack's armory-assets Docker volume and makes it world-readable.
+    /// Only top-level files/folders present in <paramref name="dataPath"/> are replaced on the volume so
+    /// separate <c>armory.data.zip</c> and <c>armory.textures.zip</c> uploads merge instead of wiping each other.
     /// </summary>
     private async Task RefreshAssetsVolumeAsync(
         string stackId,
         string dataPath,
-        bool replaceContents,
         CancellationToken cancellationToken)
     {
         var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+        var stack = await db.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+
+        if (stack is null)
+        {
+            throw new InvalidOperationException(
+                $"Stack '{stackId}' was not found; cannot publish armory data to its Docker volume.");
+        }
+
+        await _remoteEngine.EnsureVolumeExistsAsync(stack, volumeName, cancellationToken);
+        await ReplaceStagedVolumePathsAsync(stack, volumeName, dataPath, cancellationToken);
+        await _remoteEngine.SeedVolumeAsync(stack, volumeName, dataPath, cancellationToken);
+        await _remoteEngine.SetVolumeWorldReadableAsync(stack, volumeName, cancellationToken);
+
+        if (!await HasArmoryDatasetOnVolumeAsync(stack, volumeName, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                $"Armory data was copied to volume '{volumeName}' but expected folders " +
+                $"(meta/, mo3/, bone/, etc.) were not found at the volume root.");
+        }
+
+        _logger.LogInformation(
+            "Seeded armory assets volume {Volume} for stack {StackId} from {Source}.",
+            volumeName, stackId, dataPath);
+    }
+
+    /// <summary>
+    /// Removes from the volume only the top-level entries that exist in the staged upload directory,
+    /// so a textures-only or data-only zip does not delete unrelated folders already on the volume.
+    /// </summary>
+    private async Task ReplaceStagedVolumePathsAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string dataPath,
+        CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(dataPath))
+        {
+            return;
+        }
+
+        var pathsToReplace = Directory.EnumerateFileSystemEntries(dataPath)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (pathsToReplace.Count == 0)
+        {
+            return;
+        }
+
+        await _remoteEngine.DeleteVolumePathsAsync(stack, volumeName, pathsToReplace, cancellationToken);
+    }
+
+    /// <summary>
+    /// Pushes uploaded static web assets into the stack's armory-static Docker volume.
+    /// </summary>
+    private async Task RefreshStaticVolumeAsync(
+        string stackId,
+        string staticPath,
+        bool replaceContents,
+        CancellationToken cancellationToken)
+    {
+        var volumeName = DockerComposeOverrideGenerator.ArmoryStaticVolumeName(stackId);
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
@@ -257,64 +347,103 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
 
         if (stack is null)
         {
-            await _remoteEngine.SeedLocalVolumeAsync(volumeName, dataPath, cancellationToken);
-            return;
+            throw new InvalidOperationException(
+                $"Stack '{stackId}' was not found; cannot publish armory static assets to its Docker volume.");
         }
 
-        await _remoteEngine.SeedVolumeAsync(stack, volumeName, dataPath, cancellationToken);
-        await _remoteEngine.SetVolumeWorldReadableAsync(stack, volumeName, cancellationToken);
+        await _remoteEngine.SeedVolumeAsync(stack, volumeName, staticPath, cancellationToken);
     }
 
     public async Task<ArmoryAssetsInfoDto> UploadStaticAsync(string stackId, Stream archiveStream, CancellationToken cancellationToken = default)
     {
-        await ExtractIntoAsync(archiveStream, _options.StaticPathFor(stackId), markerFolders: null, cancellationToken);
+        var tempStaticPath = CreateUploadStagingDir(stackId);
+        try
+        {
+            await ExtractIntoAsync(archiveStream, tempStaticPath, markerFolders: null, cancellationToken);
+
+            if (!Directory.Exists(tempStaticPath) ||
+                !Directory.EnumerateFileSystemEntries(tempStaticPath).Any())
+            {
+                throw new InvalidOperationException("The uploaded archive did not contain any static web assets.");
+            }
+
+            await RefreshStaticVolumeAsync(stackId, tempStaticPath, replaceContents: true, cancellationToken);
+        }
+        finally
+        {
+            TryDeleteDir(tempStaticPath);
+        }
 
         await MarkStaticRebuildPendingAsync(stackId, cancellationToken);
 
-        return BuildInfo(stackId);
+        var info = await BuildInfoAsync(stackId, cancellationToken);
+        if (!info.StaticUploaded || info.StaticFileCount == 0)
+        {
+            throw new InvalidOperationException(
+                "Static assets were extracted but could not be verified on the stack's armory-static volume. " +
+                "Check that the stack's Docker engine is reachable, then try again.");
+        }
+
+        return info;
     }
 
     public async Task<ArmoryAssetsInfoDto> DeleteStaticAsync(string stackId, CancellationToken cancellationToken = default)
     {
-        var staticRoot = _options.StaticPathFor(stackId);
-        if (!Directory.Exists(staticRoot))
-        {
-            return BuildInfo(stackId);
-        }
-
         var deletedAny = false;
-        await _gate.WaitAsync(cancellationToken);
-        try
+
+        using (var scope = _scopeFactory.CreateScope())
         {
-            foreach (var file in Directory.EnumerateFiles(staticRoot))
+            var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+            var stack = await db.ManagedStacks
+                .AsNoTracking()
+                .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+
+            var staticVolume = DockerComposeOverrideGenerator.ArmoryStaticVolumeName(stackId);
+            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, staticVolume, cancellationToken);
+            if (summary.VolumeExists && summary.FileCount > 0)
             {
-                File.Delete(file);
+                await _remoteEngine.ClearVolumeContentsAsync(stack, staticVolume, cancellationToken);
                 deletedAny = true;
-            }
-
-            foreach (var dir in Directory.EnumerateDirectories(staticRoot))
-            {
-                var name = Path.GetFileName(dir);
-                if (string.Equals(name, _options.DataDirName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (string.Equals(name, "css", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "img", StringComparison.OrdinalIgnoreCase))
-                {
-                    deletedAny |= DeleteDirectoryContentsExcept(dir, IsGeneratedStylingAsset);
-                    DeleteIfEmpty(dir);
-                    continue;
-                }
-
-                Directory.Delete(dir, recursive: true);
-                deletedAny = true;
+                _logger.LogInformation("Cleared armory static volume for stack {StackId}.", stackId);
             }
         }
-        finally
+
+        var staticRoot = _options.StaticPathFor(stackId);
+        if (Directory.Exists(staticRoot))
         {
-            _gate.Release();
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(staticRoot))
+                {
+                    File.Delete(file);
+                    deletedAny = true;
+                }
+
+                foreach (var dir in Directory.EnumerateDirectories(staticRoot))
+                {
+                    var name = Path.GetFileName(dir);
+                    if (string.Equals(name, _options.DataDirName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(name, "css", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "img", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deletedAny |= DeleteDirectoryContentsExcept(dir, IsGeneratedStylingAsset);
+                        DeleteIfEmpty(dir);
+                        continue;
+                    }
+
+                    Directory.Delete(dir, recursive: true);
+                    deletedAny = true;
+                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
 
         if (deletedAny)
@@ -322,7 +451,7 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             await MarkStaticRebuildPendingAsync(stackId, cancellationToken);
         }
 
-        return BuildInfo(stackId);
+        return await BuildInfoAsync(stackId, cancellationToken);
     }
 
     public Task ClearStaticRebuildPendingAsync(string stackId, CancellationToken cancellationToken = default)
@@ -343,16 +472,73 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         return Task.CompletedTask;
     }
 
-    public Task<ClientBrowseResultDto> BrowseDataAsync(string stackId, string relativePath, CancellationToken cancellationToken = default)
+    public async Task<ClientBrowseResultDto> BrowseDataAsync(string stackId, string relativePath, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeRelative(relativePath);
+        var result = new ClientBrowseResultDto { Path = normalized };
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+        var stack = await db.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+
+        var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+        var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
+        if (summary.VolumeExists && (summary.FileCount > 0 || normalized.Length == 0))
+        {
+            IReadOnlyList<VolumeDirectoryEntry> volumeEntries;
+            try
+            {
+                volumeEntries = await _remoteEngine.ListVolumeDirectoryAsync(stack, volumeName, normalized, cancellationToken);
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogDebug(ex, "Rejected unsafe armory dataset browse path '{Path}' for stack {StackId}.", normalized, stackId);
+                return result;
+            }
+
+            if (normalized.Length == 0 || volumeEntries.Count > 0)
+            {
+                result.Exists = normalized.Length == 0 ? summary.FileCount > 0 : true;
+                foreach (var entry in volumeEntries)
+                {
+                    if (entry.Name is ".DS_Store")
+                    {
+                        continue;
+                    }
+
+                    result.Entries.Add(new ClientBrowseEntryDto
+                    {
+                        Name = entry.Name,
+                        IsDirectory = entry.IsDirectory,
+                        Size = entry.IsDirectory ? 0 : entry.SizeBytes,
+                        ItemCount = entry.IsDirectory ? entry.ItemCount : 0,
+                        RelativePath = CombineRelative(normalized, entry.Name),
+                    });
+                }
+
+                result.Entries.Sort((a, b) =>
+                    a.IsDirectory != b.IsDirectory
+                        ? (a.IsDirectory ? -1 : 1)
+                        : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+                return result;
+            }
+        }
+
+        return BrowseDataFromManager(stackId, normalized);
+    }
+
+    private ClientBrowseResultDto BrowseDataFromManager(string stackId, string normalized)
     {
         var dataRoot = _options.DataPathFor(stackId);
-        var normalized = NormalizeRelative(relativePath);
         var result = new ClientBrowseResultDto { Path = normalized };
 
         var target = ResolveWithin(dataRoot, normalized);
         if (target is null || !Directory.Exists(target))
         {
-            return Task.FromResult(result); // Exists stays false.
+            return result;
         }
 
         result.Exists = true;
@@ -406,60 +592,70 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             });
         }
 
-        // Sub-directories first, then files, each alphabetical (case-insensitive).
         result.Entries.Sort((a, b) =>
             a.IsDirectory != b.IsDirectory
                 ? (a.IsDirectory ? -1 : 1)
                 : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
 
-        return Task.FromResult(result);
+        return result;
     }
 
     public async Task<ArmoryAssetsInfoDto> DeleteDataAsync(string stackId, string relativePath, CancellationToken cancellationToken = default)
     {
-        var dataRoot = _options.DataPathFor(stackId);
         var normalized = NormalizeRelative(relativePath);
         if (normalized.Length == 0)
         {
             throw new InvalidOperationException("Refusing to delete the dataset root. Delete individual files or folders instead.");
         }
 
-        var target = ResolveWithin(dataRoot, normalized)
-            ?? throw new InvalidOperationException("Invalid path.");
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+        var stack = await db.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+
+        var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+        var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
 
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (Directory.Exists(target))
+            if (summary.VolumeExists && summary.FileCount > 0)
             {
-                Directory.Delete(target, recursive: true);
-            }
-            else if (File.Exists(target))
-            {
-                File.Delete(target);
+                if (stack is null)
+                {
+                    await _remoteEngine.DeleteLocalVolumePathsAsync(volumeName, [normalized], cancellationToken);
+                }
+                else
+                {
+                    await _remoteEngine.DeleteVolumePathsAsync(stack, volumeName, [normalized], cancellationToken);
+                }
+
+                _logger.LogInformation("Deleted '{Path}' from armory assets volume for stack {StackId}.", normalized, stackId);
             }
             else
             {
-                throw new InvalidOperationException("The file or folder no longer exists.");
-            }
+                var dataRoot = _options.DataPathFor(stackId);
+                var target = ResolveWithin(dataRoot, normalized)
+                    ?? throw new InvalidOperationException("Invalid path.");
 
-            _logger.LogInformation("Deleted '{Path}' from armory dataset for stack {StackId}.", normalized, stackId);
-
-            WriteProgressionManifest(dataRoot);
-            MakeWorldReadable(dataRoot);
-
-            // Refresh the stack's assets volume so a running stack reflects the removal. Best-effort.
-            try
-            {
-                if (Directory.Exists(dataRoot))
+                if (Directory.Exists(target))
                 {
-                    await _remoteEngine.SeedLocalVolumeAsync(
-                        DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId), dataRoot, cancellationToken);
+                    Directory.Delete(target, recursive: true);
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to refresh the armory assets volume for stack {StackId} after delete.", stackId);
+                else if (File.Exists(target))
+                {
+                    File.Delete(target);
+                }
+                else
+                {
+                    throw new InvalidOperationException("The file or folder no longer exists.");
+                }
+
+                _logger.LogInformation("Deleted '{Path}' from armory dataset for stack {StackId}.", normalized, stackId);
+
+                WriteProgressionManifest(dataRoot);
+                MakeWorldReadable(dataRoot);
             }
         }
         finally
@@ -467,54 +663,56 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             _gate.Release();
         }
 
-        return BuildInfo(stackId);
+        return await BuildInfoAsync(stackId, cancellationToken);
     }
 
     public async Task<ArmoryAssetsInfoDto> UploadDataFileAsync(
         string stackId, string relativeDir, string fileName, Stream content, CancellationToken cancellationToken = default)
     {
-        var dataRoot = _options.DataPathFor(stackId);
         var safeName = SanitizeFileName(fileName);
         var normalizedDir = NormalizeRelative(relativeDir);
+        var relativeFile = CombineRelative(normalizedDir, safeName);
 
-        var targetDir = ResolveWithin(dataRoot, normalizedDir)
-            ?? throw new InvalidOperationException("Invalid destination folder.");
-        var targetFile = ResolveWithin(dataRoot, CombineRelative(normalizedDir, safeName))
-            ?? throw new InvalidOperationException("Invalid file path.");
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+        var stack = await db.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+
+        var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+        var stagingDir = CreateUploadStagingDir(stackId);
+        var targetFile = Path.Combine(stagingDir, relativeFile.Replace('/', Path.DirectorySeparatorChar));
 
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            Directory.CreateDirectory(targetDir);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
             await using (var file = new FileStream(targetFile, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true))
             {
                 await content.CopyToAsync(file, cancellationToken);
             }
 
-            _logger.LogInformation("Uploaded '{Path}' into armory dataset for stack {StackId}.",
-                CombineRelative(normalizedDir, safeName), stackId);
+            WriteProgressionManifest(stagingDir);
+            MakeWorldReadable(stagingDir);
 
-            WriteProgressionManifest(dataRoot);
-            // The armory-assets nginx worker (uid 101) must be able to read the uploaded file and manifest.
-            MakeWorldReadable(dataRoot);
+            if (stack is null)
+            {
+                throw new InvalidOperationException(
+                    $"Stack '{stackId}' was not found; cannot upload into its armory assets volume.");
+            }
+
+            await _remoteEngine.SeedVolumeAsync(stack, volumeName, stagingDir, cancellationToken);
+            await _remoteEngine.SetVolumeWorldReadableAsync(stack, volumeName, cancellationToken);
+
+            _logger.LogInformation("Uploaded '{Path}' into armory assets volume for stack {StackId}.", relativeFile, stackId);
         }
         finally
         {
+            TryDeleteDir(stagingDir);
             _gate.Release();
         }
 
-        // Refresh the stack's assets volume so a running stack serves the new file. Best-effort.
-        try
-        {
-            await _remoteEngine.SeedLocalVolumeAsync(
-                DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId), dataRoot, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to refresh the armory assets volume for stack {StackId} after file upload.", stackId);
-        }
-
-        return BuildInfo(stackId);
+        return await BuildInfoAsync(stackId, cancellationToken);
     }
 
     /// <summary>Strips any directory components and rejects empty names so an upload can't escape its folder.</summary>
@@ -617,6 +815,18 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         if (markerFolders is not null && ContainsAnyDirectory(extractRoot, markerFolders))
         {
             return extractRoot;
+        }
+
+        if (markerFolders is not null)
+        {
+            foreach (var wrapper in new[] { "data", Path.Combine("static", "data") })
+            {
+                var wrapped = Path.Combine(extractRoot, wrapper);
+                if (Directory.Exists(wrapped) && ContainsAnyDirectory(wrapped, markerFolders))
+                {
+                    return wrapped;
+                }
+            }
         }
 
         // Ignore macOS cruft and hidden dot-entries so a lone real wrapping folder is still detected even
@@ -890,39 +1100,82 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         }
     }
 
+    private async Task<ArmoryAssetsInfoDto> BuildInfoAsync(string stackId, CancellationToken cancellationToken)
+    {
+        var info = BuildInfo(stackId);
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
+        var stack = await db.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null)
+        {
+            return info;
+        }
+
+        var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stackId);
+        if (await _remoteEngine.VolumeExistsAsync(stack, assetsVolume, cancellationToken))
+        {
+            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, assetsVolume, cancellationToken);
+            if (summary.FileCount > 0)
+            {
+                info.DataFileCount = summary.FileCount;
+                info.DataSize = summary.TotalBytes;
+            }
+
+            var folders = new List<string>();
+            foreach (var folder in DataMarkerFolders)
+            {
+                if (await _remoteEngine.VolumeSubdirExistsAsync(stack, assetsVolume, folder, cancellationToken))
+                {
+                    folders.Add(folder);
+                }
+            }
+
+            info.DataFolders = folders;
+            info.DataUploaded = folders.Any(f => f.Equals("meta", StringComparison.OrdinalIgnoreCase))
+                || folders.Any(f => f.Equals("progression", StringComparison.OrdinalIgnoreCase));
+            info.DataOnStackVolume = folders.Count > 0 || info.DataFileCount > 0;
+
+            if (info.DataOnStackVolume && info.DataFileCount == 0)
+            {
+                info.DataFileCount = await _remoteEngine.CountVolumeFilesAsync(
+                    stack, assetsVolume, string.Empty, "*", cancellationToken);
+            }
+
+            if (info.DataOnStackVolume && info.DataSize == 0 && summary.TotalBytes > 0)
+            {
+                info.DataSize = summary.TotalBytes;
+            }
+        }
+
+        var staticVolume = DockerComposeOverrideGenerator.ArmoryStaticVolumeName(stackId);
+        if (await _remoteEngine.VolumeExistsAsync(stack, staticVolume, cancellationToken))
+        {
+            var staticSummary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, staticVolume, cancellationToken);
+            if (staticSummary.FileCount > 0)
+            {
+                info.StaticFileCount = staticSummary.FileCount;
+                info.StaticSize = staticSummary.TotalBytes;
+                info.StaticUploaded = true;
+                info.StaticOnStackVolume = true;
+            }
+        }
+
+        var clientDataVolume = $"{DockerComposeOverrideGenerator.GetComposeProjectName(stackId)}_ac-client-data";
+        info.ServerDbcFileCount = await _remoteEngine.CountVolumeFilesAsync(
+            stack, clientDataVolume, "dbc", "*.dbc", cancellationToken);
+
+        return info;
+    }
+
     private ArmoryAssetsInfoDto BuildInfo(string stackId)
     {
-        var info = new ArmoryAssetsInfoDto
+        return new ArmoryAssetsInfoDto
         {
             StaticRebuildPending = File.Exists(_options.RebuildMarkerPath(stackId)),
         };
-
-        var dataPath = _options.DataPathFor(stackId);
-        (long Size, int Count) dataMetrics = (0, 0);
-        if (Directory.Exists(dataPath))
-        {
-            dataMetrics = MeasureTree(dataPath);
-            info.DataFileCount = dataMetrics.Count;
-            info.DataSize = dataMetrics.Size;
-            info.DataUploaded = Directory.Exists(Path.Combine(dataPath, "meta"))
-                || Directory.Exists(Path.Combine(dataPath, "progression"));
-            info.DataFolders = DataMarkerFolders
-                .Where(name => Directory.Exists(Path.Combine(dataPath, name)))
-                .ToList();
-        }
-
-        // The model-viewer dataset lives under static/data, so report only real web static bundle files
-        // (js/css/img/templates) and ignore generated styling files managed separately by this service.
-        var staticPath = _options.StaticPathFor(stackId);
-        if (Directory.Exists(staticPath))
-        {
-            var (size, count) = MeasureStaticWebAssets(staticPath);
-            info.StaticFileCount = count;
-            info.StaticSize = size;
-            info.StaticUploaded = info.StaticFileCount > 0;
-        }
-
-        return info;
     }
 
     private static bool DeleteDirectoryContentsExcept(string root, Func<string, bool> keepRelativePath)
@@ -1164,6 +1417,33 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
     private string StylingConfigPath(string stackId) => Path.Combine(_options.StackRootPath(stackId), StylingConfigFileName);
 
     private string LayoutConfigPath(string stackId) => Path.Combine(_options.StackRootPath(stackId), LayoutConfigFileName);
+
+    /// <summary>
+    /// Stages uploads under the manager data volume so large trees can be copied into stack volumes
+    /// daemon-side instead of streaming multi-GB tar archives through the Docker CLI.
+    /// </summary>
+    private string CreateUploadStagingDir(string stackId)
+    {
+        var dir = Path.Combine(_options.StackRootPath(stackId), ".staging", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private async Task<bool> HasArmoryDatasetOnVolumeAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        CancellationToken cancellationToken)
+    {
+        foreach (var folder in DataMarkerFolders)
+        {
+            if (await _remoteEngine.VolumeSubdirExistsAsync(stack, volumeName, folder, cancellationToken))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void TryDeleteDir(string path)
     {

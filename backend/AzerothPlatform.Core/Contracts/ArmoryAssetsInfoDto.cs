@@ -32,4 +32,16 @@ public sealed class ArmoryAssetsInfoDto
     /// so the armory image must be rebuilt for the new static assets to take effect.
     /// </summary>
     public bool StaticRebuildPending { get; set; }
+
+    /// <summary>True when model-viewer data is present on the stack's armory-assets Docker volume.</summary>
+    public bool DataOnStackVolume { get; set; }
+
+    /// <summary>True when static web assets are present on the stack's armory-static Docker volume.</summary>
+    public bool StaticOnStackVolume { get; set; }
+
+    /// <summary>
+    /// Number of <c>.dbc</c> binaries in the stack's client-data volume (<c>dbc/</c>), populated when
+    /// client-data-init has run. Zero means the stack has not downloaded server data yet.
+    /// </summary>
+    public int ServerDbcFileCount { get; set; }
 }
