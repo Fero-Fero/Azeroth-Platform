@@ -1,5 +1,17 @@
 import { useMemo, useRef, useState } from 'react'
-import { Upload, Trash2, Loader2, Package, Download, Check, ExternalLink } from 'lucide-react'
+import {
+  Upload,
+  Trash2,
+  Loader2,
+  Package,
+  Download,
+  Check,
+  ExternalLink,
+  ChevronDown,
+  Sparkles,
+  Library,
+} from 'lucide-react'
+import AddonSectionTabs, { type AddonSection } from '@/components/addons/AddonSectionTabs'
 import {
   useAddons,
   useUploadAddon,
@@ -13,6 +25,7 @@ import {
   sortCatalogIdsForInstall,
   toggleCatalogSelection,
 } from '@/lib/addon-catalog'
+import { cn } from '@/lib/utils'
 import type { AddonCatalogEntryDto } from '@/types/addon.types'
 
 interface AddonsManagerProps {
@@ -44,6 +57,7 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
   const install = useInstallCatalogAddon(stackId)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const [section, setSection] = useState<AddonSection>('installed')
   const [dragOver, setDragOver] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -168,206 +182,393 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
     [catalogEntries, selectedCatalogIds],
   )
   const suggestedCallout = catalogEntries.find((entry) => entry.suggested && !entry.installed)
+  const uploadHandlers = {
+    dragOver,
+    setDragOver,
+    busy,
+    inputRef,
+    uploadPending: upload.isPending,
+    onDrop: handleDrop,
+    onFiles: handleFiles,
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-        Addons uploaded here are served through the launcher and installed into every player's{' '}
-        <code className="font-mono">Interface/AddOns</code> folder. They are kept in sync automatically —
-        updating or deleting an addon here updates or removes it for players on their next launch. A
-        player's own manually-installed addons are never touched.
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-semibold text-slate-900">Addons</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Upload custom packs or install from the catalog — synced to players via the launcher.
+        </p>
       </div>
 
-      {/* Upload dropzone */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (!busy) setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => !busy && inputRef.current?.click()}
-        className={`flex items-center justify-center gap-2 py-6 rounded-md border-2 border-dashed cursor-pointer text-sm transition-colors ${
-          busy
-            ? 'border-gray-200 text-gray-300 cursor-not-allowed'
-            : dragOver
-            ? 'border-blue-400 bg-blue-50 text-blue-600'
-            : 'border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-500'
-        }`}
-      >
-        {upload.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
-        <span>
-          {upload.isPending ? 'Uploading…' : 'Drop addon .zip archive(s) here or click to upload'}
-        </span>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept=".zip"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files?.length) void handleFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
+      <div className="grid gap-4 lg:grid-cols-5">
+        <UploadHeroCard {...uploadHandlers} className="lg:col-span-3" />
+        <AddonCollectionsCard className="lg:col-span-2" />
       </div>
 
-      <p className="text-xs text-gray-400">
-        Large addons are supported — some (e.g. storyline or voice-over packs) can be several GB.
-        Big uploads are streamed to disk and may take a while depending on your connection.
-      </p>
-
-      <p className="text-xs text-gray-500">
-        Need more addons? Browse the{' '}
-        <a
-          href="https://github.com/TrinityCore/wow_335a_addons"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800"
-        >
-          TrinityCore wow_335a_addons collection
-          <ExternalLink className="h-3 w-3" aria-hidden="true" />
-        </a>
-        , or check out{' '}
-        <a
-          href="https://github.com/NoM0Re/WoW-3.3.5a-Addons"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800"
-        >
-          NoM0Re WoW-3.3.5a-Addons
-          <ExternalLink className="h-3 w-3" aria-hidden="true" />
-        </a>
-        {' '}on GitHub — download a .zip and upload it above.
-      </p>
+      <details className="rounded-lg border border-blue-100 bg-blue-50/60 text-sm text-blue-900">
+        <summary className="cursor-pointer list-none px-4 py-3 font-medium [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-blue-600" />
+            How launcher addons work
+            <ChevronDown className="h-4 w-4 text-blue-500" />
+          </span>
+        </summary>
+        <p className="border-t border-blue-100 px-4 py-3 text-blue-800/90">
+          Addons uploaded here are served through the launcher and installed into every player&apos;s{' '}
+          <code className="rounded bg-blue-100/80 px-1 font-mono text-xs">Interface/AddOns</code> folder.
+          Updates and deletes sync on the next launch. Player-installed addons are never touched.
+        </p>
+      </details>
 
       {message && (
-        <div className="bg-red-50 border border-red-200 rounded-md px-3 py-2 text-sm text-red-700">
-          {message}
-        </div>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{message}</div>
       )}
 
-      {/* Addon list */}
-      <div className="border border-gray-200 rounded-lg">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <h4 className="font-semibold text-gray-800">
-            Served addons <span className="text-gray-400 font-normal">({addons.length})</span>
-          </h4>
-          {data && data.totalSize > 0 && (
-            <span className="text-xs text-gray-400">{formatBytes(data.totalSize)} total</span>
-          )}
-        </div>
+      <AddonSectionTabs
+        active={section}
+        onChange={setSection}
+        installedCount={addons.length}
+        catalogCount={catalogEntries.length}
+      />
 
-        {isLoading ? (
-          <div className="px-4 py-6 text-sm text-gray-500 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading addons…
-          </div>
-        ) : error ? (
-          <div className="px-4 py-6 text-sm text-red-600">Failed to load addons.</div>
-        ) : addons.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-gray-500">
-            No addons are being served yet. Upload a .zip to get started.
-          </div>
+      <div role="tabpanel">
+        {section === 'installed' ? (
+          <InstalledAddonsPanel
+            addons={addons}
+            isLoading={isLoading}
+            error={error}
+            totalSize={data?.totalSize ?? 0}
+            busy={busy}
+            pendingDelete={pendingDelete}
+            onDelete={handleDelete}
+          />
         ) : (
-          <ul className="divide-y divide-gray-100">
-            {addons.map((addon) => (
-              <li key={addon.name} className="flex items-center justify-between px-4 py-2.5 text-sm">
-                <span className="flex items-center gap-2 min-w-0">
-                  <Package className="w-4 h-4 text-gray-400 shrink-0" />
-                  <span className="font-medium text-gray-800 truncate">{addon.name}</span>
-                  {addon.recommended && <RecommendedBadge />}
-                </span>
-                <div className="flex items-center gap-4 shrink-0">
-                  <span className="text-xs text-gray-400">
-                    {addon.fileCount} file{addon.fileCount === 1 ? '' : 's'} · {formatBytes(addon.totalSize)}
-                  </span>
-                  <button
-                    onClick={() => handleDelete(addon.name)}
-                    disabled={busy}
-                    className="text-gray-400 hover:text-red-600 disabled:opacity-30"
-                    title="Delete addon"
-                  >
-                    {pendingDelete === addon.name ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Addon catalog */}
-      <div className="border border-gray-200 rounded-lg">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <h4 className="font-semibold text-gray-800">
-            Addon catalog{' '}
-            <span className="text-gray-400 font-normal">
-              ({catalog.data?.length ?? 0})
-            </span>
-          </h4>
-          <span className="text-xs text-gray-400">One-click install of popular 3.3.5a addons</span>
-        </div>
-
-        {suggestedCallout && (
-          <div className="border-b border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-900">
-            <strong>{suggestedCallout.name}</strong> is recommended for this stack — select it in the
-            catalog below and install.
-          </div>
-        )}
-
-        {selectedPendingCount > 0 && (
-          <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-            <span className="text-sm text-gray-600">
-              {selectedPendingCount} addon{selectedPendingCount === 1 ? '' : 's'} selected
-            </span>
-            <button
-              type="button"
-              onClick={() => void handleInstallSelected()}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
-            >
-              {batchInstallProgress ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {batchInstallProgress}
-                </>
-              ) : (
-                <>
-                  <Download className="h-3.5 w-3.5" />
-                  Install selected
-                </>
-              )}
-            </button>
-          </div>
-        )}
-
-        {catalog.isLoading ? (
-          <div className="px-4 py-6 text-sm text-gray-500 flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading catalog…
-          </div>
-        ) : catalog.error ? (
-          <div className="px-4 py-6 text-sm text-red-600">Failed to load the addon catalog.</div>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {visibleCatalogEntries.map((entry) => (
-              <CatalogEntryRow
-                key={entry.id}
-                entry={entry}
-                busy={busy}
-                pendingInstall={pendingInstall}
-                selected={selectedCatalogIds.has(entry.id)}
-                onToggleSelect={() => handleToggleCatalogSelection(entry.id)}
-                onInstall={() => void handleInstall(entry.id)}
-              />
-            ))}
-          </ul>
+          <CatalogPanel
+            catalog={catalog}
+            visibleCatalogEntries={visibleCatalogEntries}
+            suggestedCallout={suggestedCallout}
+            selectedPendingCount={selectedPendingCount}
+            selectedCatalogIds={selectedCatalogIds}
+            busy={busy}
+            pendingInstall={pendingInstall}
+            batchInstallProgress={batchInstallProgress}
+            onInstallSelected={() => void handleInstallSelected()}
+            onToggleSelect={handleToggleCatalogSelection}
+            onInstall={(id) => void handleInstall(id)}
+          />
         )}
       </div>
     </div>
+  )
+}
+
+const ADDON_COLLECTIONS = [
+  {
+    name: 'TrinityCore collection',
+    description: 'Official TrinityCore 3.3.5a addon pack',
+    href: 'https://github.com/TrinityCore/wow_335a_addons',
+  },
+  {
+    name: 'NoM0Re collection',
+    description: 'Curated community 3.3.5a addons',
+    href: 'https://github.com/NoM0Re/WoW-3.3.5a-Addons',
+  },
+] as const
+
+function UploadHeroCard({
+  dragOver,
+  setDragOver,
+  busy,
+  inputRef,
+  uploadPending,
+  onDrop,
+  onFiles,
+  className,
+}: {
+  dragOver: boolean
+  setDragOver: (value: boolean) => void
+  busy: boolean
+  inputRef: React.RefObject<HTMLInputElement | null>
+  uploadPending: boolean
+  onDrop: (e: React.DragEvent) => void
+  onFiles: (files: FileList | File[]) => Promise<void>
+  className?: string
+}) {
+  return (
+    <section
+      className={cn(
+        'overflow-hidden rounded-xl border-2 border-dashed shadow-sm transition-colors',
+        busy
+          ? 'cursor-not-allowed border-slate-200 bg-slate-50'
+          : dragOver
+            ? 'cursor-pointer border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+            : 'cursor-pointer border-blue-300 bg-linear-to-br from-blue-50 via-indigo-50/80 to-white hover:border-blue-400 hover:shadow-md',
+        className,
+      )}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!busy) setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      onClick={() => !busy && inputRef.current?.click()}
+      onKeyDown={(e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && !busy) {
+          e.preventDefault()
+          inputRef.current?.click()
+        }
+      }}
+      role="button"
+      tabIndex={busy ? -1 : 0}
+      aria-disabled={busy}
+    >
+      <div className="flex h-full flex-col items-center justify-center px-6 py-8 text-center sm:py-10">
+        <div
+          className={cn(
+            'mb-4 flex h-14 w-14 items-center justify-center rounded-full',
+            busy ? 'bg-slate-100 text-slate-400' : 'bg-blue-600 text-white shadow-md shadow-blue-600/25',
+          )}
+        >
+          {uploadPending ? <Loader2 className="h-7 w-7 animate-spin" /> : <Upload className="h-7 w-7" />}
+        </div>
+        <h3 className="text-lg font-semibold text-slate-900">
+          {uploadPending ? 'Uploading addon…' : 'Upload custom addon'}
+        </h3>
+        <p className="mt-1 max-w-md text-sm text-slate-600">
+          Drop one or more <strong className="font-semibold text-slate-800">.zip</strong> archives here, or click to
+          browse your files.
+        </p>
+        {!uploadPending && !busy && (
+          <span className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm">
+            <Upload className="h-4 w-4" />
+            Choose .zip files
+          </span>
+        )}
+        <p className="mt-4 text-xs text-slate-500">
+          Large packs (storyline / voice-over) can be several GB — uploads stream to disk and may take a while.
+        </p>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".zip"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void onFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+    </section>
+  )
+}
+
+function AddonCollectionsCard({ className }: { className?: string }) {
+  return (
+    <section
+      className={cn(
+        'flex h-full flex-col rounded-xl border border-slate-800 bg-linear-to-br from-slate-900 via-slate-900 to-slate-800 p-5 text-white shadow-md',
+        className,
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
+          <Library className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="font-semibold text-white">Find addons online</h3>
+          <p className="mt-1 text-sm text-slate-300">
+            Browse community collections on GitHub, download a <strong className="text-white">.zip</strong>, then upload
+            it with the card on the left.
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 flex flex-1 flex-col gap-2">
+        {ADDON_COLLECTIONS.map((collection) => (
+          <a
+            key={collection.href}
+            href={collection.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex items-center justify-between gap-3 rounded-lg border border-white/15 bg-white/5 px-4 py-3 transition-colors hover:border-amber-400/40 hover:bg-white/10"
+          >
+            <span className="min-w-0 text-left">
+              <span className="block text-sm font-semibold text-white group-hover:text-amber-100">
+                {collection.name}
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-400 group-hover:text-slate-300">
+                {collection.description}
+              </span>
+            </span>
+            <ExternalLink className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-amber-300" aria-hidden="true" />
+          </a>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function InstalledAddonsPanel({
+  addons,
+  isLoading,
+  error,
+  totalSize,
+  busy,
+  pendingDelete,
+  onDelete,
+}: {
+  addons: Array<{ name: string; recommended?: boolean; fileCount: number; totalSize: number }>
+  isLoading: boolean
+  error: unknown
+  totalSize: number
+  busy: boolean
+  pendingDelete: string | null
+  onDelete: (name: string) => void
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
+        <h4 className="font-medium text-slate-900">Served to players</h4>
+        {totalSize > 0 && (
+          <span className="text-xs text-slate-500">{formatBytes(totalSize)} total</span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 px-4 py-8 text-sm text-slate-500 sm:px-5">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading addons…
+        </div>
+      ) : error ? (
+        <div className="px-4 py-8 text-sm text-red-600 sm:px-5">Failed to load addons.</div>
+      ) : addons.length === 0 ? (
+        <div className="px-4 py-10 text-center sm:px-5">
+          <Package className="mx-auto h-8 w-8 text-slate-300" />
+          <p className="mt-3 text-sm font-medium text-slate-700">No addons served yet</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Upload a .zip above, or switch to <strong>Browse catalog</strong> for one-click installs.
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {addons.map((addon) => (
+            <li key={addon.name} className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+              <span className="flex min-w-0 items-center gap-2">
+                <Package className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="truncate font-medium text-slate-900">{addon.name}</span>
+                {addon.recommended && <RecommendedBadge />}
+              </span>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="hidden text-xs text-slate-500 sm:inline">
+                  {addon.fileCount} file{addon.fileCount === 1 ? '' : 's'} · {formatBytes(addon.totalSize)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onDelete(addon.name)}
+                  disabled={busy}
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                  title={`Delete ${addon.name}`}
+                >
+                  {pendingDelete === addon.name ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CatalogPanel({
+  catalog,
+  visibleCatalogEntries,
+  suggestedCallout,
+  selectedPendingCount,
+  selectedCatalogIds,
+  busy,
+  pendingInstall,
+  batchInstallProgress,
+  onInstallSelected,
+  onToggleSelect,
+  onInstall,
+}: {
+  catalog: ReturnType<typeof useAddonCatalog>
+  visibleCatalogEntries: AddonCatalogEntryDto[]
+  suggestedCallout?: AddonCatalogEntryDto
+  selectedPendingCount: number
+  selectedCatalogIds: Set<string>
+  busy: boolean
+  pendingInstall: string | null
+  batchInstallProgress: string | null
+  onInstallSelected: () => void
+  onToggleSelect: (id: string) => void
+  onInstall: (id: string) => void
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {suggestedCallout && (
+        <div className="border-b border-violet-200 bg-linear-to-r from-violet-50 to-fuchsia-50 px-4 py-3 sm:px-5">
+          <p className="text-sm text-violet-950">
+            <strong>{suggestedCallout.name}</strong> is recommended for this stack — select it below and install.
+          </p>
+        </div>
+      )}
+
+      {selectedPendingCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
+          <span className="text-sm font-medium text-slate-700">
+            {selectedPendingCount} addon{selectedPendingCount === 1 ? '' : 's'} selected
+          </span>
+          <button
+            type="button"
+            onClick={onInstallSelected}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            {batchInstallProgress ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {batchInstallProgress}
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" />
+                Install selected
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {catalog.isLoading ? (
+        <div className="flex items-center gap-2 px-4 py-8 text-sm text-slate-500 sm:px-5">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading catalog…
+        </div>
+      ) : catalog.error ? (
+        <div className="px-4 py-8 text-sm text-red-600 sm:px-5">Failed to load the addon catalog.</div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {visibleCatalogEntries.map((entry) => (
+            <CatalogEntryRow
+              key={entry.id}
+              entry={entry}
+              busy={busy}
+              pendingInstall={pendingInstall}
+              selected={selectedCatalogIds.has(entry.id)}
+              onToggleSelect={() => onToggleSelect(entry.id)}
+              onInstall={() => onInstall(entry.id)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -392,9 +593,10 @@ function CatalogEntryRow({
 
   return (
     <li
-      className={`flex items-start justify-between gap-4 px-4 py-3 text-sm ${
-        isChild ? 'bg-gray-50/80 pl-10' : ''
-      }`}
+      className={cn(
+        'flex items-start justify-between gap-4 px-4 py-3 text-sm sm:px-5',
+        isChild && 'bg-slate-50/80 pl-10 sm:pl-12',
+      )}
     >
       <div className="flex min-w-0 items-start gap-3">
         <input
@@ -425,7 +627,7 @@ function CatalogEntryRow({
               </a>
             )}
           </div>
-          <p className="mt-0.5 line-clamp-2 text-gray-500">{entry.description}</p>
+          <p className="mt-0.5 line-clamp-2 text-slate-600">{entry.description}</p>
         </div>
       </div>
       <button

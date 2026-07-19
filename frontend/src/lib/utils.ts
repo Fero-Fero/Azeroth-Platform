@@ -20,7 +20,8 @@ export function apiErrorMessage(err: unknown): string {
     }
     message?: string
   }
-  const data = anyErr?.response?.data
+  const data = anyErr?.response?.data as { error?: string; message?: string; title?: string; errors?: Record<string, string[]> } | undefined
+  if (data?.message) return data.message
   if (data?.error) return data.error
   if (data?.errors) {
     const first = Object.values(data.errors).flat()[0]

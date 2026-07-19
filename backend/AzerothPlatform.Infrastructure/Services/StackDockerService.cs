@@ -207,7 +207,7 @@ public sealed class StackDockerService : IStackDockerService
 
         var overview = await GetEngineOverviewAsync(cancellationToken);
         var image = overview.Images.FirstOrDefault(i =>
-            string.Equals(i.Id, imageId, StringComparison.OrdinalIgnoreCase)
+            ImageIdsMatch(i.Id, imageId)
             || string.Equals(i.Reference, imageId, StringComparison.OrdinalIgnoreCase));
         if (image is null)
         {
@@ -223,7 +223,13 @@ public sealed class StackDockerService : IStackDockerService
             };
         }
 
+        var isDangling = string.Equals(image.Category, "Dangling", StringComparison.OrdinalIgnoreCase);
         var (exitCode, _, stderr) = await RunDockerAsync($"rmi -f {image.Id}", cancellationToken);
+        if (exitCode != 0 && isDangling)
+        {
+            await RunDockerAsync("image prune -f", cancellationToken);
+            (exitCode, _, stderr) = await RunDockerAsync($"rmi -f {image.Id}", cancellationToken);
+        }
         if (exitCode != 0)
         {
             return new StackDockerDeleteResultDto
@@ -236,7 +242,9 @@ public sealed class StackDockerService : IStackDockerService
         return new StackDockerDeleteResultDto
         {
             Success = true,
-            Message = $"Removed image {image.Reference}.",
+            Message = isDangling
+                ? $"Removed dangling build layer {ShortImageId(image.Id)}."
+                : $"Removed image {image.Reference}.",
             FreedBytes = image.SizeBytes,
         };
     }
@@ -347,32 +355,17 @@ public sealed class StackDockerService : IStackDockerService
         var result = new DockerCleanupResultDto();
         var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
         var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
-        var allContainerImageRefs = await GetAllContainerImageRefsAsync(string.Empty, cancellationToken);
         var before = await GetDiskUsageAsync(cancellationToken);
 
-        var (danglingExit, _, danglingErr) = await RunDockerAsync("image prune -f", cancellationToken);
-        if (danglingExit != 0)
+        foreach (var contextArg in await GetDistinctDockerContextArgsAsync(cancellationToken))
         {
-            _logger.LogWarning("docker image prune failed: {Err}", danglingErr);
-        }
-
-        var allPlatformImages = await ListAllPlatformImagesAsync(
-            string.Empty,
-            allContainerImageRefs,
-            managedStackIds,
-            anyClientEnabled,
-            cancellationToken);
-        foreach (var image in allPlatformImages.Where(i => !i.IsActive))
-        {
-            var (exitCode, _, stderr) = await RunDockerAsync($"rmi -f {image.Id}", cancellationToken);
-            if (exitCode != 0)
-            {
-                _logger.LogWarning("Failed to remove image {Image}: {Err}", image.Reference, stderr);
-                continue;
-            }
-
-            result.RemovedImages++;
-            result.FreedBytes += image.SizeBytes;
+            var engineResult = await CleanupOldBuildsOnEngineAsync(
+                contextArg,
+                managedStackIds,
+                anyClientEnabled,
+                cancellationToken);
+            result.RemovedImages += engineResult.RemovedImages;
+            result.FreedBytes += engineResult.FreedBytes;
         }
 
         if (Directory.Exists(_buildsPath))
@@ -409,7 +402,9 @@ public sealed class StackDockerService : IStackDockerService
         result.Success = true;
         result.Message = result.RemovedImages + result.RemovedBuildDirs > 0
             ? $"Removed {result.RemovedImages} old build image(s) and {result.RemovedBuildDirs} orphaned build checkout(s)."
-            : "No old build images or orphaned build checkouts were found.";
+            : result.FreedBytes > 0
+                ? "Reclaimed dangling build layers from the Docker engine."
+                : "No old build images or orphaned build checkouts were found.";
         return result;
     }
 
@@ -417,26 +412,37 @@ public sealed class StackDockerService : IStackDockerService
     {
         var result = new DockerCleanupResultDto();
         var before = await GetDiskUsageAsync(cancellationToken);
+        var builderFreedBytes = 0L;
 
-        var (builderExit, _, builderErr) = await RunDockerAsync("builder prune -af", cancellationToken);
-        if (builderExit != 0)
+        foreach (var contextArg in await GetDistinctDockerContextArgsAsync(cancellationToken))
         {
-            _logger.LogWarning("docker builder prune failed: {Err}", builderErr);
+            var (builderExit, builderOutput, builderErr) = await RunDockerAsync($"{contextArg}builder prune -af", cancellationToken);
+            if (builderExit != 0)
+            {
+                _logger.LogWarning(
+                    "docker builder prune failed{Context}: {Err}",
+                    DescribeDockerContextArg(contextArg),
+                    builderErr);
+            }
+            else
+            {
+                builderFreedBytes += ParseDockerReclaimedSpace(builderOutput);
+            }
         }
 
         var oldBuilds = await CleanupOldBuildsAsync(cancellationToken);
         result.RemovedImages = oldBuilds.RemovedImages;
         result.RemovedBuildDirs = oldBuilds.RemovedBuildDirs;
-        result.FreedBytes = oldBuilds.FreedBytes;
+        result.FreedBytes = builderFreedBytes + oldBuilds.FreedBytes;
 
         var after = await GetDiskUsageAsync(cancellationToken);
-        if (result.FreedBytes <= 0 && before.ReclaimableBytes > 0)
+        if (result.FreedBytes <= 0 && before.UsedBytes > after.UsedBytes)
         {
             result.FreedBytes = Math.Max(0, before.UsedBytes - after.UsedBytes);
         }
 
         result.Success = true;
-        result.Message = result.RemovedImages + result.RemovedBuildDirs > 0
+        result.Message = result.RemovedImages + result.RemovedBuildDirs > 0 || result.FreedBytes > 0
             ? $"Removed {result.RemovedImages} unused image(s) and {result.RemovedBuildDirs} orphaned build checkout(s). Build cache was pruned."
             : "No unused images or orphaned build checkouts were found. Build cache was pruned if present.";
         return result;
@@ -481,9 +487,9 @@ public sealed class StackDockerService : IStackDockerService
             return new StackDockerDeleteResultDto { Success = false, Message = "Stack not found." };
         }
 
-        var image = overview.Images.Concat(overview.UnusedImages).FirstOrDefault(i =>
-            string.Equals(i.Id, imageId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(i.Reference, imageId, StringComparison.OrdinalIgnoreCase));
+        var image = FindStackDockerImage(
+            overview.Images.Concat(overview.UnusedImages).Concat(overview.DanglingImages),
+            imageId);
         if (image is null)
         {
             return new StackDockerDeleteResultDto { Success = false, Message = "Image was not found for this Docker engine." };
@@ -500,7 +506,14 @@ public sealed class StackDockerService : IStackDockerService
 
         var stack = await _dbContext.ManagedStacks.AsNoTracking().SingleAsync(s => s.Id == stackId, cancellationToken);
         var contextArg = ContextArg(await ResolveDockerContextAsync(stack, cancellationToken));
+        var isDangling = overview.DanglingImages.Any(d =>
+            string.Equals(d.Id, image.Id, StringComparison.OrdinalIgnoreCase));
         var (exitCode, _, stderr) = await RunDockerAsync($"{contextArg}rmi -f {image.Id}", cancellationToken);
+        if (exitCode != 0 && isDangling)
+        {
+            await RunDockerAsync($"{contextArg}image prune -f", cancellationToken);
+            (exitCode, _, stderr) = await RunDockerAsync($"{contextArg}rmi -f {image.Id}", cancellationToken);
+        }
         if (exitCode != 0)
         {
             return new StackDockerDeleteResultDto
@@ -510,11 +523,13 @@ public sealed class StackDockerService : IStackDockerService
             };
         }
 
-        _logger.LogInformation("Removed docker image {Image} for stack {StackId}", image.Reference, stackId);
+        _logger.LogInformation("Removed docker image {Image} for stack {StackId}", image.Id, stackId);
         return new StackDockerDeleteResultDto
         {
             Success = true,
-            Message = $"Removed image {image.Reference}.",
+            Message = isDangling
+                ? $"Removed dangling build layer {ShortImageId(image.Id)}."
+                : $"Removed image {image.Reference}.",
             FreedBytes = image.SizeBytes,
         };
     }
@@ -2651,6 +2666,177 @@ public sealed class StackDockerService : IStackDockerService
         var status = await _buildService.GetStatusAsync(stackId, cancellationToken);
         return status is not null
             && status.CurrentPhase is not (BuildPhase.Completed or BuildPhase.Failed);
+    }
+
+    private async Task<(int RemovedImages, long FreedBytes)> CleanupOldBuildsOnEngineAsync(
+        string contextArg,
+        HashSet<string> managedStackIds,
+        bool anyClientEnabled,
+        CancellationToken cancellationToken)
+    {
+        var removedImages = 0;
+        var freedBytes = 0L;
+        var allContainerImageRefs = await GetAllContainerImageRefsAsync(contextArg, cancellationToken);
+
+        var (danglingExit, pruneOutput, danglingErr) = await RunDockerAsync($"{contextArg}image prune -f", cancellationToken);
+        if (danglingExit != 0)
+        {
+            _logger.LogWarning(
+                "docker image prune failed{Context}: {Err}",
+                DescribeDockerContextArg(contextArg),
+                danglingErr);
+        }
+        else
+        {
+            freedBytes += ParseDockerReclaimedSpace(pruneOutput);
+        }
+
+        foreach (var image in await ListDanglingImagesAsync(contextArg, cancellationToken))
+        {
+            var (exitCode, _, stderr) = await RunDockerAsync($"{contextArg}rmi -f {image.Id}", cancellationToken);
+            if (exitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Failed to remove dangling image {Image}{Context}: {Err}",
+                    image.Id,
+                    DescribeDockerContextArg(contextArg),
+                    stderr);
+                continue;
+            }
+
+            removedImages++;
+            freedBytes += image.SizeBytes;
+            _logger.LogInformation(
+                "Removed dangling docker image {Image}{Context}",
+                image.Id,
+                DescribeDockerContextArg(contextArg));
+        }
+
+        var allPlatformImages = await ListAllPlatformImagesAsync(
+            contextArg,
+            allContainerImageRefs,
+            managedStackIds,
+            anyClientEnabled,
+            cancellationToken);
+        foreach (var image in allPlatformImages.Where(i => !i.IsActive))
+        {
+            var (exitCode, _, stderr) = await RunDockerAsync($"{contextArg}rmi -f {image.Id}", cancellationToken);
+            if (exitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Failed to remove image {Image}{Context}: {Err}",
+                    image.Reference,
+                    DescribeDockerContextArg(contextArg),
+                    stderr);
+                continue;
+            }
+
+            removedImages++;
+            freedBytes += image.SizeBytes;
+        }
+
+        return (removedImages, freedBytes);
+    }
+
+    private async Task<List<string>> GetDistinctDockerContextArgsAsync(CancellationToken cancellationToken)
+    {
+        var contextArgs = new List<string> { string.Empty };
+        var seen = new HashSet<string>(StringComparer.Ordinal) { string.Empty };
+
+        var externalStacks = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .Where(s => s.DeploymentTarget == DeploymentTarget.External)
+            .ToListAsync(cancellationToken);
+
+        foreach (var stack in externalStacks)
+        {
+            var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
+            var contextArg = ContextArg(dockerContext);
+            if (seen.Add(contextArg))
+            {
+                contextArgs.Add(contextArg);
+            }
+        }
+
+        return contextArgs;
+    }
+
+    private static string DescribeDockerContextArg(string contextArg) =>
+        string.IsNullOrWhiteSpace(contextArg) ? string.Empty : " on remote engine";
+
+    private static StackDockerImageDto? FindStackDockerImage(IEnumerable<StackDockerImageDto> sources, string imageId)
+    {
+        if (string.IsNullOrWhiteSpace(imageId))
+        {
+            return null;
+        }
+
+        var normalized = imageId.Trim();
+        foreach (var image in sources)
+        {
+            if (ImageIdsMatch(image.Id, normalized)
+                || string.Equals(image.Reference, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return image;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ImageIdsMatch(string candidateId, string requestedId)
+    {
+        if (string.Equals(candidateId, requestedId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var candidate = NormalizeImageId(candidateId);
+        var requested = NormalizeImageId(requestedId);
+        if (candidate.Length == 0 || requested.Length == 0)
+        {
+            return false;
+        }
+
+        return candidate.StartsWith(requested, StringComparison.OrdinalIgnoreCase)
+            || requested.StartsWith(candidate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeImageId(string imageId)
+    {
+        var trimmed = imageId.Trim();
+        return trimmed.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"sha256:{trimmed}";
+    }
+
+    private static string ShortImageId(string imageId)
+    {
+        if (imageId.Length <= 19)
+        {
+            return imageId;
+        }
+
+        return imageId[..19];
+    }
+
+    private static long ParseDockerReclaimedSpace(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return 0;
+        }
+
+        var match = Regex.Match(
+            output,
+            @"(?:Total reclaimed space|Total):\s*([\d.,]+)\s*([KMGT]?B)",
+            RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return 0;
+        }
+
+        return ParseHumanSize($"{match.Groups[1].Value}{match.Groups[2].Value}");
     }
 
     private async Task<string?> ResolveDockerContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken) =>

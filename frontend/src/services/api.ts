@@ -168,7 +168,8 @@ export const stackApi = {
 
   deleteDockerImage: (stackId: string, imageId: string) =>
     apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>(
-      `/stacks/${stackId}/docker/images/${encodeURIComponent(imageId)}`,
+      `/stacks/${stackId}/docker/images`,
+      { params: { imageId } },
     ),
 
   deleteDockerVolume: (stackId: string, volumeName: string) =>
@@ -206,9 +207,9 @@ export const dockerApi = {
     ),
 
   deleteEngineImage: (imageId: string) =>
-    apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>(
-      `/docker/images/${encodeURIComponent(imageId)}`,
-    ),
+    apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>('/docker/images', {
+      params: { imageId },
+    }),
 
   cleanupUnused: () =>
     apiClient.post<import('@/types/docker.types').DockerCleanupJobStatus>('/docker/cleanup'),

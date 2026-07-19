@@ -203,8 +203,18 @@ public class StacksController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    [HttpDelete("{stackId}/docker/images/{imageId}")]
+    [HttpDelete("{stackId}/docker/images")]
     public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteDockerImage(
+        string stackId,
+        [FromQuery] string imageId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _stackDockerService.DeleteImageAsync(stackId, imageId, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpDelete("{stackId}/docker/images/{imageId}")]
+    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteDockerImageLegacy(
         string stackId,
         string imageId,
         CancellationToken cancellationToken)

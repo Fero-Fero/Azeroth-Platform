@@ -837,7 +837,6 @@ function StackDetailsPageContent() {
 
       {activeTab === 'addons' && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Addons</h2>
           <AddonsManager stackId={stackId!} />
         </div>
       )}
