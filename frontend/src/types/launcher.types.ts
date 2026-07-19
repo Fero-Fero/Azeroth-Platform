@@ -103,4 +103,6 @@ export interface LauncherProfileConfigDto {
   hasBackground: boolean
   /** Whether this stack uploaded a logo that overrides the global theme's logo. */
   hasLogo: boolean
+  /** Per-stack style template override; blank inherits the global launcher theme. */
+  template: string
 }

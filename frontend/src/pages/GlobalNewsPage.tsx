@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Loader2, Megaphone } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import {
   useLauncherConfig,
   useLauncherTemplates,
@@ -8,6 +8,9 @@ import {
   useUploadGlobalNewsImage,
 } from '@/hooks/useLauncher'
 import NewsEditor from '@/components/launcher/NewsEditor'
+import { StackTabInfoDetails } from '@/components/layout/StackTabChrome'
+import { armoryPreviewCssVars, CLASSIC_STYLING_FALLBACK } from '@/lib/armory-styling'
+import { resolveLauncherNewsPreviewTheme } from '@/lib/launcher-theme'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 
 /**
@@ -22,28 +25,32 @@ export default function GlobalNewsPage() {
   const saveNews = useSaveGlobalNews()
   const uploadNewsImage = useUploadGlobalNewsImage()
 
-  const newsAccent = useMemo(
-    () => templates?.find((t) => t.id === config?.template)?.accentColor ?? '#4fa8d8',
+  const launcherPreviewTheme = useMemo(
+    () => resolveLauncherNewsPreviewTheme(templates, config?.template, null),
     [templates, config?.template],
   )
 
+  const armoryPreviewStyle = useMemo(
+    () => ({
+      ...armoryPreviewCssVars(CLASSIC_STYLING_FALLBACK),
+      backgroundColor: 'var(--armory-bg)',
+    }),
+    [],
+  )
+
   const infoBanner = (
-    <div className="flex gap-3 rounded-lg border border-blue-200 bg-blue-50/80 p-4 text-sm text-blue-900 shadow-sm">
-      <Megaphone className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
-      <div className="space-y-1">
-        <p className="font-medium">Articles here are uploaded to every stack.</p>
-        <p className="text-blue-800/90">
-          When you save, each published article is copied into every launcher-visible stack's own
-          news and automatically placed as that stack's latest article. Ordering and per-stack
-          details are handled on upload.
-        </p>
-      </div>
-    </div>
+    <StackTabInfoDetails summary="Articles here are uploaded to every stack">
+      <p>
+        When you save, each published article is copied into every launcher-visible stack&apos;s own
+        news and automatically placed as that stack&apos;s latest article. Ordering and per-stack
+        details are handled on upload.
+      </p>
+    </StackTabInfoDetails>
   )
 
   if (error) {
     return (
-      <div className="mx-auto max-w-6xl space-y-5">
+      <div className="relative left-1/2 w-[90vw] -translate-x-1/2 space-y-5">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Global News</h1>
           <p className="mt-1 text-gray-600">
@@ -59,7 +66,7 @@ export default function GlobalNewsPage() {
 
   if (news === undefined) {
     return (
-      <div className="mx-auto max-w-6xl space-y-5">
+      <div className="relative left-1/2 w-[90vw] -translate-x-1/2 space-y-5">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Global News</h1>
           <p className="mt-1 text-gray-600">
@@ -74,18 +81,17 @@ export default function GlobalNewsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <NewsEditor
+    <NewsEditor
         items={news}
         onSave={(items) => saveNews.mutateAsync(items)}
         onUploadImage={(itemId, file) => uploadNewsImage.mutateAsync({ itemId, file })}
         imageUrlFor={(id) => `/api/launcher/news-image/${id}`}
         isSaving={saveNews.isPending}
-        accentColor={newsAccent}
+        launcherPreviewTheme={launcherPreviewTheme}
+        armoryPreviewStyle={armoryPreviewStyle}
         pageTitle="Global News"
         pageDescription="Write an announcement once and broadcast it to every launcher-visible stack."
         infoBanner={infoBanner}
       />
-    </div>
   )
 }

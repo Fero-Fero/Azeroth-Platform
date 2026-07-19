@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
@@ -23,16 +23,17 @@ import {
   Upload,
   AlertCircle,
   Newspaper,
-  Eye,
-  Pencil,
+  Search,
 } from 'lucide-react'
 import type { LauncherNewsItemDto } from '@/types/launcher.types'
-import { apiErrorMessage as errorMessage } from '@/lib/utils'
+import { apiErrorMessage as errorMessage, cn } from '@/lib/utils'
+import type { LauncherNewsPreviewTheme } from '@/lib/launcher-theme'
+import { StackTabHeader, StackTabSideCard } from '@/components/layout/StackTabChrome'
 import { NEWS_ARTICLE_TEMPLATES, type NewsArticleTemplate } from './newsTemplates'
 import {
-  NewsPreviewModeTabs,
-  NewsPreviewPanel,
+  NewsLivePreviewSidebar,
   type NewsPreviewMode,
+  type NewsPreviewTarget,
 } from './NewsArticlePreview'
 import './newsContent.css'
 
@@ -66,12 +67,15 @@ interface NewsEditorProps {
   imageUrlFor: (itemId: string) => string
   isSaving?: boolean
   accentColor?: string
+  launcherPreviewTheme?: LauncherNewsPreviewTheme
   /** Optional page title shown above the editor chrome. */
   pageTitle?: string
   /** Optional subtitle / help text under the title. */
   pageDescription?: string
   /** Optional info banner (e.g. global broadcast notice). */
   infoBanner?: ReactNode
+  /** CSS variables + wallpaper for armory-themed preview surfaces. */
+  armoryPreviewStyle?: CSSProperties
 }
 
 function newId(): string {
@@ -114,14 +118,17 @@ export default function NewsEditor({
   imageUrlFor,
   isSaving,
   accentColor = '#4fa8d8',
+  launcherPreviewTheme,
   pageTitle,
   pageDescription,
   infoBanner,
+  armoryPreviewStyle,
 }: NewsEditorProps) {
   const [draft, setDraft] = useState<LauncherNewsItemDto[]>(items)
   const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
-  const [detailTab, setDetailTab] = useState<'edit' | 'preview'>('edit')
+  const [previewTarget, setPreviewTarget] = useState<NewsPreviewTarget>('launcher')
   const [previewMode, setPreviewMode] = useState<NewsPreviewMode>('article')
+  const [librarySearch, setLibrarySearch] = useState('')
   const [bust, setBust] = useState(0)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -155,8 +162,6 @@ export default function NewsEditor({
 
   const selectArticle = (id: string) => {
     setSelectedId(id)
-    setDetailTab('edit')
-    setPreviewMode('article')
   }
 
   const editor = useEditor({
@@ -209,7 +214,6 @@ export default function NewsEditor({
     }
     setDraft((prev) => [item, ...prev])
     setSelectedId(item.id)
-    setDetailTab('edit')
   }
 
   const removeItem = (id: string) => {
@@ -308,266 +312,290 @@ export default function NewsEditor({
     ? `${selected.imageUrl}${selected.imageUrl.includes('?') ? '&' : '?'}v=${bust}`
     : null
 
+  const previewArticle = useMemo(
+    () =>
+      selected
+        ? {
+            title: selected.title || 'Untitled',
+            date: selected.date,
+            tag: selected.tag,
+            html: selected.html || '',
+            coverUrl,
+          }
+        : null,
+    [selected, coverUrl],
+  )
+
+  const selectedIndex = useMemo(
+    () => (selectedId ? ordered.findIndex((item) => item.id === selectedId) : -1),
+    [ordered, selectedId],
+  )
+
+  const filteredArticles = useMemo(() => {
+    const query = librarySearch.trim().toLowerCase()
+    if (!query) return ordered
+    return ordered.filter((item) => {
+      const haystack = [item.title, item.date, item.tag, item.isDraft ? 'draft' : 'published']
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [librarySearch, ordered])
+
   const tbBtn = (active: boolean) =>
     `rounded p-1.5 text-gray-700 hover:bg-gray-100 ${active ? 'bg-gray-200 text-gray-900' : ''}`
 
-  const renderArticleRow = (item: LauncherNewsItemDto, index: number) => {
-    const selected = item.id === selectedId
+  const renderArticleListItem = (item: LauncherNewsItemDto, compact = false) => {
+    const isSelected = item.id === selectedId
     const tagColor = item.tag ? NEWS_TAG_COLORS[item.tag] ?? '#555' : null
     return (
-      <div
+      <button
         key={item.id}
-        className={`flex items-stretch gap-1 border-l-4 transition-colors ${
-          item.isDraft ? 'border-l-amber-400' : 'border-l-green-500'
-        } ${selected ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'hover:bg-gray-50/90'}`}
+        type="button"
+        onClick={() => selectArticle(item.id)}
+        className={cn(
+          'flex w-full border-l-[3px] text-left transition-colors',
+          compact ? 'items-center gap-2 px-2 py-2' : 'items-start gap-2.5 px-3 py-2.5',
+          item.isDraft ? 'border-l-amber-400' : 'border-l-green-500',
+          isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50',
+        )}
       >
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2.5 text-left"
-          onClick={() => selectArticle(item.id)}
-        >
-          {item.imageUrl ? (
+        {!compact &&
+          (item.imageUrl ? (
             <img
               src={`${item.imageUrl}?v=${bust}`}
               alt=""
-              className="mt-0.5 h-10 w-14 flex-none rounded object-cover ring-1 ring-gray-200"
+              className="mt-0.5 h-9 w-12 shrink-0 rounded object-cover ring-1 ring-slate-200"
             />
           ) : (
-            <span className="mt-0.5 flex h-10 w-14 flex-none items-center justify-center rounded bg-gray-100 text-[10px] text-gray-400 ring-1 ring-gray-200">
-              No cover
+            <span className="mt-0.5 flex h-9 w-12 shrink-0 items-center justify-center rounded bg-slate-100 text-[9px] text-slate-400 ring-1 ring-slate-200">
+              —
             </span>
-          )}
-          <span className="min-w-0 flex-1">
-            <span className="flex flex-wrap items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-gray-900">
-                {item.title || 'Untitled'}
+          ))}
+        <span className="min-w-0 flex-1">
+          <span className={cn('flex items-center gap-1', compact ? 'flex-col items-start gap-0.5' : 'flex-wrap gap-1.5')}>
+            <span className={cn('truncate font-medium text-slate-900', compact ? 'text-xs' : 'text-sm')}>
+              {item.title || 'Untitled'}
+            </span>
+            {item.isDraft && (
+              <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[8px] font-semibold uppercase text-amber-800">
+                Draft
               </span>
-              {item.isDraft && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                  Draft
-                </span>
-              )}
-              {item.tag && tagColor && (
-                <span
-                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
-                  style={{ backgroundColor: tagColor }}
-                >
-                  {item.tag}
-                </span>
-              )}
-            </span>
-            <span className="mt-0.5 block text-xs text-gray-500">{item.date || 'No date'}</span>
+            )}
+            {!compact && item.tag && tagColor && (
+              <span
+                className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white"
+                style={{ backgroundColor: tagColor }}
+              >
+                {item.tag}
+              </span>
+            )}
           </span>
-        </button>
-        <div className="flex flex-none flex-col justify-center gap-0.5 pr-1">
-          <button
-            type="button"
-            onClick={() => move(item.id, -1)}
-            disabled={index === 0}
-            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30"
-            title="Move up"
-          >
-            <ChevronUp className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => move(item.id, 1)}
-            disabled={index === ordered.length - 1}
-            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30"
-            title="Move down"
-          >
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (window.confirm(`Delete "${item.title || 'Untitled'}"? This can't be undone.`)) {
-              removeItem(item.id)
-            }
-          }}
-          className="flex-none self-center px-2 text-gray-400 hover:text-red-600"
-          title="Delete article"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
+          {!compact && (
+            <span className="mt-0.5 block truncate text-xs text-slate-500">{item.date || 'No date'}</span>
+          )}
+        </span>
+      </button>
     )
   }
 
-  return (
-    <div className="space-y-5">
-      {(pageTitle || pageDescription) && (
-        <div>
-          {pageTitle && <h2 className="text-xl font-semibold text-gray-900">{pageTitle}</h2>}
-          {pageDescription && <p className="mt-1 max-w-3xl text-sm text-gray-500">{pageDescription}</p>}
-        </div>
+  const renderArticleLibraryPanel = (compact = false) => (
+    <aside
+      className={cn(
+        'flex min-h-52 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0 lg:flex-1',
+        compact && 'min-h-48',
       )}
+    >
+      <div className="border-b border-slate-100 bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">Article library</h3>
+          <span className="text-xs font-medium text-slate-500">{draft.length}</span>
+        </div>
+      </div>
+      <div className="border-b border-slate-100 px-3 py-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={librarySearch}
+            onChange={(e) => setLibrarySearch(e.target.value)}
+            placeholder="Search…"
+            className="w-full rounded-md border border-slate-300 bg-white py-1.5 pl-8 pr-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
+        {ordered.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 px-3 py-6 text-center text-xs text-slate-500">
+            <Newspaper className="h-5 w-5 text-slate-300" />
+            No articles yet
+          </div>
+        ) : filteredArticles.length === 0 ? (
+          <div className="px-3 py-6 text-center text-xs text-slate-500">No matches</div>
+        ) : (
+          filteredArticles.map((item) => renderArticleListItem(item, compact))
+        )}
+      </div>
+    </aside>
+  )
 
+  return (
+    <div className="relative left-1/2 w-[90vw] -translate-x-1/2 space-y-5">
+      {(pageTitle || pageDescription) && (
+        <StackTabHeader title={pageTitle ?? 'News'} subtitle={pageDescription} />
+      )}
       {infoBanner}
 
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,2fr)] lg:min-h-[320px]">
+        {renderArticleLibraryPanel(true)}
 
-      <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">News editor</h3>
-            <p className="mt-0.5 text-xs text-gray-500">Create articles, set tags, and preview launcher cards.</p>
+        <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border-2 border-dashed border-blue-300 bg-linear-to-br from-blue-50 via-indigo-50/80 to-white shadow-sm">
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-6 text-center sm:px-6">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-md shadow-blue-600/25">
+              <Plus className="h-6 w-6" />
+            </div>
+            <h3 className="text-base font-semibold text-slate-900 sm:text-lg">Create news article</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Patch notes and announcements for the launcher and armory.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => addArticle()}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4" /> New article
+              </button>
+              <select
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+                value=""
+                onChange={(e) => {
+                  const tpl = NEWS_ARTICLE_TEMPLATES.find((t) => t.id === e.target.value)
+                  if (tpl) addArticle(tpl)
+                  e.target.value = ''
+                }}
+              >
+                <option value="">From template…</option>
+                {NEWS_ARTICLE_TEMPLATES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => addArticle()}
-              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4" /> New article
-            </button>
-            <select
-              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              value=""
-              onChange={(e) => {
-                const tpl = NEWS_ARTICLE_TEMPLATES.find((t) => t.id === e.target.value)
-                if (tpl) addArticle(tpl)
-                e.target.value = ''
-              }}
-            >
-              <option value="">From template…</option>
-              {NEWS_ARTICLE_TEMPLATES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        </section>
 
-        <div className="grid gap-px border-t border-gray-100 bg-gray-100 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="bg-white px-5 py-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Articles</p>
-            <p className="mt-0.5 text-sm font-semibold text-gray-900">{draft.length}</p>
-          </div>
-          <div className="bg-white px-5 py-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Published</p>
-            <p className="mt-0.5 text-sm font-semibold text-green-700">{publishedCount}</p>
-          </div>
-          <div className="bg-white px-5 py-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Drafts</p>
-            <p className="mt-0.5 text-sm font-semibold text-amber-700">{draftCount}</p>
-          </div>
-          <div className="flex items-center justify-between gap-3 bg-white px-5 py-3">
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Save status</p>
+        <StackTabSideCard
+          className="min-w-0"
+          title="Article stats"
+          description="Autosave keeps drafts safe — publish when ready."
+          icon={<Newspaper className="h-5 w-5" />}
+        >
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <StatPill label="Articles" value={String(draft.length)} />
+            <StatPill label="Published" value={String(publishedCount)} tone="success" />
+            <StatPill label="Drafts" value={String(draftCount)} tone="warning" />
+            <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Status</p>
               {isSaving ? (
-                <p className="mt-0.5 inline-flex items-center gap-1 text-sm font-medium text-gray-600">
+                <p className="mt-1 inline-flex items-center gap-1 font-semibold text-slate-200">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
                 </p>
               ) : dirty ? (
-                <p className="mt-0.5 inline-flex items-center gap-1 text-sm font-medium text-amber-700">
+                <p className="mt-1 inline-flex items-center gap-1 font-semibold text-amber-300">
                   <AlertCircle className="h-3.5 w-3.5" /> Unsaved
                 </p>
               ) : (
-                <p className="mt-0.5 inline-flex items-center gap-1 text-sm font-medium text-green-700">
+                <p className="mt-1 inline-flex items-center gap-1 font-semibold text-emerald-300">
                   <CheckCircle2 className="h-3.5 w-3.5" /> {saved ? 'Saved' : 'Up to date'}
                 </p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={save}
-              disabled={isSaving || !dirty}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              title="Autosave keeps drafts saved; use this to save immediately"
-            >
-              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              Save now
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isSaving || !dirty}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save now
+          </button>
+        </StackTabSideCard>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {!selected ? (
+        <div className="flex h-72 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/80 shadow-sm">
+          <Newspaper className="h-8 w-8 text-slate-300" />
+          <p className="text-sm font-medium text-slate-600">Select an article from the library</p>
+          <p className="text-xs text-slate-500">Edit content, cover image, and live launcher/armory preview</p>
         </div>
-      </section>
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(280px,340px)_1fr]">
-        <aside className="lg:sticky lg:top-4 lg:self-start">
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
-              <h3 className="text-sm font-semibold text-gray-900">Article library</h3>
-              <p className="mt-0.5 text-xs text-gray-500">Newest first · reorder with arrows</p>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-4">
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-semibold text-gray-900">
+                {selected.title || 'Untitled article'}
+              </h3>
+              <p className="mt-1 text-xs text-gray-500">
+                {selected.date || 'No date'}
+                {selected.isDraft ? ' · Draft (hidden from launcher)' : ' · Published'}
+              </p>
             </div>
-            <div className="max-h-[calc(100vh-14rem)] divide-y divide-gray-50 overflow-y-auto">
-              {ordered.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-                  <Newspaper className="h-8 w-8 text-gray-300" />
-                  <p className="text-sm font-medium text-gray-600">No articles yet</p>
-                  <p className="text-xs text-gray-400">Add one or start from a template</p>
-                </div>
-              ) : (
-                ordered.map((item, index) => renderArticleRow(item, index))
-              )}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center rounded-md border border-gray-300 bg-white">
+                <button
+                  type="button"
+                  onClick={() => selectedId && move(selectedId, -1)}
+                  disabled={selectedIndex <= 0}
+                  className="rounded-l-md p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800 disabled:opacity-30"
+                  title="Move newer"
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectedId && move(selectedId, 1)}
+                  disabled={selectedIndex < 0 || selectedIndex >= ordered.length - 1}
+                  className="rounded-r-md border-l border-gray-300 p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-800 disabled:opacity-30"
+                  title="Move older"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Delete "${selected.title || 'Untitled'}"? This can't be undone.`)) {
+                    removeItem(selected.id)
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-700 hover:bg-red-100"
+                title="Delete article"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+              <label className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300"
+                  checked={!!selected.isDraft}
+                  onChange={(e) => patchSelected({ isDraft: e.target.checked })}
+                />
+                <span className="font-medium text-gray-700">Draft</span>
+              </label>
             </div>
           </div>
-        </aside>
 
-        <main className="min-w-0">
-          {!selected ? (
-            <div className="flex h-72 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 shadow-sm">
-              <Newspaper className="h-8 w-8 text-gray-300" />
-              <p className="text-sm font-medium text-gray-600">Select an article from the library</p>
-              <p className="text-xs text-gray-400">Edit content, cover image, and launcher preview</p>
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/80 px-5 py-4">
-                <div className="min-w-0">
-                  <h3 className="truncate text-lg font-semibold text-gray-900">
-                    {selected.title || 'Untitled article'}
-                  </h3>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {selected.date || 'No date'}
-                    {selected.isDraft ? ' · Draft (hidden from launcher)' : ' · Published'}
-                  </p>
-                </div>
-                <label className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300"
-                    checked={!!selected.isDraft}
-                    onChange={(e) => patchSelected({ isDraft: e.target.checked })}
-                  />
-                  <span className="font-medium text-gray-700">Draft</span>
-                </label>
-              </div>
-
-              <div className="flex gap-1 border-b border-gray-100 bg-white px-5">
-                <button
-                  type="button"
-                  onClick={() => setDetailTab('edit')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    detailTab === 'edit'
-                      ? 'border-blue-600 text-blue-700'
-                      : 'border-transparent text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  <Pencil className="h-4 w-4" /> Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDetailTab('preview')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    detailTab === 'preview'
-                      ? 'border-blue-600 text-blue-700'
-                      : 'border-transparent text-gray-500 hover:text-gray-800'
-                  }`}
-                >
-                  <Eye className="h-4 w-4" /> Launcher preview
-                </button>
-              </div>
-
-              <div className="space-y-4 p-5">
-                {detailTab === 'edit' ? (
-                  <>
+          <div className="grid gap-5 p-5 xl:grid-cols-2">
+                <div className="min-w-0 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Headline</span>
@@ -608,10 +636,10 @@ export default function NewsEditor({
             </div>
 
             <div>
-              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cover image</span>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">
-                  <Upload className="h-4 w-4" /> Upload cover
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cover image</span>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-blue-200 bg-blue-50/60 px-4 py-3 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:bg-blue-50">
+                  <Upload className="h-4 w-4 text-blue-600" /> Upload cover
                   <input
                     type="file"
                     accept="image/*"
@@ -620,12 +648,12 @@ export default function NewsEditor({
                   />
                 </label>
                 {coverUrl ? (
-                  <img src={coverUrl} alt="cover" className="aspect-video h-16 rounded-md object-cover ring-1 ring-gray-200" />
+                  <img src={coverUrl} alt="cover" className="aspect-video h-16 rounded-lg object-cover ring-1 ring-slate-200" />
                 ) : (
-                  <span className="text-sm text-gray-400">No cover uploaded</span>
+                  <span className="text-sm text-slate-500">No cover uploaded</span>
                 )}
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">
+              <p className="mt-1.5 text-xs text-slate-500">
                 Recommended 1280×720 (16:9). Images are resized and cropped to fit launcher cards.
               </p>
             </div>
@@ -691,32 +719,49 @@ export default function NewsEditor({
                 </div>
               </div>
             </div>
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <NewsPreviewModeTabs
-                      mode={previewMode}
-                      onModeChange={setPreviewMode}
-                      variant="light"
-                    />
-                    <NewsPreviewPanel
-                      mode={previewMode}
-                      accentColor={accentColor}
-                      article={{
-                        title: selected.title || 'Untitled',
-                        date: selected.date,
-                        tag: selected.tag,
-                        html: selected.html || '',
-                        coverUrl,
-                      }}
-                    />
-                  </div>
+                </div>
+
+                {previewArticle && (
+                  <NewsLivePreviewSidebar
+                    article={previewArticle}
+                    accentColor={launcherPreviewTheme?.accentColor ?? accentColor}
+                    launcherPreviewTheme={launcherPreviewTheme}
+                    target={previewTarget}
+                    mode={previewMode}
+                    onTargetChange={setPreviewTarget}
+                    onModeChange={setPreviewMode}
+                    armoryHostStyle={armoryPreviewStyle}
+                  />
                 )}
               </div>
             </div>
-          )}
-        </main>
-      </div>
+      )}
+    </div>
+  )
+}
+
+function StatPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone?: 'success' | 'warning'
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p
+        className={cn(
+          'mt-1 text-lg font-bold tabular-nums',
+          tone === 'success' && 'text-emerald-300',
+          tone === 'warning' && 'text-amber-300',
+          !tone && 'text-white',
+        )}
+      >
+        {value}
+      </p>
     </div>
   )
 }

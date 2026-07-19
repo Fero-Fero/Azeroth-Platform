@@ -10,10 +10,65 @@
   padding: 0.5rem 0 0.25rem;
 }
 
+.launcher-news-preview-themed {
+  --launcher-news-accent: #4fa8d8;
+  --launcher-news-label: #f0c869;
+  --launcher-news-title: #ffd980;
+  --launcher-news-muted: #b3a384;
+  --launcher-news-excerpt: #d4c4a8;
+  --launcher-news-border: #5a4628;
+  --launcher-news-card-bg: rgba(43, 33, 20, 0.08);
+  --launcher-news-strip-border: rgba(90, 70, 40, 0.45);
+  --launcher-news-strip-bg: linear-gradient(180deg, rgba(21, 16, 10, 0.35) 0%, rgba(18, 13, 7, 0.85) 100%);
+  --launcher-news-article-bg: #15100a;
+  --launcher-news-article-border: #5a4628;
+  --launcher-news-article-title: #ffd980;
+  --launcher-news-article-date: #b3a384;
+  --launcher-news-placeholder: rgba(179, 163, 132, 0.7);
+}
+
+.launcher-news-preview-themed .launcher-news-preview-strip__label {
+  color: var(--launcher-news-label);
+}
+
+.launcher-news-preview-themed .launcher-news-card {
+  border-color: var(--launcher-news-border);
+  background: var(--launcher-news-card-bg);
+}
+
+.launcher-news-preview-themed .launcher-news-card__title {
+  color: var(--launcher-news-title);
+}
+
+.launcher-news-preview-themed .launcher-news-card__date {
+  color: var(--launcher-news-muted);
+}
+
+.launcher-news-preview-themed .launcher-news-card__excerpt {
+  color: var(--launcher-news-excerpt);
+}
+
+.launcher-news-preview-themed .launcher-news-preview-strip {
+  background: var(--launcher-news-strip-bg);
+  border-color: var(--launcher-news-strip-border);
+}
+
+.launcher-news-preview-themed.launcher-news-article-preview {
+  background: var(--launcher-news-article-bg);
+  border-color: var(--launcher-news-article-border);
+}
+
+.launcher-news-preview-themed.launcher-news-article-preview .launcher-news-article-preview__title {
+  color: var(--launcher-news-article-title);
+}
+
+.launcher-news-preview-themed.launcher-news-article-preview .launcher-news-article-preview__date {
+  color: var(--launcher-news-article-date);
+}
+
 .launcher-news-preview-strip {
   width: 100%;
   max-width: min(100%, 320px);
-  background: linear-gradient(180deg, rgba(21, 16, 10, 0.35) 0%, rgba(18, 13, 7, 0.85) 100%);
   border: 1px solid rgba(90, 70, 40, 0.45);
   border-radius: 10px;
   padding: 1.25rem 1rem 1.5rem;
@@ -21,7 +76,6 @@
 }
 
 .launcher-news-preview-strip__label {
-  color: #f0c869;
   font-size: 1em;
   font-weight: 700;
   margin-bottom: 0.75em;
@@ -33,7 +87,6 @@
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid #5a4628;
-  background: rgba(43, 33, 20, 0.08);
   text-align: left;
   display: flex;
   flex-direction: column;
@@ -78,7 +131,6 @@
 }
 
 .launcher-news-card__title {
-  color: #ffd980;
   font-size: 1em;
   font-weight: 600;
   line-height: 1.25;
@@ -89,12 +141,10 @@
 }
 
 .launcher-news-card__date {
-  color: #b3a384;
   font-size: 0.78em;
 }
 
 .launcher-news-card__excerpt {
-  color: #d4c4a8;
   font-size: 0.72em;
   line-height: 1.35;
   display: -webkit-box;
@@ -108,4 +158,267 @@
   font-size: 0.75em;
   color: #6b7280;
   text-align: center;
+}
+
+/*
+ * Armory news preview surfaces. Mirrors frontend-armory/static/css/theme.css news sections,
+ * scoped under .armory-news-preview-host with --armory-* CSS variables from armoryPreviewCssVars().
+ */
+.armory-news-preview-host {
+  width: 100%;
+  border-radius: 8px;
+  padding: 1rem;
+  color: var(--armory-text);
+  background-color: var(--armory-bg);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center top;
+}
+
+.armory-news-card-preview {
+  width: 100%;
+}
+
+.armory-news-card {
+  position: relative;
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--armory-border);
+  background: linear-gradient(180deg, var(--armory-panel-highlight), var(--armory-panel));
+  color: var(--armory-text);
+  text-decoration: none;
+  --tag-color: var(--armory-accent);
+}
+
+.armory-news-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--tag-color);
+  box-shadow: 0 0 12px -1px var(--tag-color);
+  z-index: 2;
+}
+
+.armory-news-card__cover {
+  position: relative;
+  flex: 0 0 42%;
+  max-width: 210px;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.armory-news-card__cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 50%, var(--armory-panel) 100%);
+  pointer-events: none;
+}
+
+.armory-news-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.armory-news-card__body {
+  flex: 1;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+}
+
+.armory-news-card__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+  color: var(--tag-color);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.armory-news-card__eyebrow::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--tag-color);
+  transform: rotate(45deg);
+  box-shadow: 0 0 8px 0 var(--tag-color);
+}
+
+.armory-news-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.armory-news-card__title {
+  color: var(--armory-heading);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.armory-news-card__date {
+  color: var(--armory-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.armory-news-card__excerpt {
+  color: var(--armory-text);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.armory-news-card__readmore {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+  color: var(--armory-link);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.armory-news-card__readmore::after {
+  content: "\2192";
+}
+
+.armory-news-card--patch { --tag-color: #4a9fe8; }
+.armory-news-card--announcement { --tag-color: #f0c869; }
+.armory-news-card--expansion { --tag-color: #b06be0; }
+.armory-news-card--event { --tag-color: #4fce7f; }
+.armory-news-card--update { --tag-color: #38c8bd; }
+.armory-news-card--hotfix { --tag-color: #e8624a; }
+
+.armory-news-article {
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.armory-news-article__cover {
+  border: 1px solid var(--armory-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  aspect-ratio: 16 / 9;
+}
+
+.armory-news-article__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.armory-news-article__title {
+  color: var(--armory-heading);
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  margin-bottom: 0.35rem;
+}
+
+.armory-news-article__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.armory-news-article__date {
+  color: var(--armory-text-muted);
+  font-size: 0.85rem;
+}
+
+.armory-news-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #555;
+}
+
+.armory-news-tag--patch { background: #2f7dd1; }
+.armory-news-tag--announcement { background: #c8952f; }
+.armory-news-tag--expansion { background: #7a3fb0; }
+.armory-news-tag--event { background: #2e9e5b; }
+.armory-news-tag--update { background: #2aa198; }
+.armory-news-tag--hotfix { background: #c0392b; }
+
+.armory-news-article__body {
+  color: var(--armory-text);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.armory-news-article__body h1,
+.armory-news-article__body h2,
+.armory-news-article__body h3 {
+  color: var(--armory-heading);
+  margin: 1.2rem 0 0.5rem;
+  line-height: 1.25;
+}
+
+.armory-news-article__body p {
+  margin-bottom: 0.85rem;
+}
+
+.armory-news-article__body ul,
+.armory-news-article__body ol {
+  margin: 0 0 0.85rem 1.25rem;
+}
+
+.armory-news-article__body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+
+.armory-news-article__body a {
+  color: var(--armory-link);
+}
+
+.armory-news-article__body blockquote {
+  border-left: 3px solid var(--armory-border-bright);
+  padding-left: 1rem;
+  color: var(--armory-text-muted);
+  margin: 0 0 0.85rem;
+}
+
+@media screen and (max-width: 640px) {
+  .armory-news-card {
+    flex-direction: column;
+  }
+
+  .armory-news-card__cover {
+    flex-basis: auto;
+    max-width: none;
+    height: 140px;
+  }
+
+  .armory-news-card__cover::after {
+    background: linear-gradient(0deg, var(--armory-panel) 0%, transparent 45%);
+  }
 }

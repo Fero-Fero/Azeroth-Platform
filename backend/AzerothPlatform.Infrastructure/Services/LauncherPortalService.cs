@@ -266,6 +266,7 @@ public sealed class LauncherPortalService : ILauncherPortalService
         stack.LauncherSortOrder = profile.SortOrder;
         stack.RealmlistHostOverride = (profile.RealmlistHostOverride ?? string.Empty).Trim();
         stack.LauncherClientVersion = (profile.ClientVersion ?? string.Empty).Trim();
+        stack.LauncherTemplate = NormalizeTemplateId(profile.Template);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return await ToProfileConfigAsync(stack);
@@ -767,7 +768,8 @@ public sealed class LauncherPortalService : ILauncherPortalService
             RealmlistPort = stack.AuthServerPort,
             ClientVersion = stack.LauncherClientVersion,
             HasBackground = ResolveAsset(assetsDir, "background") is not null,
-            HasLogo = ResolveAsset(assetsDir, "logo") is not null
+            HasLogo = ResolveAsset(assetsDir, "logo") is not null,
+            Template = stack.LauncherTemplate ?? string.Empty
         });
     }
 

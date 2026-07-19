@@ -861,7 +861,6 @@ function StackDetailsPageContent() {
 
       {activeTab === 'client' && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Client Files</h2>
           <ClientTab stackId={stackId!} />
         </div>
       )}
@@ -923,7 +922,6 @@ function StackDetailsPageContent() {
 
       {activeTab === 'launcher' && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Launcher Profile</h2>
           <LauncherProfileTab stackId={stackId!} />
         </div>
       )}

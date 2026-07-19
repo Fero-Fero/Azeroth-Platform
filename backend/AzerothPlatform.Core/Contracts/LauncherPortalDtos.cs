@@ -285,4 +285,10 @@ public sealed class LauncherProfileConfigDto
 
     /// <summary>Whether this stack has uploaded a logo that overrides the global theme's logo.</summary>
     public bool HasLogo { get; set; }
+
+    /// <summary>
+    /// Per-stack style template override (<c>classic</c>/<c>tbc</c>/<c>wotlk</c>). Empty inherits the
+    /// global launcher theme from the platform Launcher settings.
+    /// </summary>
+    public string Template { get; set; } = string.Empty;
 }
