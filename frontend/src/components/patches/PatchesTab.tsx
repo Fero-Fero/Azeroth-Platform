@@ -21,6 +21,7 @@ import {
   useSavePatchDescription,
   useBootstrapIndividualProgression,
   useValidateIndividualProgressionPatches,
+  useProgressionSyncStatus,
   patchKeys,
 } from '@/hooks/usePatches'
 import { stackKeys } from '@/hooks/useStacks'
@@ -106,6 +107,18 @@ const PATCH_KINDS: { id: PatchKind; label: string; hint: string }[] = [
   { id: 'patch', label: 'Patch', hint: 'Release index (1.1, 2.3, …)' },
   { id: 'hotfix', label: 'Hotfix', hint: 'Sub-release index (1.1.1, 1.2.3, …)' },
 ]
+
+/** Built-in placeholder folders seeded before progression sync (see MigrationLayout on the backend). */
+const DEFAULT_PLACEHOLDER_PATCH_KEYS = new Set([
+  'patch 1.0',
+  'patch 2.0',
+  'patch 3.0',
+  'patch 4.0',
+  'patch 1',
+  'patch 2',
+  'patch 3',
+  'patch 4',
+])
 
 function parsePatchIndex(index: string): number[] {
   return index.split('.').map((part) => Number(part))
@@ -256,6 +269,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const validateMutation = useValidateIndividualProgressionPatches(stackId)
   const hasIpModule = overview?.hasIndividualProgressionModule ?? false
   const ipBootstrapped = hasIpModule && (overview?.individualProgressionBootstrapped ?? false)
+  const { data: progressionSyncStatus } = useProgressionSyncStatus(stackId)
 
   const [showCreate, setShowCreate] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -573,7 +587,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     try {
       const res = await bootstrapMutation.mutateAsync()
       setImportSummary(
-        `Prepared server-wide progression: ${res.data.templatesCreated} patch templates created. Import patch content, then run patch validation before applying.`
+        `Prepared server-wide progression: ${res.data.templatesCreated} patch templates created. Run Sync with mod-individual-progression below to import patches from Azeroth-Platform-Progression.`
       )
     } catch (err) {
       setActionError(extractError(err))
@@ -865,7 +879,24 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     (overview?.currentLevel ?? 0) === 0 &&
     !isApplying &&
     !overview?.individualProgressionBootstrapped
-  const showValidationPanel = true
+
+  const hasCompletedProgressionSync =
+    progressionSyncStatus?.hasCompletedInitialSync === true || !!progressionSyncStatus?.lastSyncAt
+
+  const hasMeaningfulPatchContent = (overview?.patches ?? []).some(
+    (patch) =>
+      !DEFAULT_PLACEHOLDER_PATCH_KEYS.has(patch.key.toLowerCase()) ||
+      patch.sqlCount + patch.dbcCount + patch.mapCount + patch.mpqCount > 0,
+  )
+
+  // Hide until progression sync replaces placeholders, or the operator has added real patch content.
+  const showValidationPanel =
+    hasIpModule &&
+    ipBootstrapped &&
+    (hasCompletedProgressionSync ||
+      hasMeaningfulPatchContent ||
+      ipValidationCurrent ||
+      validationResult !== null)
   const validationMode =
     validationResult?.mode ??
     (hasIpModule && (overview?.individualProgressionExpectedPatchCount ?? 0) > 0 ? 'Full' : 'ConfigOnly')

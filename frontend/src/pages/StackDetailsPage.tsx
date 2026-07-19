@@ -42,6 +42,7 @@ import InitialBuildRequiredPanel from '@/components/stacks/InitialBuildRequiredP
 import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import ModuleSetupWarnings from '@/components/modules/ModuleSetupWarnings'
+import { resolveArmoryBrowseUrl } from '@/lib/armory-network'
 import { CiBuildStatusBadge } from '@/components/CiBuildStatusBadge'
 import { useLauncherProfile } from '@/hooks/useLauncher'
 import { Eye, EyeOff, Copy, Play, Square, RotateCw, Hammer, Loader2 } from 'lucide-react'
@@ -68,21 +69,6 @@ const formatRelativeTime = (date: string | Date): string => {
   return time.toLocaleDateString()
 }
 
-const hostFromStackAddress = (value?: string | null): string => {
-  const raw = value?.trim()
-  if (!raw) return window.location.hostname
-  try {
-    const url = raw.includes('://') ? new URL(raw) : new URL(`http://${raw}`)
-    return url.hostname || window.location.hostname
-  } catch {
-    if (raw.startsWith('[')) {
-      const end = raw.indexOf(']')
-      return end > 0 ? raw.slice(1, end) : window.location.hostname
-    }
-    return raw.split(':')[0] || window.location.hostname
-  }
-}
-
 type StackTabId =
   | 'overview'
   | 'accounts'
@@ -105,7 +91,7 @@ type StackTabId =
   | 'logs'
   | 'docker'
 
-// Stack tabs grouped into nested categories. Single-tab groups (Overview, News, Server Config) act as
+// Stack tabs grouped into nested categories. Single-tab groups (Overview, Launcher, News) act as
 // standalone tabs; multi-tab groups render a secondary row of sub-tabs when active.
 const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: string }[] }[] = [
   { id: 'overview', label: 'Overview', tabs: [{ id: 'overview', label: 'Overview' }] },
@@ -113,14 +99,24 @@ const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: st
     id: 'client',
     label: 'Client',
     tabs: [
+      { id: 'client', label: 'Client Files' },
+      { id: 'addons', label: 'Addons' },
+    ],
+  },
+  {
+    id: 'server',
+    label: 'Server',
+    tabs: [
       { id: 'accounts', label: 'Accounts' },
       { id: 'characters', label: 'Characters' },
       { id: 'realms', label: 'Realms' },
-      { id: 'addons', label: 'Addons' },
-      { id: 'client', label: 'Client' },
-      { id: 'launcher', label: 'Launcher' },
+      { id: 'modules', label: 'Modules' },
+      { id: 'patches', label: 'Patches' },
+      { id: 'lua', label: 'Lua Scripts' },
+      { id: 'config', label: 'Server Config' },
     ],
   },
+  { id: 'launcher', label: 'Launcher', tabs: [{ id: 'launcher', label: 'Launcher' }] },
   {
     id: 'armory',
     label: 'Armory',
@@ -131,17 +127,7 @@ const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: st
       { id: 'armory-email', label: 'Email' },
     ],
   },
-  {
-    id: 'game',
-    label: 'Game',
-    tabs: [
-      { id: 'modules', label: 'Modules' },
-      { id: 'patches', label: 'Patches' },
-      { id: 'lua', label: 'Lua Scripts' },
-    ],
-  },
   { id: 'news', label: 'News', tabs: [{ id: 'news', label: 'News' }] },
-  { id: 'serverConfig', label: 'Server Config', tabs: [{ id: 'config', label: 'Server Config' }] },
   {
     id: 'advanced',
     label: 'Advanced',
@@ -220,6 +206,11 @@ function StackDetailsPageContent() {
   })
 
   const { data: diskUsage } = useDockerDiskUsage()
+  const { data: armoryNetwork } = useQuery({
+    queryKey: ['armory-network', stackId],
+    queryFn: () => stackApi.armoryNetwork(stackId!).then((res) => res.data),
+    enabled: !!stackId,
+  })
 
   // Calculate stack uptime based on earliest running container
   const stackUptime = useMemo(() => {
@@ -572,10 +563,12 @@ function StackDetailsPageContent() {
     (stack.status === StackStatus.Running ||
       stack.status === StackStatus.Degraded ||
       stack.status === StackStatus.Stopped)
-  const armoryHost = hostFromStackAddress(
-    launcherProfile?.effectiveRealmlistHost || stack.configuration.advanced.realmlistHost,
-  )
-  const armoryUrl = `http://${armoryHost}:${stack.armoryPort}`
+  const realmlistHost =
+    launcherProfile?.effectiveRealmlistHost || stack.configuration.advanced.realmlistHost
+  const armoryUrl =
+    armoryNetwork && stack.armoryPort > 0
+      ? resolveArmoryBrowseUrl(armoryNetwork.effectiveBindAddress, stack.armoryPort, realmlistHost)
+      : null
 
   const selectTab = (tab: StackTabId) => {
     setActiveTab(tab)
@@ -698,7 +691,7 @@ function StackDetailsPageContent() {
               {armoryStartMutation.isPending ? 'Starting Armory...' : 'Start Armory'}
             </button>
           )}
-          {stack.armoryRunning && stack.armoryPort > 0 && (
+          {stack.armoryRunning && armoryUrl && (
             <a
               href={armoryUrl}
               target="_blank"
@@ -869,7 +862,7 @@ function StackDetailsPageContent() {
 
       {activeTab === 'client' && (
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Client</h2>
+          <h2 className="text-xl font-semibold mb-4">Client Files</h2>
           <ClientTab stackId={stackId!} />
         </div>
       )}

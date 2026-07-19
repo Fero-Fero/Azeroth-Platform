@@ -931,6 +931,10 @@ public sealed class StackService : IStackService
             }
         }
 
+        // Port/bind changes affect portal.json URLs for every stack; push the full registry snapshot.
+        await RepushRegistrySafeAsync(cancellationToken);
+        await RescanStackClientSafeAsync(stackId, cancellationToken);
+
         return await GetArmoryNetworkAsync(stackId, cancellationToken);
     }
 

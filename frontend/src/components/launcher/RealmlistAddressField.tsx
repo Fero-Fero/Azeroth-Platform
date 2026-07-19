@@ -7,7 +7,7 @@ import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import { browserLanHost, detectBrowserLanIp, detectManagerLanHost, isPrivateIPv4 } from '@/lib/network'
 
 /**
- * Shared realmlist host editor used by both the stack Overview and the Client → Realms tab so the two
+ * Shared realmlist host editor used by both the stack Overview and the Server → Realms tab so the two
  * always stay in lockstep. Saving performs the full stack public-host update in one step:
  *   1. persists the stack's realmlist host override (survives restarts),
  *   2. applies it to the live realmlist DB and regenerated runtime env/config,

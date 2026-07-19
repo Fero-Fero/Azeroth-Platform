@@ -16,7 +16,7 @@ cp .env.example .env
 
 The manager stores all of its state in a Docker-managed named volume (`azeroth-platform-data`) and
 pushes every per-stack artifact into per-stack named volumes on the same Docker daemon. There is no
-host `data/` directory to create and no `HOST_DATA_PATH` to configure.
+host `data/` directory to create.
 
 ### 2. Build and run with Docker Compose
 
@@ -87,7 +87,7 @@ falls back to the id-only prefix.
 
 Per-stack runtime data (modules, config, logs, client base/overlay/cache, the `ac-client-data`
 volume) lives in **per-stack named volumes** seeded from the manager's data volume. Nothing is
-bind-mounted from a host filesystem path, so no `HOST_DATA_PATH` is required — the same model is used
+bind-mounted from a host filesystem path — the same model is used
 for both local and external (remote-engine) stacks.
 
 ## Environment Variables
@@ -260,7 +260,7 @@ per-stack launcher, writes **`config/*.json` overrides** into the matching serve
 folder (bind-mounted into the worldserver). A worldserver restart is triggered when config or Lua
 content changes. Because the manager talks to Docker via the socket, patch helper containers work
 against named volumes (seeded/fetched from the manager's data volume) rather than host bind mounts,
-so no `HOST_DATA_PATH` is involved.
+using named volumes rather than host bind mounts.
 
 Each SQL file is applied inside a single transaction (`START TRANSACTION` … `COMMIT`) with the
 mysql client left to abort on the first error, so a failing statement rolls back that whole file

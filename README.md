@@ -172,7 +172,7 @@ the raw Docker socket).
 ### Data model (named volumes)
 
 The manager drives the host Docker daemon through the allowlisted proxy and keeps everything in
-**Docker-managed named volumes** — there are no host bind mounts and no `HOST_DATA_PATH`:
+**Docker-managed named volumes** — there are no host bind mounts:
 
 - Manager state (SQLite DB, builds, client base, launcher builds/branding, custom modules) lives in
   the `azeroth-platform-data` volume at `/app/data`.
@@ -377,8 +377,8 @@ The root `.env` (copied from `.env.example`) configures the **platform/manager**
 | `STACK_DATAPLANE_BIND` | Host interface MySQL + SOAP bind to (management only). Default loopback; set to the Docker bridge gateway on a Linux host. |
 
 Game protocol ports (auth `3724`, world `8085`) are always published on all interfaces. The
-`ACORE_ARMORY_*` keys are per-stack defaults you normally manage from the stack UI. A **single
-server's** container variables are edited in that stack's
+Per-stack armory settings (`ACORE_ARMORY_*`) are documented in
+[`frontend-armory/.env.example`](./frontend-armory/.env.example) and managed from each stack's
 [Environment Variables](#configuration-configs--environment-variables) tab — a different scope from the
 platform `.env`.
 

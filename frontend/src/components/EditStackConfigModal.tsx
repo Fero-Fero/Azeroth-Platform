@@ -176,7 +176,7 @@ export default function EditStackConfigModal({ stack, onClose }: EditStackConfig
           <CollapsibleSection title={`Environment Variables (${envVarCount})`} expanded={expandedSections.environment} onToggle={() => toggleSection('environment')}>
             <div className="space-y-3">
               <p className="text-xs text-gray-500">
-                Environment variables are per-container. Compile-time module selection lives under Game → Modules.
+                Environment variables are per-container. Compile-time module selection lives under Server → Modules.
               </p>
 
               <ServiceEnvVarsEditor
@@ -192,7 +192,7 @@ export default function EditStackConfigModal({ stack, onClose }: EditStackConfig
             <ul className="list-inside list-disc space-y-1 text-sm text-gray-600">
               <li>Stack name and server type cannot be changed</li>
               <li>The stack will be restarted after saving (if running)</li>
-              <li>Compiled modules are managed from Game → Modules</li>
+              <li>Compiled modules are managed from Server → Modules</li>
             </ul>
           </div>
         </div>

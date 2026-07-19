@@ -33,8 +33,7 @@ services:
       # Manager's data directory (stacks, builds, manager database).
       # A Docker-managed named volume (not a host bind mount): the manager persists its own state
       # here, and every per-stack artifact is pushed from here into per-stack named volumes on the
-      # same daemon. This removes any dependency on a host filesystem path (HOST_DATA_PATH), so
-      # nested AzerothCore containers no longer need host-path translation.
+      # same daemon. Nested AzerothCore containers no longer need host-path translation.
       - azeroth-platform-data:/app/data
 
       # Live armory source overlaid on the baked-in copy (Dockerfile COPY frontend-armory/ ./armory-src/).

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Save, Upload, CheckCircle2, Trash2 } from 'lucide-react'
+import { Loader2, Save, Upload, CheckCircle2, Trash2, Eye, EyeOff } from 'lucide-react'
 import {
   useLauncherConfig,
   useLauncherProfile,
@@ -109,15 +109,59 @@ export default function LauncherProfileTab({ stackId }: { stackId: string }) {
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{formError}</div>
       )}
 
-      <label className="flex items-center gap-3">
-        <input
-          type="checkbox"
-          className="h-4 w-4"
-          checked={form.visible}
-          onChange={(e) => update({ visible: e.target.checked })}
-        />
-        <span className="font-medium text-gray-800">Show this server in the launcher</span>
-      </label>
+      <div
+        className={`rounded-lg border p-5 shadow-sm ${
+          form.visible ? 'border-green-200 bg-green-50/70' : 'border-amber-300 bg-amber-50'
+        }`}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-3">
+            <div
+              className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                form.visible ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {form.visible ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold text-gray-900">Launcher visibility</h3>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    form.visible ? 'bg-green-100 text-green-800' : 'bg-amber-200 text-amber-950'
+                  }`}
+                >
+                  {form.visible ? 'Visible to players' : 'Hidden from launcher'}
+                </span>
+              </div>
+              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-gray-700">
+                {form.visible ? (
+                  <>
+                    Players can select this server in the desktop launcher. It is included in the shared
+                    server list that is pushed to every visible stack.
+                  </>
+                ) : (
+                  <>
+                    This server is <strong>not listed</strong> in the desktop launcher and is omitted from
+                    the cross-stack server registry. Enable visibility below and click{' '}
+                    <strong>Save profile</strong> to make it appear for players.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <label className="inline-flex shrink-0 cursor-pointer items-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-3 shadow-sm transition hover:bg-gray-50">
+            <input
+              type="checkbox"
+              className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+              checked={form.visible}
+              onChange={(e) => update({ visible: e.target.checked })}
+            />
+            <span className="text-sm font-semibold text-gray-900">Show this server in the launcher</span>
+          </label>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label className="block">

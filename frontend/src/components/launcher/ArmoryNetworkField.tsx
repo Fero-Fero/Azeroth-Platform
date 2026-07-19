@@ -4,6 +4,7 @@ import { Loader2, Save, CheckCircle2, AlertCircle, Globe2 } from 'lucide-react'
 import { stackApi } from '@/services/api'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import type { ArmoryNetworkConfig } from '@/types/stack.types'
+import { resolveArmoryBrowseUrl } from '@/lib/armory-network'
 
 type BindMode = 'inherit' | 'all' | 'local' | 'custom'
 
@@ -95,7 +96,7 @@ export default function ArmoryNetworkField({ stackId }: { stackId: string }) {
     }
   }
 
-  const effectiveUrl = `http://${data.effectiveBindAddress === '0.0.0.0' ? '<this-host-ip>' : data.effectiveBindAddress}:${data.armoryPort}`
+  const effectiveUrl = resolveArmoryBrowseUrl(data.effectiveBindAddress, data.armoryPort)
 
   return (
     <div>
