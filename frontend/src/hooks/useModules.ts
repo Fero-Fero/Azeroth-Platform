@@ -121,3 +121,35 @@ export function useDeleteModule() {
     onSuccess: invalidate,
   })
 }
+
+export function useCommunityModules(params: {
+  search?: string
+  sort?: string
+  page?: number
+  pageSize?: number
+  enabled?: boolean
+}) {
+  const { search, sort, page = 1, pageSize = 20, enabled = true } = params
+  return useQuery({
+    queryKey: ['community-modules', search ?? '', sort ?? 'stars', page, pageSize],
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () =>
+      (
+        await moduleApi.community({
+          search: search?.trim() || undefined,
+          sort: sort || 'stars',
+          page,
+          pageSize,
+        })
+      ).data,
+  })
+}
+
+export function useImportCommunityModule() {
+  const invalidate = useInvalidateModules()
+  return useMutation({
+    mutationFn: async (repository: string) => (await moduleApi.importCommunity(repository)).data,
+    onSuccess: invalidate,
+  })
+}

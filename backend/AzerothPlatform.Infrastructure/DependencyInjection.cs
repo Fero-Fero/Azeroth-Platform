@@ -80,6 +80,8 @@ public static class DependencyInjection
         services.AddScoped<IBuildService, BuildService>();
         services.AddSingleton<IModulePackageStorage, ModulePackageStorage>();
         services.AddScoped<IModuleCatalogService, ModuleCatalogService>();
+        services.AddScoped<ICommunityModuleCatalogService, CommunityModuleCatalogService>();
+        services.AddMemoryCache();
         services.AddScoped<IModuleConfigService, ModuleConfigService>();
         services.AddSingleton<IServiceEnvTemplateService, ServiceEnvTemplateService>();
         services.AddSingleton<IServerTypeCatalog, ServerTypeCatalog>();

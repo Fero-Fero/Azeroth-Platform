@@ -366,6 +366,26 @@ export interface ModuleDto {
   requiredModuleIds?: string[]
 }
 
+export interface CommunityModuleDto {
+  id: string
+  name: string
+  description: string
+  repository: string
+  branch: string
+  stars: number
+  forks: number
+  updatedAt?: string | null
+  inPlatformCatalog: boolean
+  isBuiltIn: boolean
+}
+
+export interface CommunityModuleListResult {
+  items: CommunityModuleDto[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 // Payload for creating/updating a git-sourced custom catalog module
 export interface SaveModuleRequest {
   id: string

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { AlertCircle, Check, ExternalLink, Loader2, Lock, Package } from 'lucide-react'
 import type { WizardForm } from '@/components/wizard/types'
-import { useModules, useServerTypes } from '@/hooks/useModules'
+import CommunityModulesBrowser from '@/components/modules/CommunityModulesBrowser'
+import ModuleBrowseTabs, { type ModuleBrowseTab } from '@/components/modules/ModuleBrowseTabs'
+import { useCommunityModules, useModules, useServerTypes } from '@/hooks/useModules'
 import { applyModuleToggle, isModuleLocked, moduleLockReason } from '@/lib/module-dependencies'
 import {
   isServerTypeRequiredModule,
@@ -20,13 +22,16 @@ export function ModulesStep({ form }: ModulesStepProps) {
   const serverType = watch('serverType')
   const selectedIds = watch('moduleIds')
   const [search, setSearch] = useState('')
+  const [browseTab, setBrowseTab] = useState<ModuleBrowseTab>('curated')
 
   const { data: modules, isLoading, isError } = useModules(serverType)
   const { data: serverTypes } = useServerTypes()
+  const { data: communityPreview } = useCommunityModules({
+    page: 1,
+    pageSize: 1,
+    enabled: browseTab === 'community',
+  })
 
-  // The backend already filters the catalog to modules that are valid for the chosen server type. If the
-  // user switches type after selecting modules, drop any selection that is no longer offered so we never
-  // submit an incompatible module (e.g. Individual Progression selected, then type changed to Standard).
   useEffect(() => {
     if (!modules) return
     const availableIds = new Set(modules.map((module) => module.id))
@@ -49,7 +54,9 @@ export function ModulesStep({ form }: ModulesStepProps) {
     { serverType, serverTypes, selectedIds },
   )
 
-  // Module-specific env var defaults to inject when a module is toggled on
+  const recommendedModules = filtered.filter((module) => module.recommended)
+  const otherCuratedModules = filtered.filter((module) => !module.recommended)
+
   const MODULE_ENV_DEFAULTS: Record<string, Record<string, string>> = {
     'mod-ah-bot': { AC_AUCTION_HOUSE_BOT_GUIDS: '' },
   }
@@ -67,12 +74,26 @@ export function ModulesStep({ form }: ModulesStepProps) {
     const isRemoving = selectedIds.includes(id)
     setValue('moduleIds', next, { shouldDirty: true })
 
-    // Auto-inject module-specific env var defaults when module is enabled. Module env vars are
-    // worldserver.conf (AC_*) overrides, so they live in the per-service worldserver bucket.
     if (!isRemoving && MODULE_ENV_DEFAULTS[id]) {
       const services = (form.getValues('advanced.serviceEnvVars') as Record<string, Record<string, string>>) ?? {}
       const worldserver = services['worldserver'] ?? {}
-      const merged = { ...MODULE_ENV_DEFAULTS[id], ...worldserver } // existing values win (don't overwrite)
+      const merged = { ...MODULE_ENV_DEFAULTS[id], ...worldserver }
+      form.setValue('advanced.serviceEnvVars', { ...services, worldserver: merged }, { shouldDirty: true })
+    }
+  }
+
+  const addCommunityModule = (moduleId: string) => {
+    if (selectedIds.includes(moduleId)) {
+      return
+    }
+
+    const next = applyModuleToggle(moduleId, selectedIds, modules ?? []) ?? [...selectedIds, moduleId]
+    setValue('moduleIds', next, { shouldDirty: true })
+
+    if (MODULE_ENV_DEFAULTS[moduleId]) {
+      const services = (form.getValues('advanced.serviceEnvVars') as Record<string, Record<string, string>>) ?? {}
+      const worldserver = services['worldserver'] ?? {}
+      const merged = { ...MODULE_ENV_DEFAULTS[moduleId], ...worldserver }
       form.setValue('advanced.serviceEnvVars', { ...services, worldserver: merged }, { shouldDirty: true })
     }
   }
@@ -82,12 +103,25 @@ export function ModulesStep({ form }: ModulesStepProps) {
       <div>
         <h2 className="text-xl font-semibold text-gray-900">Modules</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Select optional AzerothCore modules to include in your build. Only modules compatible with the
-          selected server type are shown.
+          Pick curated platform modules or browse the wider AzerothCore community catalogue.
         </p>
       </div>
 
-      {serverType === ServerType.IndividualProgression && (
+      {selectedIds.length > 0 && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm text-blue-900">
+          <span className="font-medium">{selectedIds.length}</span> module{selectedIds.length !== 1 ? 's' : ''}{' '}
+          selected for this stack.
+        </div>
+      )}
+
+      <ModuleBrowseTabs
+        active={browseTab}
+        onChange={setBrowseTab}
+        curatedCount={modules?.length}
+        communityCount={communityPreview?.total}
+      />
+
+      {serverType === ServerType.IndividualProgression && browseTab === 'curated' && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 space-y-2">
           <p className="text-violet-800">
             After creating the stack, you will be prompted to <strong>disable playerbots</strong> before
@@ -109,110 +143,199 @@ export function ModulesStep({ form }: ModulesStepProps) {
         </div>
       )}
 
-      <input
-        type="search"
-        placeholder="Search modules…"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        aria-label="Search modules"
-      />
+      {browseTab === 'community' ? (
+        <CommunityModulesBrowser selectedIds={selectedIds} onAdd={addCommunityModule} />
+      ) : (
+        <div className="rounded-xl border border-blue-100 bg-slate-50/80 p-4">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-slate-800">Curated modules</p>
+              <p className="text-xs text-slate-500">
+                Tested and filtered for your server type ({modules?.length ?? 0} available).
+              </p>
+            </div>
+            <input
+              type="search"
+              placeholder="Search curated modules…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="block w-full max-w-xs rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Search curated modules"
+            />
+          </div>
 
-      {isLoading && (
-        <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-500">
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-          Loading modules…
-        </div>
-      )}
+          {isLoading && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
+              <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+              Loading modules…
+            </div>
+          )}
 
-      {isError && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>
-            Modules could not be loaded. You can continue — the module list will be available once the backend is running.
-          </span>
-        </div>
-      )}
+          {isError && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                Modules could not be loaded. You can continue — the module list will be available once the backend is running.
+              </span>
+            </div>
+          )}
 
-      {!isLoading && !isError && filtered.length === 0 && (
-        <p className="py-6 text-center text-sm text-gray-400">
-          {search ? 'No modules match your search.' : 'No modules available.'}
-        </p>
-      )}
+          {!isLoading && !isError && filtered.length === 0 && (
+            <p className="py-6 text-center text-sm text-slate-400">
+              {search ? 'No modules match your search.' : 'No modules available.'}
+            </p>
+          )}
 
-      {!isLoading && !isError && filtered.length > 0 && (
-        <ul className="grid gap-2" role="list" aria-label="Available modules">
-          {filtered.map((module) => {
-            const isSelected = selectedIds.includes(module.id)
-            const requiredByServerType = isServerTypeRequiredModule(module.id, serverType, serverTypes)
-            const locked =
-              (isSelected && requiredByServerType) ||
-              isModuleLocked(module.id, selectedIds, modules ?? [])
-            const lockReason = requiredByServerType
-              ? 'Required for this server type'
-              : moduleLockReason(module.id, selectedIds, modules ?? [])
+          {!isLoading && !isError && filtered.length > 0 && (
+            <div className="space-y-4">
+              {recommendedModules.length > 0 && (
+                <CuratedModuleSection
+                  title="Recommended"
+                  items={recommendedModules}
+                  selectedIds={selectedIds}
+                  serverType={serverType}
+                  serverTypes={serverTypes}
+                  catalogModules={modules ?? []}
+                  onToggle={toggle}
+                />
+              )}
 
-            return (
-              <li key={module.id} className="min-w-0">
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={isSelected}
-                  aria-disabled={locked}
-                  onClick={() => toggle(module.id)}
-                  className={cn(
-                    'flex w-full items-start gap-3 rounded-lg border-2 p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
-                    isSelected ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300',
-                    locked && 'cursor-not-allowed opacity-90'
-                  )}
-                >
-                  <div
-                    className={cn(
-                      'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2',
-                      isSelected ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'
-                    )}
-                    aria-hidden="true"
-                  >
-                    {locked ? (
-                      <Lock className="h-3 w-3 text-white" />
-                    ) : (
-                      isSelected && <Check className="h-3 w-3 text-white" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Package className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
-                      <span className="text-sm font-medium text-gray-900">{module.name}</span>
-                      {module.recommended && <RecommendedBadge />}
+              {otherCuratedModules.length > 0 &&
+                (recommendedModules.length > 0 ? (
+                  <details className="group rounded-lg border border-slate-200 bg-white/70">
+                    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-slate-700 marker:content-none">
+                      <span className="inline-flex items-center gap-2">
+                        Show all curated modules
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                          {otherCuratedModules.length}
+                        </span>
+                      </span>
+                    </summary>
+                    <div className="border-t border-slate-100 px-2 pb-2 pt-1">
+                      <CuratedModuleSection
+                        title="All curated"
+                        items={otherCuratedModules}
+                        compact
+                        selectedIds={selectedIds}
+                        serverType={serverType}
+                        serverTypes={serverTypes}
+                        catalogModules={modules ?? []}
+                        onToggle={toggle}
+                      />
                     </div>
-                    <p className="mt-0.5 wrap-break-word text-xs text-gray-500">{module.description}</p>
-                    {lockReason && <p className="mt-1 text-xs text-amber-700">{lockReason}</p>}
-                  </div>
-                  {module.repository && (
-                    <a
-                      href={module.repository}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(event) => event.stopPropagation()}
-                      className="mt-0.5 shrink-0 text-gray-400 hover:text-blue-600"
-                      aria-label={`View ${module.name} repository`}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                    </a>
-                  )}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {selectedIds.length > 0 && (
-        <p className="text-xs text-gray-500">
-          {selectedIds.length} module{selectedIds.length !== 1 ? 's' : ''} selected
-        </p>
+                  </details>
+                ) : (
+                  <CuratedModuleSection
+                    title="Curated modules"
+                    items={otherCuratedModules}
+                    selectedIds={selectedIds}
+                    serverType={serverType}
+                    serverTypes={serverTypes}
+                    catalogModules={modules ?? []}
+                    onToggle={toggle}
+                  />
+                ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
+  )
+}
+
+function CuratedModuleSection({
+  title,
+  items,
+  compact = false,
+  selectedIds,
+  serverType,
+  serverTypes,
+  catalogModules,
+  onToggle,
+}: {
+  title: string
+  items: NonNullable<ReturnType<typeof useModules>['data']>
+  compact?: boolean
+  selectedIds: string[]
+  serverType: ServerType
+  serverTypes: ReturnType<typeof useServerTypes>['data']
+  catalogModules: NonNullable<ReturnType<typeof useModules>['data']>
+  onToggle: (id: string) => void
+}) {
+  if (items.length === 0) {
+    return null
+  }
+
+  return (
+    <section>
+      {!compact && <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h4>}
+      <ul className="grid gap-2" role="list" aria-label={title}>
+        {items.map((module) => {
+          const isSelected = selectedIds.includes(module.id)
+          const requiredByServerType = isServerTypeRequiredModule(module.id, serverType, serverTypes)
+          const locked =
+            (isSelected && requiredByServerType) ||
+            isModuleLocked(module.id, selectedIds, catalogModules)
+          const lockReason = requiredByServerType
+            ? 'Required for this server type'
+            : moduleLockReason(module.id, selectedIds, catalogModules)
+
+          return (
+            <li key={module.id} className="min-w-0">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={isSelected}
+                aria-disabled={locked}
+                onClick={() => onToggle(module.id)}
+                className={cn(
+                  'flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50/80 shadow-sm'
+                    : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30',
+                  locked && 'cursor-not-allowed opacity-90',
+                )}
+              >
+                <div
+                  className={cn(
+                    'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2',
+                    isSelected ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white',
+                  )}
+                  aria-hidden="true"
+                >
+                  {locked ? (
+                    <Lock className="h-3 w-3 text-white" />
+                  ) : (
+                    isSelected && <Check className="h-3 w-3 text-white" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Package className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                    <span className="text-sm font-medium text-slate-900">{module.name}</span>
+                    {module.recommended && <RecommendedBadge />}
+                  </div>
+                  <p className="mt-0.5 wrap-break-word text-xs text-slate-500">{module.description}</p>
+                  {lockReason && <p className="mt-1 text-xs text-amber-700">{lockReason}</p>}
+                </div>
+                {module.repository && (
+                  <a
+                    href={module.repository}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                    className="mt-0.5 shrink-0 text-slate-400 hover:text-blue-600"
+                    aria-label={`View ${module.name} repository`}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  </a>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 

@@ -14,15 +14,18 @@ namespace AzerothPlatform.Api.Controllers;
 public class ModulesController : ControllerBase
 {
     private readonly IModuleCatalogService _moduleCatalogService;
+    private readonly ICommunityModuleCatalogService _communityModuleCatalogService;
     private readonly IModuleConfigService _moduleConfigService;
     private readonly IServiceEnvTemplateService _serviceEnvTemplateService;
 
     public ModulesController(
         IModuleCatalogService moduleCatalogService,
+        ICommunityModuleCatalogService communityModuleCatalogService,
         IModuleConfigService moduleConfigService,
         IServiceEnvTemplateService serviceEnvTemplateService)
     {
         _moduleCatalogService = moduleCatalogService;
+        _communityModuleCatalogService = communityModuleCatalogService;
         _moduleConfigService = moduleConfigService;
         _serviceEnvTemplateService = serviceEnvTemplateService;
     }
@@ -51,6 +54,33 @@ public class ModulesController : ControllerBase
         var modules = await _moduleCatalogService.ListAllAsync(cancellationToken);
         return Ok(modules);
     }
+
+    /// <summary>Browses modules from the AzerothCore community catalogue (GitHub topic metadata).</summary>
+    [HttpGet("community")]
+    public async Task<ActionResult<CommunityModuleListResult>> GetCommunityModules(
+        [FromQuery] string? search,
+        [FromQuery] string? sort,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await _communityModuleCatalogService.ListAsync(search, sort, page, pageSize, cancellationToken);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { error = $"Failed to load community module catalogue: {ex.Message}" });
+        }
+    }
+
+    /// <summary>Imports a community module into the platform catalog so it can be selected on stacks.</summary>
+    [HttpPost("community/import")]
+    public Task<IActionResult> ImportCommunityModule(
+        [FromBody] ImportCommunityModuleRequest request,
+        CancellationToken cancellationToken)
+        => Execute(() => _communityModuleCatalogService.ImportAsync(request.Repository, cancellationToken));
 
     /// <summary>Adds a custom module cloned from a git repository.</summary>
     [HttpPost]

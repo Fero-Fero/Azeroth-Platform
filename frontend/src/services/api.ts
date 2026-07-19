@@ -313,6 +313,12 @@ export const moduleApi = {
 
   readme: (moduleId: string) =>
     apiClient.get<import('@/types/stack.types').ModuleReadmeDto>(`/modules/${encodeURIComponent(moduleId)}/readme`),
+
+  community: (params?: { search?: string; sort?: string; page?: number; pageSize?: number }) =>
+    apiClient.get<import('@/types/stack.types').CommunityModuleListResult>('/modules/community', { params }),
+
+  importCommunity: (repository: string) =>
+    apiClient.post<import('@/types/stack.types').ModuleDto>('/modules/community/import', { repository }),
 }
 
 // Server-type catalog API (selectable variants in the stack wizard)
