@@ -217,6 +217,30 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
         Big uploads are streamed to disk and may take a while depending on your connection.
       </p>
 
+      <p className="text-xs text-gray-500">
+        Need more addons? Browse the{' '}
+        <a
+          href="https://github.com/TrinityCore/wow_335a_addons"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800"
+        >
+          TrinityCore wow_335a_addons collection
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+        , or check out{' '}
+        <a
+          href="https://github.com/NoM0Re/WoW-3.3.5a-Addons"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800"
+        >
+          NoM0Re WoW-3.3.5a-Addons
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+        {' '}on GitHub — download a .zip and upload it above.
+      </p>
+
       {message && (
         <div className="bg-red-50 border border-red-200 rounded-md px-3 py-2 text-sm text-red-700">
           {message}

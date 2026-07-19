@@ -36,17 +36,6 @@ public sealed class AddonService : IAddonService
     [
         new()
         {
-            Id = "questie-335",
-            Name = "Questie (3.3.5a)",
-            Description = "Quest helper that pins quest objectives, turn-ins, and available quests on the map and minimap. AzerothCore-compatible 3.3.5a port.",
-            Category = "Quests",
-            DownloadUrl = "https://github.com/Aldori15/Questie/archive/refs/heads/335.zip",
-            Website = "https://github.com/Aldori15/Questie",
-            Folders = ["Questie-335"],
-            Recommended = true,
-        },
-        new()
-        {
             Id = "pfquest-wotlk",
             Name = "pfQuest (WotLK)",
             Description = "Lightweight quest helper and database browser. Automatically pins relevant NPCs, mobs, and objects when you pick up a quest.",
@@ -129,6 +118,17 @@ public sealed class AddonService : IAddonService
             DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOver-WoW_3.3.5.zip",
             Website = "https://github.com/celguar/wow-voiceover",
             Folders = ["AI_VoiceOver"],
+        },
+        new()
+        {
+            Id = "questie-335",
+            Name = "Questie (3.3.5a)",
+            Description = "Quest helper that pins quest objectives, turn-ins, and available quests on the map and minimap. AzerothCore-compatible 3.3.5a port.",
+            Category = "Quests",
+            DownloadUrl = "https://github.com/Aldori15/Questie/archive/refs/heads/335.zip",
+            Website = "https://github.com/Aldori15/Questie",
+            Folders = ["Questie-335"],
+            Recommended = false,
         },
         new()
         {
@@ -270,6 +270,12 @@ public sealed class AddonService : IAddonService
                     ParentAddonId = a.ParentAddonId,
                 };
             })
+            .Where(a => IsVisibleForStack(a, stackModuleIds, stackServerType, stackId))
+            .ToList();
+
+        var visibleIds = catalog.Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        catalog = catalog
+            .Where(a => string.IsNullOrWhiteSpace(a.ParentAddonId) || visibleIds.Contains(a.ParentAddonId))
             .OrderByDescending(a => a.Recommended)
             .ThenByDescending(a => a.Suggested)
             .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
@@ -283,13 +289,32 @@ public sealed class AddonService : IAddonService
         var entry = BuiltInAddons.FirstOrDefault(a => string.Equals(a.Id, addonId, StringComparison.OrdinalIgnoreCase))
             ?? throw new KeyNotFoundException($"Unknown catalog addon: {addonId}");
 
+        var addonsDir = ResolveAddonsDir(stackId);
+        var (stackModuleIds, stackServerType) = await LoadStackContextAsync(stackId, cancellationToken);
+        var installed = entry.Folders.Count > 0 && entry.Folders.Any(f => Directory.Exists(Path.Combine(addonsDir, f)));
+        if (!IsVisibleForStack(
+                new AddonCatalogEntryDto
+                {
+                    Id = entry.Id,
+                    Installed = installed,
+                    RelatedModuleIds = entry.RelatedModuleIds,
+                    RelatedServerTypes = entry.RelatedServerTypes,
+                    ParentAddonId = entry.ParentAddonId,
+                },
+                stackModuleIds,
+                stackServerType,
+                stackId))
+        {
+            throw new InvalidOperationException(
+                $"Catalog addon '{addonId}' is not available for this stack. Install the related server module first.");
+        }
+
         // Only https downloads from the trusted static catalog are allowed (no arbitrary/user URLs).
         if (!Uri.TryCreate(entry.DownloadUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             throw new InvalidOperationException($"Catalog addon '{addonId}' has an invalid download URL.");
         }
 
-        var addonsDir = ResolveAddonsDir(stackId);
         Directory.CreateDirectory(addonsDir);
 
         var tempZip = Path.GetTempFileName();
@@ -305,9 +330,9 @@ public sealed class AddonService : IAddonService
                 await src.CopyToAsync(dst, cancellationToken);
             }
 
-            var installed = InstallArchive(tempZip, addonsDir, entry.InstallAsFolder, cancellationToken);
+            var folderCount = InstallArchive(tempZip, addonsDir, entry.InstallAsFolder, cancellationToken);
             _logger.LogInformation(
-                "Installed catalog addon {AddonId} ({Count} folder(s)) into {Dir}", addonId, installed, addonsDir);
+                "Installed catalog addon {AddonId} ({Count} folder(s)) into {Dir}", addonId, folderCount, addonsDir);
         }
         finally
         {
@@ -373,6 +398,49 @@ public sealed class AddonService : IAddonService
         var serverTypeName = stackServerType.Value.ToString();
         return entry.RelatedServerTypes.Any(
             related => string.Equals(related, serverTypeName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Module- or server-type-specific catalog entries are hidden until the stack matches, except when
+    /// already installed so operators can reinstall or manage the files.
+    /// </summary>
+    private static bool IsVisibleForStack(
+        AddonCatalogEntryDto entry,
+        HashSet<string> stackModuleIds,
+        ServerType? stackServerType,
+        string? stackId)
+    {
+        if (entry.Installed)
+        {
+            return true;
+        }
+
+        var moduleGated = entry.RelatedModuleIds.Count > 0;
+        var serverTypeGated = entry.RelatedServerTypes.Count > 0;
+        if (!moduleGated && !serverTypeGated)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(stackId))
+        {
+            return false;
+        }
+
+        if (moduleGated
+            && entry.RelatedModuleIds.Any(id => stackModuleIds.Contains(id, StringComparer.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (serverTypeGated && stackServerType is not null)
+        {
+            var serverTypeName = stackServerType.Value.ToString();
+            return entry.RelatedServerTypes.Any(
+                related => string.Equals(related, serverTypeName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
     }
 
     private string ResolveAddonsDir(string? stackId)
