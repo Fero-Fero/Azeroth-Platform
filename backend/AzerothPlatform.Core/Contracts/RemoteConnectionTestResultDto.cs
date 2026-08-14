@@ -13,4 +13,7 @@ public class RemoteConnectionTestResultDto
 
     /// <summary>Remote Docker server version, when the probe succeeded.</summary>
     public string? ServerVersion { get; set; }
+
+    /// <summary>Individual prerequisite checks (SSH, Docker Engine, Docker Compose, …).</summary>
+    public List<RemotePrerequisiteCheckDto> Prerequisites { get; set; } = new();
 }

@@ -88,8 +88,85 @@ public class SystemController : ControllerBase
         return Ok(new NetworkInfoDto
         {
             Addresses = addresses,
-            SuggestedRealmlistHost = suggested
+            SuggestedRealmlistHost = suggested,
+            SuggestedAdminSourceCidr = ResolveClientSourceCidr()
         });
+    }
+
+    /// <summary>Client IP for cloud SG SSH source hints (respects X-Forwarded-For when present).</summary>
+    private string? ResolveClientSourceCidr()
+    {
+        var ip = ResolveClientIpAddress();
+        if (ip is null || !IsUsableAdminSourceIp(ip))
+        {
+            return null;
+        }
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        return ip.AddressFamily switch
+        {
+            AddressFamily.InterNetwork => $"{ip}/32",
+            AddressFamily.InterNetworkV6 => $"{ip}/128",
+            _ => null
+        };
+    }
+
+    private static bool IsUsableAdminSourceIp(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip))
+        {
+            return false;
+        }
+
+        if (ip.AddressFamily != AddressFamily.InterNetwork)
+        {
+            return true;
+        }
+
+        var bytes = ip.GetAddressBytes();
+        if (bytes[0] == 10)
+        {
+            return false;
+        }
+
+        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+        {
+            return false;
+        }
+
+        if (bytes[0] == 192 && bytes[1] == 168)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private IPAddress? ResolveClientIpAddress()
+    {
+        var forwarded = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(forwarded))
+        {
+            foreach (var hop in forwarded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (IPAddress.TryParse(hop, out var forwardedIp) && IsUsableAdminSourceIp(forwardedIp))
+                {
+                    return forwardedIp;
+                }
+            }
+        }
+
+        var remote = HttpContext.Connection.RemoteIpAddress;
+        if (remote is not null && IsUsableAdminSourceIp(remote))
+        {
+            return remote;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -176,16 +253,70 @@ public class SystemController : ControllerBase
     /// <summary>Probes an external Docker host over SSH using the supplied connection details.</summary>
     [HttpPost("test-remote-connection")]
     public async Task<ActionResult<RemoteConnectionTestResultDto>> TestRemoteConnection(
-        [FromBody] DeploymentConfigDto deployment,
+        [FromBody] RemoteConnectionTestRequestDto request,
         CancellationToken cancellationToken)
     {
+        var deployment = request.Deployment ?? new DeploymentConfigDto();
         var result = await _remoteEngine.TestConnectionAsync(
             deployment.ExternalHost,
             deployment.ExternalSshPort,
             deployment.ExternalSshUser,
             deployment.ExternalSshPrivateKey,
+            request.Phase,
             cancellationToken);
 
         return Ok(result);
+    }
+
+    /// <summary>Runs first-time Docker provisioning on a remote VPC host over SSH.</summary>
+    [HttpPost("provision-remote-host")]
+    public async Task<ActionResult<RemoteSetupResultDto>> ProvisionRemoteHost(
+        [FromBody] RemoteProvisionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var deployment = request.Deployment ?? new DeploymentConfigDto();
+        var options = request.Options ?? new RemoteSetupOptionsDto();
+        var result = await _remoteEngine.ProvisionRemoteHostAsync(
+            deployment.ExternalHost,
+            deployment.ExternalSshPort,
+            deployment.ExternalSshUser,
+            deployment.ExternalSshPrivateKey,
+            options,
+            cancellationToken);
+
+        return Ok(result);
+    }
+
+    /// <summary>Catalog of VPC security roles for external stack deployment.</summary>
+    [HttpGet("vpc-security-roles")]
+    public ActionResult<VpcSecurityCatalogDto> GetVpcSecurityRoles()
+        => Ok(VpcSecurityCatalog.CreateCatalog());
+
+    /// <summary>Suggested firewall rules before stack ports are fully known.</summary>
+    [HttpGet("vpc-security-profile")]
+    public ActionResult<VpcSecurityProfileDto> GetVpcSecurityProfile(
+        [FromQuery] string host,
+        [FromQuery] int authPort = 3724,
+        [FromQuery] int worldPort = 8085,
+        [FromQuery] int armoryPort = StackNetworkDefaults.DefaultArmoryPort,
+        [FromQuery] int clientPort = StackNetworkDefaults.DefaultClientPort,
+        [FromQuery] int databasePort = 3306,
+        [FromQuery] int soapPort = 7878,
+        [FromQuery] int sshPort = 22)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return BadRequest("host is required.");
+        }
+
+        return Ok(VpcSecurityCatalog.BuildProfile(
+            host.Trim(),
+            authPort,
+            worldPort,
+            armoryPort,
+            clientPort,
+            databasePort,
+            soapPort,
+            sshPort));
     }
 }

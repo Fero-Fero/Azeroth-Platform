@@ -10,7 +10,7 @@ public sealed class MigrationOptions
     /// <summary>
     /// Docker image (built from <c>wdbx/Dockerfile</c>) used to import CSV into DBC files via Wine.
     /// </summary>
-    public string WdbxImage { get; set; } = "azerothcore-wdbx:latest";
+    public string WdbxImage { get; set; } = "azerothcore-wdbx:mono";
 
     /// <summary>
     /// Lightweight image (built from <c>mpqtool/Dockerfile</c>) used to pack compiled DBC files into a

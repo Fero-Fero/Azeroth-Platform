@@ -158,7 +158,10 @@ export default function DockerTab({ stackId }: DockerTabProps) {
     return (
       <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         <AlertCircle className="mr-2 inline h-4 w-4" />
-        {errorMessage(error)}
+        {errorMessage(
+          error,
+          'For external stacks the manager queries the remote Docker engine over SSH — this usually takes 15–60 seconds.',
+        )}
       </div>
     )
   }

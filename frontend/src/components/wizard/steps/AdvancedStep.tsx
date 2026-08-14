@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, Settings2 } from 'lucide-react'
+import { Settings2 } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
 import { ModuleConfigModal } from '@/components/wizard/ModuleConfigModal'
 import { ServiceEnvVarsEditor } from '@/components/wizard/ServiceEnvVarsEditor'
@@ -7,7 +7,7 @@ import type { WizardForm } from '@/components/wizard/types'
 import { useServiceEnvTemplates } from '@/hooks/useModules'
 import { cn } from '@/lib/utils'
 import { systemApi } from '@/services/api'
-import { DeploymentTarget, type RemoteConnectionTestResultDto } from '@/types/stack.types'
+import { DeploymentTarget } from '@/types/stack.types'
 import type { ServiceEnvVars } from '@/types/serviceEnv'
 import { browserLanHost, detectManagerLanHost } from '@/lib/network'
 
@@ -33,8 +33,6 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
   const deploymentTarget = watch('deployment.target')
   const realmlistHost = watch('advanced.realmlistHost')
   const [suggestedHost, setSuggestedHost] = useState<string>('')
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<RemoteConnectionTestResultDto | null>(null)
 
   // Suggest the host's LAN IP for the realmlist host so LAN clients can connect out of the box.
   useEffect(() => {
@@ -62,26 +60,6 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleTestConnection = useCallback(async () => {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const res = await systemApi.testRemoteConnection({
-        target: DeploymentTarget.External,
-        externalHost: watch('deployment.externalHost') ?? '',
-        externalSshPort: Number(watch('deployment.externalSshPort')) || 22,
-        externalSshUser: watch('deployment.externalSshUser') ?? '',
-        externalSshPrivateKey: watch('deployment.externalSshPrivateKey') ?? '',
-      })
-      setTestResult(res.data)
-    } catch {
-      setTestResult({ success: false, message: 'Failed to reach the platform to run the test.' })
-    } finally {
-      setTesting(false)
-    }
-  }, [watch])
-
-  // Build module name mapping
   const moduleNames: Record<string, string> = {
     'mod-autobalance': 'Auto Balance',
     'mod-playerbots': 'Playerbots',
@@ -199,148 +177,6 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
             </span>
           </span>
         </label>
-      </div>
-
-      <div className="rounded-lg border border-gray-200 p-4">
-        <div className="mb-3">
-          <span className="text-sm font-medium text-gray-700">Deployment</span>
-          <p className="text-xs text-gray-500">
-            Where this stack&rsquo;s containers run. External stacks are built locally and shipped to a
-            remote Docker host over SSH.
-          </p>
-        </div>
-
-        <div className="flex gap-3">
-          {[
-            { value: DeploymentTarget.Local, label: 'Local', desc: 'Runs on this machine' },
-            { value: DeploymentTarget.External, label: 'External', desc: 'Runs on a remote host' },
-          ].map((option) => (
-            <label
-              key={option.value}
-              className={cn(
-                'flex flex-1 cursor-pointer flex-col rounded-md border px-3 py-2 text-sm',
-                deploymentTarget === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-              )}
-            >
-              <span className="flex items-center gap-2 font-medium text-gray-800">
-                <input
-                  type="radio"
-                  value={option.value}
-                  checked={deploymentTarget === option.value}
-                  onChange={() => setValue('deployment.target', option.value, { shouldDirty: true, shouldValidate: true })}
-                />
-                {option.label}
-              </span>
-              <span className="ml-5 text-xs text-gray-500">{option.desc}</span>
-            </label>
-          ))}
-        </div>
-
-        {deploymentTarget === DeploymentTarget.External && (
-          <div className="mt-4 space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="sm:col-span-2">
-                <FormField
-                  label="Remote Host"
-                  htmlFor="external-host"
-                  error={errors.deployment?.externalHost?.message}
-                  hint="Public IP or DNS of the droplet/instance"
-                  required
-                >
-                  <input
-                    id="external-host"
-                    type="text"
-                    className={cn(
-                      'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                      errors.deployment?.externalHost ? 'border-red-400' : 'border-gray-300'
-                    )}
-                    {...register('deployment.externalHost')}
-                  />
-                </FormField>
-              </div>
-              <FormField
-                label="SSH Port"
-                htmlFor="external-ssh-port"
-                error={errors.deployment?.externalSshPort?.message}
-              >
-                <input
-                  id="external-ssh-port"
-                  type="number"
-                  min={1}
-                  max={65535}
-                  className={cn(
-                    'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                    errors.deployment?.externalSshPort ? 'border-red-400' : 'border-gray-300'
-                  )}
-                  {...register('deployment.externalSshPort', { valueAsNumber: true })}
-                />
-              </FormField>
-            </div>
-
-            <FormField
-              label="SSH User"
-              htmlFor="external-ssh-user"
-              error={errors.deployment?.externalSshUser?.message}
-              required
-            >
-              <input
-                id="external-ssh-user"
-                type="text"
-                className={cn(
-                  'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  errors.deployment?.externalSshUser ? 'border-red-400' : 'border-gray-300'
-                )}
-                {...register('deployment.externalSshUser')}
-              />
-            </FormField>
-
-            <FormField
-              label="SSH Private Key"
-              htmlFor="external-ssh-key"
-              error={errors.deployment?.externalSshPrivateKey?.message}
-              hint="PEM-encoded private key with access to the remote host. Stored on the platform at rest."
-              required
-            >
-              <textarea
-                id="external-ssh-key"
-                rows={5}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                className={cn(
-                  'block w-full rounded-md border px-3 py-2 font-mono text-xs shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  errors.deployment?.externalSshPrivateKey ? 'border-red-400' : 'border-gray-300'
-                )}
-                {...register('deployment.externalSshPrivateKey')}
-              />
-            </FormField>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={testing}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-              >
-                {testing && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                Test connection
-              </button>
-              {testResult && (
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1.5 text-xs',
-                    testResult.success ? 'text-green-700' : 'text-red-700'
-                  )}
-                >
-                  {testResult.success ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : (
-                    <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  {testResult.message}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       <div>

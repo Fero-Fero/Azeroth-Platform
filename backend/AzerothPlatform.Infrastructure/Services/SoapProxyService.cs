@@ -3,6 +3,7 @@ using System.Text;
 using System.Xml.Linq;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Data;
+using AzerothPlatform.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -16,17 +17,20 @@ public class SoapProxyService : ISoapProxyService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly AzerothCoreDbContext _dbContext;
+    private readonly IRemoteEngineService _remoteEngine;
     private readonly ILogger<SoapProxyService> _logger;
     private readonly string _soapHost;
 
     public SoapProxyService(
         IHttpClientFactory httpClientFactory,
         AzerothCoreDbContext dbContext,
+        IRemoteEngineService remoteEngine,
         ILogger<SoapProxyService> logger,
         IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory;
         _dbContext = dbContext;
+        _remoteEngine = remoteEngine;
         _logger = logger;
         _soapHost = configuration["SOAP:Host"] ?? "localhost";
     }
@@ -50,13 +54,21 @@ public class SoapProxyService : ISoapProxyService
             throw new InvalidOperationException($"Stack '{stackId}' not found");
         }
 
-        // Use configured host (localhost for local dev, host.docker.internal for Docker). External
-        // stacks run on a remote engine, so target their public host instead.
-        var host = stack.DeploymentTarget == Core.Contracts.DeploymentTarget.External
-                   && !string.IsNullOrWhiteSpace(stack.ExternalHost)
-            ? stack.ExternalHost
-            : _soapHost;
-        var soapUrl = $"http://{host}:{stack.SoapPort}/";
+        string host;
+        int port;
+        if (stack.DeploymentTarget == Core.Contracts.DeploymentTarget.External)
+        {
+            var endpoint = await _remoteEngine.GetManagementTunnelEndpointAsync(stack, stack.SoapPort, cancellationToken);
+            host = endpoint.Host;
+            port = endpoint.Port;
+        }
+        else
+        {
+            host = _soapHost;
+            port = stack.SoapPort;
+        }
+
+        var soapUrl = $"http://{host}:{port}/";
         var soapEnvelope = BuildSoapEnvelope(command, stack.SoapUsername, stack.SoapPassword);
 
         _logger.LogInformation("Executing SOAP command on stack {StackId} via {SoapUrl}: {Command}", stackId, soapUrl, command);

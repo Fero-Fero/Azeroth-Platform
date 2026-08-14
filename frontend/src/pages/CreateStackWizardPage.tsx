@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { StepIndicator, type WizardStep } from '@/components/wizard/StepIndicator'
 import { WizardNavigation } from '@/components/wizard/WizardNavigation'
 import { AdvancedStep } from '@/components/wizard/steps/AdvancedStep'
+import { DeploymentStep } from '@/components/wizard/steps/DeploymentStep'
 import { DatabaseStep } from '@/components/wizard/steps/DatabaseStep'
 import { EmailConfirmationStep } from '@/components/wizard/steps/EmailConfirmationStep'
 import { ModulesStep } from '@/components/wizard/steps/ModulesStep'
@@ -17,7 +18,7 @@ import { useWizardDraft } from '@/hooks/useWizardDraft'
 import { useCreateStack, useStacks } from '@/hooks/useStacks'
 import { wizardSchema, WIZARD_DEFAULTS, STEP_TRIGGER_FIELDS_BY_ID, EMAIL_STEP_TRIGGER_FIELDS, type WizardFormData } from '@/schemas/wizard.schemas'
 import { validationApi, buildApi } from '@/services/api'
-import { ServerType } from '@/types/stack.types'
+import { ServerType, DeploymentTarget } from '@/types/stack.types'
 import type {
   PortFieldPath,
   StackConfigurationDto,
@@ -27,6 +28,7 @@ import type {
 } from '@/types/stack.types'
 
 const BASE_STEPS: WizardStep[] = [
+  { id: 'deployment', label: 'Deployment' },
   { id: 'server-config', label: 'Server' },
   { id: 'modules', label: 'Modules' },
   { id: 'database', label: 'Database' },
@@ -98,6 +100,7 @@ export default function CreateStackWizardPage() {
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [suggestedPorts, setSuggestedPorts] = useState<SuggestedPorts>({})
   const [isValidating, setIsValidating] = useState(false)
+  const [deploymentStepError, setDeploymentStepError] = useState<string | null>(null)
   const [showResumeBanner, setShowResumeBanner] = useState(() => initialDraft !== null)
   const [pendingDraft, setPendingDraft] = useState<{ data: Partial<WizardFormData>; step: number } | null>(
     () => initialDraft
@@ -208,10 +211,23 @@ export default function CreateStackWizardPage() {
       }
     }
 
+    if (
+      targetStep > currentStep
+      && activeStep?.id === 'deployment'
+      && form.getValues('deployment.target') === DeploymentTarget.External
+      && (!form.getValues('deployment.connectionVerified') || !form.getValues('deployment.cloudSecurityGroupAcknowledged'))
+    ) {
+      setDeploymentStepError(
+        'Complete first-time setup, verify remote prerequisites, and acknowledge the cloud security group checklist before continuing.'
+      )
+      return
+    }
+
     const values = form.getValues()
     saveDraft(values, targetStep)
     setCurrentStep(targetStep)
     setSubmitError(null)
+    setDeploymentStepError(null)
 
     if (targetStep === reviewStepIndex) {
       void validateWithBackend(values).then(result => {
@@ -359,6 +375,7 @@ export default function CreateStackWizardPage() {
         </div>
 
         <div className="min-h-[24rem] px-6 py-6">
+          {steps[currentStep]?.id === 'deployment' && <DeploymentStep form={form} />}
           {steps[currentStep]?.id === 'server-config' && <ServerConfigStep form={form} />}
           {steps[currentStep]?.id === 'modules' && <ModulesStep form={form} />}
           {steps[currentStep]?.id === 'database' && <DatabaseStep form={form} />}
@@ -380,6 +397,13 @@ export default function CreateStackWizardPage() {
           <div className="mx-6 mb-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
             <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
             {submitError}
+          </div>
+        )}
+
+        {deploymentStepError && (
+          <div className="mx-6 mb-4 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" role="alert">
+            <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {deploymentStepError}
           </div>
         )}
 

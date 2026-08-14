@@ -8,8 +8,9 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * Best-effort human-readable message from an API/axios error: prefers the server-provided
  * `response.data.error`, then the JS error `message`, then a generic fallback.
+ * Pass optional `networkContext` when a slow or remote operation may have timed out.
  */
-export function apiErrorMessage(err: unknown): string {
+export function apiErrorMessage(err: unknown, networkContext?: string): string {
   const anyErr = err as {
     response?: {
       data?: {
@@ -28,5 +29,10 @@ export function apiErrorMessage(err: unknown): string {
     if (first) return first
   }
   if (data?.title) return data.title
+  if (anyErr?.message === 'Network Error' && !anyErr?.response) {
+    const base =
+      'Could not reach the manager API (connection failed or timed out). Ensure the manager is running and retry.'
+    return networkContext ? `${base} ${networkContext}` : base
+  }
   return anyErr?.message ?? 'Something went wrong.'
 }

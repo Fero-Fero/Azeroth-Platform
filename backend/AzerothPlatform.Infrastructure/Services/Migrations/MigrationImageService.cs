@@ -81,6 +81,7 @@ public sealed class MigrationImageService : IMigrationImageService
         }
         Directory.CreateDirectory(workPath);
         CopyDirectory(sourcePath, workPath);
+        NormalizeShellScripts(workPath);
 
         // IMPORTANT: `docker build <context>` streams the context from the *client's* filesystem, not
         // the daemon's. Since this process runs inside the manager container, the context must be a
@@ -127,6 +128,24 @@ public sealed class MigrationImageService : IMigrationImageService
     {
         var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return parts.Any(p => p is "bin" or "obj" or ".git" or "node_modules" or "packages");
+    }
+
+    /// <summary>
+    /// Shell entrypoints copied from a Windows checkout may carry CRLF; Linux interprets the shebang
+    /// as <c>bash\r</c> and fails. Strip CR before <c>docker build</c>.
+    /// </summary>
+    private static void NormalizeShellScripts(string root)
+    {
+        foreach (var script in Directory.EnumerateFiles(root, "*.sh", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(script);
+            if (!text.Contains('\r'))
+            {
+                continue;
+            }
+
+            File.WriteAllText(script, text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal));
+        }
     }
 
     private static async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(

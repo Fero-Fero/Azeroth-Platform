@@ -1,6 +1,8 @@
 using System.Data.Common;
+using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Data;
+using AzerothPlatform.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using MySql.Data.MySqlClient;
@@ -13,11 +15,16 @@ namespace AzerothPlatform.Infrastructure.Data;
 public class MySqlConnectionFactory : IMySqlConnectionFactory
 {
     private readonly AzerothCoreDbContext _dbContext;
+    private readonly IRemoteEngineService _remoteEngine;
     private readonly string _mysqlHost;
 
-    public MySqlConnectionFactory(AzerothCoreDbContext dbContext, IConfiguration configuration)
+    public MySqlConnectionFactory(
+        AzerothCoreDbContext dbContext,
+        IRemoteEngineService remoteEngine,
+        IConfiguration configuration)
     {
         _dbContext = dbContext;
+        _remoteEngine = remoteEngine;
         _mysqlHost = configuration["MySQL:Host"] ?? "localhost";
     }
 
@@ -40,25 +47,54 @@ public class MySqlConnectionFactory : IMySqlConnectionFactory
             _ => throw new ArgumentException($"Unknown database type: {database}. Valid values are: auth, world, characters", nameof(database))
         };
 
-        // Connect to MySQL using configured host (localhost for local dev, host.docker.internal for Docker).
-        // The stack's MySQL containers expose their ports to the host. External stacks run on a remote
-        // engine, so target their public host (requires the DB port to be reachable on the remote).
-        var host = stack.DeploymentTarget == Core.Contracts.DeploymentTarget.External
-                   && !string.IsNullOrWhiteSpace(stack.ExternalHost)
-            ? stack.ExternalHost
-            : _mysqlHost;
+        string host;
+        uint port;
+        if (stack.DeploymentTarget == DeploymentTarget.External)
+        {
+            // External stacks: reach MySQL over an SSH tunnel so the DB port stays closed on the cloud SG.
+            var endpoint = await _remoteEngine.GetManagementTunnelEndpointAsync(stack, stack.DatabasePort, cancellationToken);
+            host = endpoint.Host;
+            port = (uint)endpoint.Port;
+        }
+        else
+        {
+            host = _mysqlHost;
+            port = (uint)stack.DatabasePort;
+        }
+
         var builder = new MySqlConnectionStringBuilder
         {
             Server = host,
-            Port = (uint)stack.DatabasePort,
+            Port = port,
             Database = dbName,
             UserID = "root",
             Password = stack.DatabaseRootPassword,
-            AllowPublicKeyRetrieval = true
+            AllowPublicKeyRetrieval = true,
+            ConnectionTimeout = 15,
         };
 
         var connection = new MySqlConnection(builder.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
+        try
+        {
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            connectCts.CancelAfter(TimeSpan.FromSeconds(20));
+            await connection.OpenAsync(connectCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Timed out connecting to MySQL for stack '{stackId}' at {host}:{port}. " +
+                "For external stacks, verify SSH access and that the database container is running on the remote host.");
+        }
+        catch (MySqlException ex)
+        {
+            throw new InvalidOperationException(
+                stack.DeploymentTarget == DeploymentTarget.External
+                    ? $"Could not connect to MySQL on the external stack via SSH tunnel ({host}:{port}): {ex.Message}"
+                    : $"Could not connect to MySQL at {host}:{port}: {ex.Message}",
+                ex);
+        }
+
         return connection;
     }
 }

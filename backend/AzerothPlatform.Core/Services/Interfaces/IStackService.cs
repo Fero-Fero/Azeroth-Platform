@@ -98,6 +98,12 @@ public interface IStackService
     /// </summary>
     Task<ArmoryNetworkConfigDto?> UpdateArmoryNetworkAsync(
         string stackId, ArmoryNetworkConfigDto config, CancellationToken cancellationToken = default);
+
+    /// <summary>Syncs Linux host firewall (ufw) rules for an external stack's player/web ports.</summary>
+    Task<RemoteSetupResultDto?> SyncVpcFirewallAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Suggested host/cloud firewall rules for an external stack.</summary>
+    Task<VpcSecurityProfileDto?> GetVpcSecurityProfileAsync(string stackId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Import a discovered stack into the manager database

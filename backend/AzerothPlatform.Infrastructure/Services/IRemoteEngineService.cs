@@ -94,10 +94,56 @@ public interface IRemoteEngineService
         int sshPort,
         string user,
         string privateKey,
+        RemoteConnectionTestPhase phase = RemoteConnectionTestPhase.Full,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs first-time provisioning on a remote host (Docker install/start, user group, verification).
+    /// Steps are executed sequentially over SSH; idempotent when Docker is already configured.
+    /// </summary>
+    Task<RemoteSetupResultDto> ProvisionRemoteHostAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        RemoteSetupOptionsDto options,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies or updates host firewall allow rules for the given player/web ports (Linux ufw).
+    /// </summary>
+    Task<RemoteSetupResultDto> SyncRemoteHostFirewallAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        RemoteSetupOptionsDto options,
         CancellationToken cancellationToken = default);
 
     /// <summary>Streams a local image (by tag) to the stack's remote engine via <c>docker save | docker load</c>.</summary>
     Task ShipImageAsync(ManagedStackEntity stack, string imageTag, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Populates a named volume from an uploaded archive stream. External stacks stream the bytes over
+    /// SSH into a throwaway work volume on the remote engine, extract there, and copy into the target
+    /// volume so the manager never stores the full client (~17 GB) locally.
+    /// </summary>
+    Task SeedVolumeFromArchiveStreamAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        Stream archiveStream,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes one file into a named volume by streaming bytes into a throwaway container (no manager
+    /// staging directory). Used when extracting unsupported archive formats entry-by-entry.
+    /// </summary>
+    Task WriteVolumeFileFromStreamAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string relativePath,
+        Stream content,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates the named volume on the stack's engine (if missing) and populates it with the contents of
@@ -234,6 +280,15 @@ public interface IRemoteEngineService
     Task EnsureVolumeExistsAsync(
         ManagedStackEntity? stack,
         string volumeName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a local <c>127.0.0.1:&lt;port&gt;</c> endpoint that forwards to a management port
+    /// (MySQL, SOAP) on an external stack's host over SSH. Keeps MySQL/SOAP off the public internet.
+    /// </summary>
+    Task<(string Host, int Port)> GetManagementTunnelEndpointAsync(
+        ManagedStackEntity stack,
+        int remotePort,
         CancellationToken cancellationToken = default);
 }
 

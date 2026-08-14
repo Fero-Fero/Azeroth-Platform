@@ -31,6 +31,31 @@ public static class DockerComposeOverrideGenerator
         return string.IsNullOrEmpty(slug) ? GetComposeProjectName(stackId) : $"acore-{slug}-{stackId}";
     }
 
+    /// <summary>
+    /// Resolves the fixed <c>container_name</c> for a compose service. Used before
+    /// <c>--force-recreate</c> to remove stale containers that would otherwise conflict with the
+    /// pinned name during in-place recreation.
+    /// </summary>
+    public static string? GetContainerNameForService(string stackId, string? stackName, string composeService)
+    {
+        var suffix = composeService switch
+        {
+            "frontend-armory" => "-armory",
+            "armory-assets" => "-armory-assets",
+            "client" => "-client",
+            "ac-database" => "-database",
+            "ac-db-import" => "-db-import",
+            "ac-client-data-init" => "-client-data-init",
+            "ac-worldserver" => "-worldserver",
+            "ac-authserver" => "-authserver",
+            "ac-tools" => "-tools",
+            "ac-dev-server" => "-dev-server",
+            _ => null,
+        };
+
+        return suffix is null ? null : $"{GetContainerPrefix(stackId, stackName)}{suffix}";
+    }
+
     /// <summary>Named docker volume that holds the modules tree for an external stack (pre-seeded on the remote).</summary>
     public static string ModulesVolumeName(string stackId) => $"acore-{stackId}-modules";
 
@@ -135,13 +160,13 @@ public static class DockerComposeOverrideGenerator
         AppendDbImportOverride(sb, stackId, $"{containerPrefix}-db-import", external);
         AppendWorldserverOverride(sb, stackId, containerPrefix, Bucket(serviceEnvironment, WorldserverService), includeLua, external);
         AppendAuthserverOverride(sb, stackId, containerPrefix, Bucket(serviceEnvironment, AuthserverService), external);
-        AppendServiceOverride(sb, "ac-client-data-init", $"{containerPrefix}-client-data-init");
+        AppendClientDataInitOverride(sb, stackId, $"{containerPrefix}-client-data-init", external);
         AppendServiceOverride(sb, "ac-tools", $"{containerPrefix}-tools");
         AppendServiceOverride(sb, "ac-dev-server", $"{containerPrefix}-dev-server");
 
         if (armory is not null)
         {
-            AppendArmoryService(sb, $"{containerPrefix}-armory", armory, Bucket(serviceEnvironment, ArmoryService));
+            AppendArmoryService(sb, $"{containerPrefix}-armory", armory, Bucket(serviceEnvironment, ArmoryService), external);
             if (assets)
             {
                 AppendArmoryAssetsService(sb, $"{containerPrefix}-armory-assets");
@@ -150,7 +175,7 @@ public static class DockerComposeOverrideGenerator
 
         if (client is not null)
         {
-            AppendClientService(sb, $"{containerPrefix}-client", client, Bucket(serviceEnvironment, ClientService));
+            AppendClientService(sb, $"{containerPrefix}-client", client, Bucket(serviceEnvironment, ClientService), external);
         }
 
         // All per-stack data lives in named volumes the manager creates and seeds (a daemon-side copy
@@ -198,10 +223,21 @@ public static class DockerComposeOverrideGenerator
     /// volumes (see the <c>volumes:</c> block).
     /// </summary>
     private static void AppendClientService(
-        StringBuilder sb, string containerName, ClientComposeOptions client, IReadOnlyDictionary<string, string> overrides)
+        StringBuilder sb,
+        string containerName,
+        ClientComposeOptions client,
+        IReadOnlyDictionary<string, string> overrides,
+        bool external)
     {
         sb.AppendLine("  client:");
-        sb.AppendLine($"    image: {client.ImageName}");
+        if (!external)
+        {
+            sb.AppendLine($"    image: {client.ImageName}");
+        }
+        else
+        {
+            AppendExternalImagePin(sb, client.ImageName);
+        }
         sb.AppendLine($"    container_name: {containerName}");
         sb.AppendLine("    restart: unless-stopped");
         // The container verifies player logins against the stack's auth DB over the host's published DB
@@ -286,13 +322,24 @@ public static class DockerComposeOverrideGenerator
     /// started/stopped explicitly (never by <c>up -d</c> of the whole stack unless requested).
     /// </summary>
     private static void AppendArmoryService(
-        StringBuilder sb, string containerName, ArmoryComposeOptions armory, IReadOnlyDictionary<string, string> overrides)
+        StringBuilder sb,
+        string containerName,
+        ArmoryComposeOptions armory,
+        IReadOnlyDictionary<string, string> overrides,
+        bool external)
     {
         var pw = armory.DbPassword;
         var publicUrl = string.IsNullOrWhiteSpace(armory.PlatformPublicUrl) ? armory.PlatformApiUrl : armory.PlatformPublicUrl;
 
         sb.AppendLine("  frontend-armory:");
-        sb.AppendLine($"    image: {armory.ImageName}");
+        if (!external)
+        {
+            sb.AppendLine($"    image: {armory.ImageName}");
+        }
+        else
+        {
+            AppendExternalImagePin(sb, armory.ImageName);
+        }
         sb.AppendLine($"    container_name: {containerName}");
         sb.AppendLine("    restart: unless-stopped");
         sb.AppendLine("    extra_hosts:");
@@ -563,10 +610,33 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine($"    container_name: {containerName}");
         if (external)
         {
-            // Pin the shipped image so the remote engine never tries to build from missing source.
-            sb.AppendLine($"    image: acore/ac-wotlk-db-import:{stackId}");
+            AppendExternalImagePin(sb, $"acore/ac-wotlk-db-import:{stackId}");
         }
     }
+
+    private static void AppendClientDataInitOverride(StringBuilder sb, string stackId, string containerName, bool external)
+    {
+        sb.AppendLine("  ac-client-data-init:");
+        sb.AppendLine($"    container_name: {containerName}");
+        if (external)
+        {
+            AppendExternalImagePin(sb, $"acore/ac-wotlk-client-data:{stackId}");
+        }
+    }
+
+    /// <summary>
+    /// Pins a pre-shipped image on external stacks and disables the base compose <c>build:</c> stanza so
+    /// the remote engine never tries to compile from missing source.
+    /// </summary>
+    private static void AppendExternalImagePin(StringBuilder sb, string image)
+    {
+        sb.AppendLine($"    image: {image}");
+        sb.AppendLine("    build: !reset null");
+        AppendNeverPullPolicy(sb);
+    }
+
+    private static void AppendNeverPullPolicy(StringBuilder sb)
+        => sb.AppendLine("    pull_policy: never");
 
     private static void AppendWorldserverOverride(
         StringBuilder sb,
@@ -580,12 +650,19 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine($"    container_name: {containerPrefix}-worldserver");
         if (external)
         {
-            sb.AppendLine($"    image: acore/ac-wotlk-worldserver:{stackId}");
+            AppendExternalImagePin(sb, $"acore/ac-wotlk-worldserver:{stackId}");
         }
 
         // Mount the modules directory (pre-seeded named volume) for SQL migrations, critical for modules
-        // like Playerbots.
+        // like Playerbots. External stacks repeat etc/logs/client-data here because the override block
+        // replaces the base compose volume list for this service.
         sb.AppendLine("    volumes:");
+        if (external)
+        {
+            sb.AppendLine("      - ${DOCKER_VOL_ETC}:/azerothcore/env/dist/etc");
+            sb.AppendLine("      - ${DOCKER_VOL_LOGS}:/azerothcore/env/dist/logs");
+            sb.AppendLine("      - ac-client-data:/azerothcore/env/dist/data:ro");
+        }
         sb.AppendLine("      - modules:/azerothcore/modules:ro");
 
         // Mount Lua scripts into Eluna's default ScriptPath (relative to the worldserver bin dir).
@@ -625,7 +702,7 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine($"    container_name: {containerPrefix}-authserver");
         if (external)
         {
-            sb.AppendLine($"    image: acore/ac-wotlk-authserver:{stackId}");
+            AppendExternalImagePin(sb, $"acore/ac-wotlk-authserver:{stackId}");
         }
         sb.AppendLine("    ports:");
         sb.AppendLine("      - \"${DOCKER_AUTH_EXTERNAL_PORT}:3724\"");

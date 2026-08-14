@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -24,6 +25,14 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private readonly ILogger<RemoteEngineService> _logger;
     private readonly DockerOptions _dockerOptions;
     private readonly ISecretProtector _secretProtector;
+    private readonly ConcurrentDictionary<string, ManagementTunnel> _managementTunnels = new(StringComparer.Ordinal);
+
+    private sealed class ManagementTunnel
+    {
+        public required Process Process { get; init; }
+        public required int LocalPort { get; init; }
+        public required int RemotePort { get; init; }
+    }
 
     public RemoteEngineService(
         ILogger<RemoteEngineService> logger,
@@ -65,15 +74,130 @@ public sealed class RemoteEngineService : IRemoteEngineService
         var privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
         WriteSshConfig(contextName, stack.ExternalHost.Trim(), stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort,
             stack.ExternalSshUser.Trim(), privateKey);
-        await EnsureDockerContextAsync(contextName, cancellationToken);
+        await EnsureDockerContextAsync(
+            contextName,
+            stack.ExternalSshUser.Trim(),
+            stack.ExternalHost.Trim(),
+            stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort,
+            cancellationToken);
         return contextName;
     }
 
     public async Task RemoveContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default)
     {
+        StopManagementTunnels(stack.Id);
         var contextName = GetContextName(stack.Id);
         await RunAsync("docker", $"context rm -f {contextName}", cancellationToken, throwOnError: false);
         RemoveSshConfigBlock(contextName);
+    }
+
+    public async Task<(string Host, int Port)> GetManagementTunnelEndpointAsync(
+        ManagedStackEntity stack,
+        int remotePort,
+        CancellationToken cancellationToken = default)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("Management tunnels are only used for external stacks.");
+        }
+
+        if (remotePort is <= 0 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(remotePort), remotePort, "Remote port must be between 1 and 65535.");
+        }
+
+        var tunnelKey = ManagementTunnelKey(stack.Id, remotePort);
+        if (_managementTunnels.TryGetValue(tunnelKey, out var existing) && IsTunnelAlive(existing))
+        {
+            return ("127.0.0.1", existing.LocalPort);
+        }
+
+        if (existing is not null)
+        {
+            StopManagementTunnel(tunnelKey, existing);
+        }
+
+        var contextName = await EnsureContextAsync(stack, cancellationToken);
+        var localPort = AllocateLocalPort();
+        var forward = $"127.0.0.1:{localPort}:127.0.0.1:{remotePort}";
+        var sshConfigPath = Path.Combine(GetSshDir(), "config");
+
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "ssh",
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("-F");
+        process.StartInfo.ArgumentList.Add(sshConfigPath);
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("BatchMode=yes");
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("ExitOnForwardFailure=yes");
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("ServerAliveInterval=15");
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("ServerAliveCountMax=4");
+        process.StartInfo.ArgumentList.Add("-N");
+        process.StartInfo.ArgumentList.Add("-L");
+        process.StartInfo.ArgumentList.Add(forward);
+        process.StartInfo.ArgumentList.Add(contextName);
+
+        if (!process.Start())
+        {
+            throw new InvalidOperationException($"Could not start SSH tunnel to remote port {remotePort}.");
+        }
+
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await Task.Delay(750, cancellationToken);
+        if (process.HasExited)
+        {
+            var err = (await stderrTask).Trim();
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(err)
+                    ? $"SSH tunnel to remote port {remotePort} exited immediately."
+                    : $"SSH tunnel to remote port {remotePort} failed: {err}");
+        }
+
+        var tunnel = new ManagementTunnel
+        {
+            Process = process,
+            LocalPort = localPort,
+            RemotePort = remotePort,
+        };
+        _managementTunnels[tunnelKey] = tunnel;
+        _ = stderrTask.ContinueWith(
+            t =>
+            {
+                if (process.HasExited)
+                {
+                    _managementTunnels.TryRemove(tunnelKey, out _);
+                    var err = t.IsCompletedSuccessfully ? t.Result.Trim() : string.Empty;
+                    if (!string.IsNullOrWhiteSpace(err))
+                    {
+                        _logger.LogWarning(
+                            "SSH management tunnel for stack {StackId} port {RemotePort} closed: {Err}",
+                            stack.Id,
+                            remotePort,
+                            err);
+                    }
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        _logger.LogDebug(
+            "Opened SSH management tunnel for stack {StackId}: localhost:{LocalPort} -> remote:{RemotePort}",
+            stack.Id,
+            localPort,
+            remotePort);
+
+        return ("127.0.0.1", localPort);
     }
 
     public async Task<RemoteConnectionTestResultDto> TestConnectionAsync(
@@ -81,6 +205,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         int sshPort,
         string user,
         string privateKey,
+        RemoteConnectionTestPhase phase = RemoteConnectionTestPhase.Full,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
@@ -88,11 +213,22 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return new RemoteConnectionTestResultDto { Success = false, Message = "Host and SSH user are required." };
         }
 
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            return new RemoteConnectionTestResultDto { Success = false, Message = "SSH private key is required." };
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+        var checkSsh = phase is RemoteConnectionTestPhase.Full or RemoteConnectionTestPhase.SshOnly;
+        var checkPrerequisites = phase is RemoteConnectionTestPhase.Full or RemoteConnectionTestPhase.PrerequisitesOnly;
+
         // SSRF guard: refuse to dial loopback / link-local / cloud-metadata targets. This endpoint takes a
         // caller-supplied host, so without this an admin (or a stolen token) could use the manager to reach
         // internal-only services or the 169.254.169.254 metadata endpoint. Private LAN ranges are allowed
         // because legitimate remote Docker engines commonly live on a private network.
-        if (await IsDisallowedRemoteHostAsync(host.Trim(), cancellationToken))
+        if (await IsDisallowedRemoteHostAsync(host, cancellationToken))
         {
             return new RemoteConnectionTestResultDto
             {
@@ -104,39 +240,150 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         // Use a throwaway context name so a pre-create test doesn't collide with a real stack context.
         var contextName = $"acore-ext-test-{Guid.NewGuid():N}";
+        var prerequisites = new List<RemotePrerequisiteCheckDto>();
         try
         {
-            WriteSshConfig(contextName, host.Trim(), sshPort <= 0 ? 22 : sshPort, user.Trim(), privateKey ?? string.Empty);
-            await EnsureDockerContextAsync(contextName, cancellationToken);
-
-            var (exit, stdout, stderr) = await RunAsync(
-                "docker",
-                $"--context {contextName} version --format {{{{.Server.Version}}}}",
-                cancellationToken,
-                throwOnError: false);
-
-            if (exit == 0)
+            WriteSshConfig(contextName, host, port, user, privateKey);
+            if (checkPrerequisites)
             {
-                var version = stdout.Trim();
+                await EnsureDockerContextAsync(contextName, user, host, port, cancellationToken);
+            }
+
+            if (checkSsh)
+            {
+                var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+                if (sshExit != 0)
+                {
+                    prerequisites.Add(new RemotePrerequisiteCheckDto
+                    {
+                        Name = "SSH",
+                        Passed = false,
+                        Message = FormatSshError(sshStderr, host, user, port)
+                    });
+                    return new RemoteConnectionTestResultDto
+                    {
+                        Success = false,
+                        Message = "SSH connection failed from the platform. Your key may work in a local terminal " +
+                                  "but the manager process could not reach the host (check host/user/port, key paste, " +
+                                  "and outbound SSH from the platform container).",
+                        Prerequisites = prerequisites
+                    };
+                }
+
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "SSH",
+                    Passed = true,
+                    Message = "Connected to the remote host."
+                });
+
+                if (phase == RemoteConnectionTestPhase.SshOnly)
+                {
+                    return new RemoteConnectionTestResultDto
+                    {
+                        Success = true,
+                        Message = "SSH connection successful.",
+                        Prerequisites = prerequisites
+                    };
+                }
+            }
+
+            if (!checkPrerequisites)
+            {
                 return new RemoteConnectionTestResultDto
                 {
-                    Success = true,
-                    ServerVersion = version,
-                    Message = string.IsNullOrWhiteSpace(version)
-                        ? "Connected to the remote Docker engine."
-                        : $"Connected to remote Docker engine {version}."
+                    Success = prerequisites.All(p => p.Passed),
+                    Message = prerequisites.All(p => p.Passed) ? "Connection checks passed." : "Connection checks failed.",
+                    Prerequisites = prerequisites
                 };
             }
 
+            // Probe Docker on the remote host over the same SSH session (matches `ssh … docker info` on EC2).
+            var (remoteDockerExit, remoteDockerOut, remoteDockerErr) = await RunSshAsync(
+                contextName,
+                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                cancellationToken);
+
+            if (remoteDockerExit != 0)
+            {
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Docker Engine",
+                    Passed = false,
+                    Message = FormatRemoteDockerError(remoteDockerErr, host, user, port)
+                });
+                return new RemoteConnectionTestResultDto
+                {
+                    Success = false,
+                    Message = "SSH works, but the remote Docker engine is not available. On a fresh EC2 Ubuntu " +
+                              "instance install Docker and add the SSH user to the docker group " +
+                              $"(sudo usermod -aG docker {user}; log out and back in), or run First Time Setup.",
+                    Prerequisites = prerequisites
+                };
+            }
+
+            var version = remoteDockerOut.Trim();
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Docker Engine",
+                Passed = true,
+                Message = string.IsNullOrWhiteSpace(version) ? "Docker engine is running." : $"Docker {version}"
+            });
+
+            var (composeExit, composeStdout, composeStderr) = await RunSshAsync(
+                contextName,
+                ["docker", "compose", "version", "--short"],
+                cancellationToken);
+
+            if (composeExit != 0)
+            {
+                var composeMessage = FormatRemoteDockerError(
+                    composeStderr,
+                    host,
+                    user,
+                    port,
+                    fallback: "Docker Compose plugin is not installed on the remote host.");
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Docker Compose",
+                    Passed = false,
+                    Message = composeMessage
+                });
+                return new RemoteConnectionTestResultDto
+                {
+                    Success = false,
+                    ServerVersion = version,
+                    Message = "Remote host has Docker but Docker Compose is missing.",
+                    Prerequisites = prerequisites
+                };
+            }
+
+            var composeVersion = composeStdout.Trim();
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Docker Compose",
+                Passed = true,
+                Message = string.IsNullOrWhiteSpace(composeVersion) ? "Docker Compose is available." : $"Compose {composeVersion}"
+            });
+
             return new RemoteConnectionTestResultDto
             {
-                Success = false,
-                Message = string.IsNullOrWhiteSpace(stderr) ? "Failed to reach the remote Docker engine." : stderr.Trim()
+                Success = true,
+                ServerVersion = version,
+                Message = string.IsNullOrWhiteSpace(version)
+                    ? "Remote host is ready for deployment."
+                    : $"Remote host is ready (Docker {version}).",
+                Prerequisites = prerequisites
             };
         }
         catch (Exception ex)
         {
-            return new RemoteConnectionTestResultDto { Success = false, Message = ex.Message };
+            return new RemoteConnectionTestResultDto
+            {
+                Success = false,
+                Message = ex.Message,
+                Prerequisites = prerequisites
+            };
         }
         finally
         {
@@ -144,6 +391,583 @@ public sealed class RemoteEngineService : IRemoteEngineService
             RemoveSshConfigBlock(contextName);
         }
     }
+
+    public Task<RemoteSetupResultDto> ProvisionRemoteHostAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        CancellationToken cancellationToken = default)
+        => ProvisionRemoteHostAsync(host, sshPort, user, privateKey, new RemoteSetupOptionsDto { SshPort = sshPort <= 0 ? 22 : sshPort }, cancellationToken);
+
+    public async Task<RemoteSetupResultDto> ProvisionRemoteHostAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        RemoteSetupOptionsDto options,
+        CancellationToken cancellationToken = default)
+    {
+        options ??= new RemoteSetupOptionsDto();
+        if (options.RemoteOs == RemoteHostOs.Windows)
+        {
+            return new RemoteSetupResultDto
+            {
+                Success = false,
+                Message = "Automated setup for Windows remote hosts is not supported yet. Use Linux (Ubuntu/Debian)."
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
+        {
+            return new RemoteSetupResultDto { Success = false, Message = "Host and SSH user are required." };
+        }
+
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            return new RemoteSetupResultDto { Success = false, Message = "SSH private key is required." };
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+        options.SshPort = options.SshPort <= 0 ? port : options.SshPort;
+        user = SanitizeSshToken(user, "user");
+
+        if (await IsDisallowedRemoteHostAsync(host, cancellationToken))
+        {
+            return new RemoteSetupResultDto
+            {
+                Success = false,
+                Message = "The specified host is not an allowed remote engine target (loopback and " +
+                          "link-local/metadata addresses are blocked)."
+            };
+        }
+
+        var contextName = $"acore-ext-setup-{Guid.NewGuid():N}";
+        var steps = new List<RemotePrerequisiteCheckDto>();
+        try
+        {
+            WriteSshConfig(contextName, host, port, user, privateKey);
+
+            var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Verify SSH access",
+                Passed = sshExit == 0,
+                Message = sshExit == 0
+                    ? "Connected to the remote host."
+                    : FormatSshError(sshStderr, host, user, port)
+            });
+            if (sshExit != 0)
+            {
+                return FailSetup(steps, "SSH connection failed. Fix credentials before running setup.");
+            }
+
+            var dockerReady = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
+            if (dockerReady.Ready)
+            {
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Setting up Docker",
+                    Passed = true,
+                    Message = string.IsNullOrWhiteSpace(dockerReady.Version)
+                        ? "Docker is already installed and running."
+                        : $"Docker {dockerReady.Version} is already running (Compose {dockerReady.ComposeVersion})."
+                });
+            }
+            else
+            {
+                var dockerSteps = await InstallLinuxDockerAsync(contextName, user, steps, cancellationToken);
+                if (dockerSteps is not null)
+                {
+                    return dockerSteps;
+                }
+            }
+
+            if (options.EnableUnattendedUpgrades)
+            {
+                await RunLinuxSecurityBaselinesAsync(contextName, steps, cancellationToken);
+            }
+
+            if (options.EnableHostFirewall)
+            {
+                var firewallResult = await ApplyLinuxHostFirewallAsync(contextName, host, user, port, options, steps, cancellationToken);
+                if (firewallResult is not null)
+                {
+                    return firewallResult;
+                }
+            }
+
+            var finalDocker = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
+            if (!finalDocker.Ready)
+            {
+                return FailSetup(steps, "Docker is not ready after setup.");
+            }
+
+            return new RemoteSetupResultDto
+            {
+                Success = true,
+                ServerVersion = finalDocker.Version,
+                Message = string.IsNullOrWhiteSpace(finalDocker.Version)
+                    ? "Remote host is ready for deployment."
+                    : $"Remote host is ready (Docker {finalDocker.Version}).",
+                Steps = steps
+            };
+        }
+        catch (Exception ex)
+        {
+            return new RemoteSetupResultDto
+            {
+                Success = false,
+                Message = ex.Message,
+                Steps = steps
+            };
+        }
+        finally
+        {
+            RemoveSshConfigBlock(contextName);
+        }
+    }
+
+    public async Task<RemoteSetupResultDto> SyncRemoteHostFirewallAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        RemoteSetupOptionsDto options,
+        CancellationToken cancellationToken = default)
+    {
+        options ??= new RemoteSetupOptionsDto();
+        if (options.RemoteOs == RemoteHostOs.Windows)
+        {
+            return new RemoteSetupResultDto { Success = false, Message = "Windows host firewall sync is not supported yet." };
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+        user = SanitizeSshToken(user, "user");
+        var contextName = $"acore-ext-fw-{Guid.NewGuid():N}";
+        var steps = new List<RemotePrerequisiteCheckDto>();
+        try
+        {
+            WriteSshConfig(contextName, host, port, user, privateKey);
+            if (!options.EnableHostFirewall)
+            {
+                return new RemoteSetupResultDto
+                {
+                    Success = true,
+                    Message = "Host firewall updates are disabled.",
+                    Steps = steps
+                };
+            }
+
+            var result = await ApplyLinuxHostFirewallAsync(contextName, host, user, port, options, steps, cancellationToken);
+            if (result is not null)
+            {
+                return result;
+            }
+
+            return new RemoteSetupResultDto
+            {
+                Success = true,
+                Message = "Host firewall rules are up to date.",
+                Steps = steps
+            };
+        }
+        catch (Exception ex)
+        {
+            return new RemoteSetupResultDto { Success = false, Message = ex.Message, Steps = steps };
+        }
+        finally
+        {
+            RemoveSshConfigBlock(contextName);
+        }
+    }
+
+    private async Task<RemoteSetupResultDto?> InstallLinuxDockerAsync(
+        string contextName,
+        string user,
+        List<RemotePrerequisiteCheckDto> steps,
+        CancellationToken cancellationToken)
+    {
+        var (aptExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "command -v apt-get >/dev/null 2>&1",
+            cancellationToken);
+        if (aptExit != 0)
+        {
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Setting up Docker",
+                Passed = false,
+                Message = "Automatic setup supports Ubuntu/Debian hosts (apt-get). Install Docker manually on this OS."
+            });
+            return FailSetup(steps, "Automatic Docker setup is not supported on this operating system.");
+        }
+
+        var setupCommands = new (string Label, string Command)[]
+        {
+            ("Update package lists", SudoAptGet("update -qq")),
+            ("Install Docker Engine & Compose", SudoAptGet("install -y docker.io docker-compose-v2")),
+            ("Start Docker service", SudoNonInteractive("systemctl start docker")),
+            ("Enable Docker on boot", SudoNonInteractive("systemctl enable docker")),
+            ("Grant Docker access to SSH user", SudoNonInteractive($"usermod -aG docker {user}")),
+        };
+
+        foreach (var (label, command) in setupCommands)
+        {
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, command, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = label,
+                Passed = exit == 0,
+                Message = exit == 0 ? SummarizeRemoteOutput(stdout, label) : FormatRemoteShellError(stderr, stdout)
+            });
+            if (exit != 0)
+            {
+                return FailSetup(steps, $"Setup stopped at “{label}”. See the step detail below.");
+            }
+        }
+
+        var (verifyExit, verifyOut, verifyErr) = await RunSshAsync(
+            contextName,
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Verify Docker Engine",
+            Passed = verifyExit == 0,
+            Message = verifyExit == 0
+                ? (string.IsNullOrWhiteSpace(verifyOut.Trim()) ? "Docker engine is responding." : $"Docker {verifyOut.Trim()} is running.")
+                : FormatRemoteDockerError(verifyErr, string.Empty, user, 22)
+        });
+        if (verifyExit != 0)
+        {
+            return FailSetup(steps, "Docker was installed but the SSH user still cannot reach the engine.");
+        }
+
+        var (composeExit, composeOut, composeErr) = await RunSshAsync(
+            contextName,
+            ["docker", "compose", "version", "--short"],
+            cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Verify Docker Compose",
+            Passed = composeExit == 0,
+            Message = composeExit == 0
+                ? (string.IsNullOrWhiteSpace(composeOut.Trim()) ? "Docker Compose is available." : $"Compose {composeOut.Trim()}.")
+                : FormatRemoteDockerError(composeErr, string.Empty, user, 22, fallback: "Docker Compose plugin is missing.")
+        });
+        if (composeExit != 0)
+        {
+            return FailSetup(steps, "Docker Engine is running but Docker Compose is not available.");
+        }
+
+        return null;
+    }
+
+    private async Task RunLinuxSecurityBaselinesAsync(
+        string contextName,
+        List<RemotePrerequisiteCheckDto> steps,
+        CancellationToken cancellationToken)
+    {
+        if (await IsUnattendedUpgradesEnabledAsync(contextName, cancellationToken))
+        {
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "OS security baselines",
+                Passed = true,
+                Message = "Automatic security updates are already enabled."
+            });
+            return;
+        }
+
+        var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+            contextName,
+            $"{SudoAptGet("install -y unattended-upgrades")} && {SudoNonInteractive("systemctl enable unattended-upgrades")}",
+            cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "OS security baselines",
+            Passed = exit == 0,
+            Message = exit == 0
+                ? "Unattended upgrades enabled."
+                : FormatRemoteShellError(stderr, stdout)
+        });
+    }
+
+    private async Task<RemoteSetupResultDto?> ApplyLinuxHostFirewallAsync(
+        string contextName,
+        string host,
+        string user,
+        int sshPort,
+        RemoteSetupOptionsDto options,
+        List<RemotePrerequisiteCheckDto> steps,
+        CancellationToken cancellationToken)
+    {
+        var ufwActive = await IsUfwActiveAsync(contextName, cancellationToken);
+        if (ufwActive)
+        {
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Configure host firewall (ufw)",
+                Passed = true,
+                Message = "ufw is already active — verifying SSH and player/web port rules."
+            });
+        }
+        else
+        {
+            var (installExit, _, installErr) = await RunSshRemoteShellAsync(
+                contextName,
+                SudoAptGet("install -y ufw"),
+                cancellationToken);
+            if (installExit != 0)
+            {
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Configure host firewall (ufw)",
+                    Passed = false,
+                    Message = FormatRemoteShellError(installErr, string.Empty)
+                });
+                return FailSetup(steps, "Could not install ufw on the remote host.");
+            }
+
+            var baselineCommands = new (string Label, string Command)[]
+            {
+                ("Set firewall default deny incoming", SetUfwDefaultIncomingPolicyShell()),
+                ("Set firewall default allow outgoing", SetUfwDefaultOutgoingPolicyShell()),
+                ($"Allow SSH (port {sshPort})", AllowUfwTcpPort(sshPort, "SSH")),
+            };
+
+            foreach (var (label, command) in baselineCommands)
+            {
+                var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, command, cancellationToken);
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = label,
+                    Passed = exit == 0,
+                    Message = exit == 0 ? SummarizeRemoteOutput(stdout, label) : FormatRemoteShellError(stderr, stdout)
+                });
+                if (exit != 0)
+                {
+                    return FailSetup(steps, $"Host firewall setup failed at “{label}”.");
+                }
+            }
+        }
+
+        if (ufwActive)
+        {
+            var (sshAllowExit, sshAllowOut, sshAllowErr) = await RunSshRemoteShellAsync(
+                contextName,
+                AllowUfwTcpPort(sshPort, "SSH"),
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = $"Allow SSH (port {sshPort})",
+                Passed = sshAllowExit == 0,
+                Message = sshAllowExit == 0
+                    ? SummarizeRemoteOutput(sshAllowOut, $"SSH port {sshPort}/tcp allowed")
+                    : FormatRemoteShellError(sshAllowErr, sshAllowOut)
+            });
+            if (sshAllowExit != 0)
+            {
+                return FailSetup(steps, $"Could not allow SSH port {sshPort} on the host firewall.");
+            }
+        }
+
+        foreach (var port in CollectPlayerWebPorts(options))
+        {
+            var label = $"Allow TCP {port} (player/web)";
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                contextName,
+                AllowUfwTcpPort(port, "Azeroth player/web"),
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = label,
+                Passed = exit == 0,
+                Message = exit == 0 ? $"Port {port}/tcp allowed." : FormatRemoteShellError(stderr, stdout)
+            });
+            if (exit != 0)
+            {
+                return FailSetup(steps, $"Could not allow port {port} on the host firewall.");
+            }
+        }
+
+        if (!ufwActive)
+        {
+            var (enableExit, enableOut, enableErr) = await RunSshRemoteShellAsync(
+                contextName,
+                SudoUfw("--force enable"),
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Enable host firewall (ufw)",
+                Passed = enableExit == 0,
+                Message = enableExit == 0
+                    ? SummarizeRemoteOutput(enableOut, "Firewall enabled")
+                    : FormatRemoteShellError(enableErr, enableOut)
+            });
+            if (enableExit != 0)
+            {
+                return FailSetup(steps, "Could not enable ufw on the remote host.");
+            }
+        }
+
+        var (statusExit, statusOut, _) = await RunSshRemoteShellAsync(contextName, SudoUfw("status verbose"), cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Configure firewall rules",
+            Passed = statusExit == 0,
+            Message = statusExit == 0
+                ? "Host firewall configured. Management ports (MySQL/SOAP) are not opened — Docker binds them on the VPC interface only."
+                : "Firewall configured; status check failed."
+        });
+
+        return null;
+    }
+
+    private static IEnumerable<int> CollectPlayerWebPorts(RemoteSetupOptionsDto options)
+    {
+        var ports = new HashSet<int> { options.AuthServerPort, options.WorldServerPort };
+        if (options.ArmoryPort > 0)
+        {
+            ports.Add(options.ArmoryPort);
+        }
+
+        if (options.ClientPort > 0)
+        {
+            ports.Add(options.ClientPort);
+        }
+
+        return ports.OrderBy(p => p);
+    }
+
+    private static RemoteSetupResultDto FailSetup(List<RemotePrerequisiteCheckDto> steps, string message)
+        => new() { Success = false, Message = message, Steps = steps };
+
+    private async Task<(bool Ready, string? Version, string? ComposeVersion)> IsRemoteDockerReadyAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (dockerExit, dockerOut, _) = await RunSshAsync(
+            contextName,
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            cancellationToken);
+        if (dockerExit != 0)
+        {
+            return (false, null, null);
+        }
+
+        var (composeExit, composeOut, _) = await RunSshAsync(
+            contextName,
+            ["docker", "compose", "version", "--short"],
+            cancellationToken);
+        if (composeExit != 0)
+        {
+            return (false, dockerOut.Trim(), null);
+        }
+
+        return (true, dockerOut.Trim(), composeOut.Trim());
+    }
+
+    private async Task<bool> IsUnattendedUpgradesEnabledAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (exit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "dpkg -s unattended-upgrades >/dev/null 2>&1 && systemctl is-enabled unattended-upgrades >/dev/null 2>&1",
+            cancellationToken);
+        return exit == 0;
+    }
+
+    private async Task<bool> IsUfwActiveAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (exit, stdout, _) = await RunSshRemoteShellAsync(contextName, SudoUfw("status"), cancellationToken);
+        return exit == 0
+            && stdout.Contains("Status: active", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private const string UfwPathSetup =
+        "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; " +
+        "UFW=\"$(command -v ufw 2>/dev/null || echo /usr/sbin/ufw)\"";
+
+    private static string SudoNonInteractive(string command)
+        => $"sudo -n {command}";
+
+    private static string SudoUfw(string arguments)
+        => $"{UfwPathSetup}; sudo -n \"$UFW\" {arguments}";
+
+    /// <summary>
+    /// Sets ufw default incoming deny via the ufw CLI, falling back to /etc/default/ufw when the CLI fails
+    /// (common on minimal images or when ufw is not yet enabled).
+    /// </summary>
+    private static string SetUfwDefaultIncomingPolicyShell()
+        => $"{UfwPathSetup}; " +
+           "if sudo -n \"$UFW\" default deny incoming 2>/dev/null; then exit 0; fi; " +
+           "if sudo -n sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY=\"DROP\"/' /etc/default/ufw 2>/dev/null " +
+           "&& grep -qE '^DEFAULT_INPUT_POLICY=\"DROP\"' /etc/default/ufw; then exit 0; fi; " +
+           "echo 'Could not set default incoming policy to deny.' >&2; exit 1";
+
+    private static string SetUfwDefaultOutgoingPolicyShell()
+        => $"{UfwPathSetup}; " +
+           "if sudo -n \"$UFW\" default allow outgoing 2>/dev/null; then exit 0; fi; " +
+           "if sudo -n sed -i 's/^DEFAULT_OUTPUT_POLICY=.*/DEFAULT_OUTPUT_POLICY=\"ACCEPT\"/' /etc/default/ufw 2>/dev/null " +
+           "&& grep -qE '^DEFAULT_OUTPUT_POLICY=\"ACCEPT\"' /etc/default/ufw; then exit 0; fi; " +
+           "echo 'Could not set default outgoing policy to allow.' >&2; exit 1";
+
+    private static string AllowUfwTcpPort(int port, string comment)
+        => SudoUfw($"allow {port}/tcp comment '{comment}'");
+
+    private static string SudoAptGet(string arguments)
+        => $"env DEBIAN_FRONTEND=noninteractive {SudoNonInteractive($"apt-get {arguments}")}";
+
+    private static string SummarizeRemoteOutput(string stdout, string fallback)
+    {
+        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        return string.IsNullOrWhiteSpace(line) ? $"{fallback} completed." : line;
+    }
+
+    private static string TrimRemoteError(string stderr, string stdout)
+    {
+        var message = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+        message = (message ?? string.Empty).Trim();
+        if (message.Length > 500)
+        {
+            message = message[..500] + "…";
+        }
+
+        return string.IsNullOrWhiteSpace(message) ? "Command failed." : message;
+    }
+
+    private static string FormatRemoteShellError(string stderr, string stdout)
+    {
+        var message = TrimRemoteError(stderr, stdout);
+        if (message.Contains("a password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("sorry, you must have a tty", StringComparison.OrdinalIgnoreCase))
+        {
+            return message + " The SSH user needs passwordless sudo (NOPASSWD) for setup commands to run non-interactively.";
+        }
+
+        if (message.Contains("usage: sudo", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("expected one of these actions", StringComparison.OrdinalIgnoreCase))
+        {
+            return "sudo rejected the command on this host. Ensure the SSH user has passwordless sudo, or run the equivalent apt/ufw commands manually over SSH.";
+        }
+
+        return message;
+    }
+
+    private Task<(int ExitCode, string StdOut, string StdErr)> RunSshRemoteShellAsync(
+        string contextName,
+        string shellCommand,
+        CancellationToken cancellationToken)
+        => RunSshAsync(contextName, ["bash", "-lc", shellCommand], cancellationToken);
 
     /// <summary>
     /// SSRF allowlist check: returns true when <paramref name="host"/> resolves to a loopback or
@@ -215,17 +1039,114 @@ public sealed class RemoteEngineService : IRemoteEngineService
         _logger.LogInformation("Shipped image {Image} to remote engine for stack {StackId}.", imageTag, stack.Id);
     }
 
+    public async Task SeedVolumeFromArchiveStreamAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        Stream archiveStream,
+        CancellationToken cancellationToken = default)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("SeedVolumeFromArchiveStreamAsync is only valid for external stacks.");
+        }
+
+        await EnsureVolumeExistsAsync(stack, volumeName, cancellationToken);
+        await ClearVolumeContentsAsync(stack, volumeName, cancellationToken);
+
+        var workVolume = $"acore-client-upload-{Guid.NewGuid():N}";
+        await EnsureVolumeExistsAsync(stack, workVolume, cancellationToken);
+
+        try
+        {
+            var contextName = await EnsureContextAsync(stack, cancellationToken);
+            _logger.LogInformation(
+                "Streaming client archive to remote work volume {WorkVolume} for stack {StackId}.",
+                workVolume,
+                stack.Id);
+
+            var uploadCommand =
+                $"docker run --rm -i -v {workVolume}:/work alpine:3.20 sh -c {ShellQuote("cat > /work/upload.archive")}";
+            var (uploadExit, _, uploadErr) = await StreamStdinToRemoteShellAsync(
+                contextName, uploadCommand, archiveStream, cancellationToken);
+            if (uploadExit != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to stream the client archive to the remote engine: {uploadErr.Trim()}");
+            }
+
+            await ExtractClientArchiveOnRemoteAsync(contextName, workVolume, volumeName, cancellationToken);
+            var contextArg = await ContextArgAsync(stack, cancellationToken);
+            await VerifyVolumeNotEmptyAsync(contextArg, volumeName, cancellationToken);
+            _logger.LogInformation(
+                "Client archive extracted into remote volume {Volume} for stack {StackId}.",
+                volumeName,
+                stack.Id);
+        }
+        finally
+        {
+            await RemoveVolumeAsync(stack, workVolume, cancellationToken);
+        }
+    }
+
+    public async Task WriteVolumeFileFromStreamAsync(
+        ManagedStackEntity stack,
+        string volumeName,
+        string relativePath,
+        Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        var safeRelative = SanitizeVolumeSubdir(relativePath);
+        var destFile = $"/dest/{safeRelative}";
+        var destDir = Path.GetDirectoryName(destFile.Replace('\\', '/'))?.Replace('\\', '/') ?? "/dest";
+        var shell = destDir == "/dest"
+            ? $"cat > {destFile}"
+            : $"mkdir -p {destDir} && cat > {destFile}";
+
+        if (stack.DeploymentTarget == DeploymentTarget.External)
+        {
+            var contextName = await EnsureContextAsync(stack, cancellationToken);
+            var remoteCommand =
+                $"docker run --rm -i -v {volumeName}:/dest alpine:3.20 sh -c {ShellQuote(shell)}";
+            var (exit, _, stderr) = await StreamStdinToRemoteShellAsync(
+                contextName, remoteCommand, content, cancellationToken);
+            if (exit != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to write '{safeRelative}' into remote volume '{volumeName}': {stderr.Trim()}");
+            }
+
+            return;
+        }
+
+        var contextArg = await ContextArgAsync(stack, cancellationToken);
+        var localCommand =
+            $"docker {contextArg}run --rm -i -v {volumeName}:/dest alpine:3.20 sh -c {ShellQuote(shell)}";
+        var (localExit, _, localErr) = await StreamStdinToShellAsync(localCommand, content, cancellationToken);
+        if (localExit != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to write '{safeRelative}' into volume '{volumeName}': {localErr.Trim()}");
+        }
+    }
+
     public async Task SeedVolumeAsync(ManagedStackEntity stack, string volumeName, string localSourceDir, CancellationToken cancellationToken = default)
     {
         var contextArg = await ContextArgAsync(stack, cancellationToken);
         var local = stack.DeploymentTarget != DeploymentTarget.External;
-        await SeedVolumeCoreAsync(contextArg, local, volumeName, localSourceDir, cancellationToken);
+        var contextName = local ? null : GetContextName(stack.Id);
+        await SeedVolumeCoreAsync(contextArg, contextName, local, volumeName, localSourceDir, cancellationToken);
     }
 
     public Task SeedLocalVolumeAsync(string volumeName, string localSourceDir, CancellationToken cancellationToken = default)
-        => SeedVolumeCoreAsync(string.Empty, local: true, volumeName, localSourceDir, cancellationToken);
+        => SeedVolumeCoreAsync(string.Empty, contextName: null, local: true, volumeName, localSourceDir, cancellationToken);
 
-    private async Task SeedVolumeCoreAsync(string contextArg, bool local, string volumeName, string localSourceDir, CancellationToken cancellationToken)
+    private async Task SeedVolumeCoreAsync(
+        string contextArg,
+        string? contextName,
+        bool local,
+        string volumeName,
+        string localSourceDir,
+        CancellationToken cancellationToken)
     {
         if (!Directory.Exists(localSourceDir))
         {
@@ -235,6 +1156,15 @@ public sealed class RemoteEngineService : IRemoteEngineService
         // Ensure the named volume exists on the engine.
         await RunAsync("docker", $"{contextArg}volume create {volumeName}", cancellationToken, throwOnError: false);
 
+        if (!DirectoryHasContent(localSourceDir))
+        {
+            _logger.LogDebug(
+                "Source {Source} is empty; ensured volume {Volume} exists without tar seed.",
+                localSourceDir,
+                volumeName);
+            return;
+        }
+
         // Fast path for the local daemon: when the source lives inside the manager's own data volume, do
         // a daemon-side volume-to-volume copy (no multi-GB streaming through the CLI).
         if (local && await TryDaemonSideCopyAsync(volumeName, localSourceDir, cancellationToken))
@@ -243,8 +1173,22 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return;
         }
 
-        // Stream a tar of the local dir into a throwaway container that extracts it into the volume
-        // mount: tar -C <src> -c . | docker [--context <ctx>] run --rm -i -v vol:/dest alpine ...
+        // Remote engines: pipe tar over SSH into `docker run -i` on the host. Docker context streaming
+        // (`tar | docker --context … run -i`) often drops stdin before it reaches the remote container.
+        if (!local && !string.IsNullOrWhiteSpace(contextName))
+        {
+            var (sshExit, _, sshErr) = await SeedVolumeViaSshAsync(contextName, volumeName, localSourceDir, cancellationToken);
+            if (sshExit != 0)
+            {
+                throw new InvalidOperationException($"Failed to seed volume '{volumeName}': {sshErr}");
+            }
+
+            await VerifyVolumeNotEmptyAsync(contextArg, volumeName, cancellationToken);
+            _logger.LogInformation("Seeded volume {Volume} (SSH stream).", volumeName);
+            return;
+        }
+
+        // Local fallback: stream tar into a throwaway container on the manager daemon.
         var srcQuoted = ShellQuote(localSourceDir);
         var command =
             $"tar -C {srcQuoted} -cf - . | docker {contextArg}run --rm -i " +
@@ -259,6 +1203,28 @@ public sealed class RemoteEngineService : IRemoteEngineService
         await VerifyVolumeNotEmptyAsync(contextArg, volumeName, cancellationToken);
 
         _logger.LogInformation("Seeded volume {Volume}.", volumeName);
+    }
+
+    private static bool DirectoryHasContent(string directory)
+        => Directory.EnumerateFileSystemEntries(directory).Any();
+
+    /// <summary>
+    /// Streams a local directory tar over SSH into <c>docker run -i</c> on the remote host so stdin
+    /// reaches the extract container reliably (unlike piping through <c>docker --context</c>).
+    /// </summary>
+    private Task<(int ExitCode, string StdOut, string StdErr)> SeedVolumeViaSshAsync(
+        string contextName,
+        string volumeName,
+        string localSourceDir,
+        CancellationToken cancellationToken)
+    {
+        var srcQuoted = ShellQuote(localSourceDir);
+        var sshConfigQuoted = ShellQuote(Path.Combine(GetSshDir(), "config"));
+        var remoteDocker = ShellQuote(
+            $"docker run --rm -i -v {volumeName}:/dest alpine:3.20 sh -c \"cd /dest && tar -xf -\"");
+        var command =
+            $"tar -C {srcQuoted} -cf - . | ssh -F {sshConfigQuoted} -o BatchMode=yes -o ConnectTimeout=120 {contextName} {remoteDocker}";
+        return RunShellAsync(command, cancellationToken);
     }
 
     private async Task VerifyVolumeNotEmptyAsync(string contextArg, string volumeName, CancellationToken cancellationToken)
@@ -1141,13 +2107,15 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         var keyPath = Path.Combine(sshDir, $"{contextName}.key");
         var knownHostsPath = Path.Combine(sshDir, $"{contextName}.known_hosts");
-        var keyContent = privateKey.Replace("\r\n", "\n").TrimEnd('\n') + "\n";
+        var keyContent = NormalizePrivateKey(privateKey);
         File.WriteAllText(keyPath, keyContent);
         TrySetUnixMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
+        // Match both the internal alias and the real hostname so `ssh alias …` (our probe) and
+        // `ssh://user@hostname` (Docker context) resolve to the same key/user settings.
         var block = new StringBuilder()
             .Append(BeginMarker(contextName)).Append('\n')
-            .Append($"Host {contextName}\n")
+            .Append($"Host {contextName} {host}\n")
             .Append($"    HostName {host}\n")
             .Append($"    User {user}\n")
             .Append($"    Port {port}\n")
@@ -1240,18 +2208,129 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return Path.Combine(home, ".ssh");
     }
 
-    private async Task EnsureDockerContextAsync(string contextName, CancellationToken cancellationToken)
+    private static string NormalizePrivateKey(string privateKey)
+    {
+        var normalized = (privateKey ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        return normalized + "\n";
+    }
+
+    private async Task EnsureDockerContextAsync(
+        string contextName,
+        string user,
+        string host,
+        int port,
+        CancellationToken cancellationToken)
     {
         var (inspectExit, _, _) = await RunAsync("docker", $"context inspect {contextName}", cancellationToken, throwOnError: false);
-        var endpoint = $"host=ssh://{contextName}";
+        // Use the same ubuntu@ec2-host form as manual SSH; IdentityFile comes from the Host block above.
+        var endpoint = $"host={BuildDockerSshEndpoint(user, host, port)}";
         if (inspectExit == 0)
         {
-            await RunAsync("docker", $"context update {contextName} --docker {endpoint}", cancellationToken, throwOnError: false);
+            var (updateExit, _, updateErr) = await RunAsync(
+                "docker",
+                $"context update {contextName} --docker {endpoint}",
+                cancellationToken,
+                throwOnError: false);
+            if (updateExit != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to update Docker context '{contextName}': {updateErr.Trim()}");
+            }
         }
         else
         {
             await RunAsync("docker", $"context create {contextName} --docker {endpoint}", cancellationToken, throwOnError: true);
         }
+    }
+
+    private static string BuildDockerSshEndpoint(string user, string host, int port)
+    {
+        user = SanitizeSshToken(user, "user");
+        host = SanitizeSshToken(host, "host");
+        var portSuffix = port is > 0 and not 22 ? $":{port}" : string.Empty;
+        return $"ssh://{user}@{host}{portSuffix}";
+    }
+
+    private Task<(int ExitCode, string StdOut, string StdErr)> RunSshAsync(
+        string contextName,
+        IReadOnlyList<string> remoteCommand,
+        CancellationToken cancellationToken)
+    {
+        var sshConfigPath = Path.Combine(GetSshDir(), "config");
+        var args = new List<string>
+        {
+            "-F", sshConfigPath,
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=30",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=4",
+            contextName
+        };
+        args.AddRange(remoteCommand);
+        return RunProcessAsync("ssh", args, cancellationToken, throwOnError: false);
+    }
+
+    private static string FormatSshError(string stderr, string host, string user, int port)
+    {
+        var message = string.IsNullOrWhiteSpace(stderr)
+            ? $"Could not connect to {user}@{host}:{port} over SSH."
+            : stderr.Trim();
+
+        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
+        {
+            message += " Verify the private key matches the remote authorized_keys entry.";
+        }
+
+        return message;
+    }
+
+    /// <summary>
+    /// Rewrites Docker CLI's misleading <c>http://docker.example.com</c> placeholder (used for SSH
+    /// transports) and surfaces nested <c>stderr=</c> details when present.
+    /// </summary>
+    private static string FormatRemoteDockerError(
+        string stderr,
+        string host,
+        string user,
+        int port,
+        string? fallback = null)
+    {
+        var target = port == 22 ? $"ssh://{user}@{host}" : $"ssh://{user}@{host}:{port}";
+        var message = string.IsNullOrWhiteSpace(stderr) ? (fallback ?? "Docker is not available on the remote host.") : stderr.Trim();
+
+        message = message
+            .Replace("http://docker.example.com", target, StringComparison.OrdinalIgnoreCase)
+            .Replace("https://docker.example.com", target, StringComparison.OrdinalIgnoreCase);
+
+        const string stderrPrefix = "stderr=";
+        var stderrIdx = message.LastIndexOf(stderrPrefix, StringComparison.OrdinalIgnoreCase);
+        if (stderrIdx >= 0)
+        {
+            var nested = message[(stderrIdx + stderrPrefix.Length)..].Trim();
+            if (!string.IsNullOrWhiteSpace(nested))
+            {
+                message = nested;
+            }
+        }
+
+        if (message.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
+        {
+            message += $" Add '{user}' to the docker group on the remote host " +
+                       $"(sudo usermod -aG docker {user}; log out and back in).";
+        }
+        else if (message.Contains("docker daemon", StringComparison.OrdinalIgnoreCase)
+                 || message.Contains("docker.sock", StringComparison.OrdinalIgnoreCase))
+        {
+            message += " The Docker client is installed but the daemon is not running — on the remote " +
+                       "host run: sudo systemctl start docker && sudo systemctl enable docker";
+        }
+
+        return message;
     }
 
     // ===== process helpers =====
@@ -1292,28 +2371,38 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
         string fileName,
-        IReadOnlyList<string> argumentList,
+        IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
-        bool throwOnError)
+        bool throwOnError,
+        Stream? stdin = null)
     {
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
+            FileName = fileName,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = stdin is not null,
+            CreateNoWindow = true,
         };
-
-        foreach (var arg in argumentList)
+        foreach (var argument in arguments)
         {
-            process.StartInfo.ArgumentList.Add(arg);
+            startInfo.ArgumentList.Add(argument);
         }
 
-        process.Start();
+        using var process = new Process { StartInfo = startInfo };
+        if (!process.Start())
+        {
+            throw new InvalidOperationException($"Failed to start {fileName}.");
+        }
+
+        if (stdin is not null)
+        {
+            await stdin.CopyToAsync(process.StandardInput.BaseStream, cancellationToken);
+            await process.StandardInput.BaseStream.FlushAsync(cancellationToken);
+            process.StandardInput.Close();
+        }
+
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
@@ -1322,13 +2411,111 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         if (throwOnError && process.ExitCode != 0)
         {
-            var rendered = argumentList.Count > 0
-                ? $"{fileName} {string.Join(' ', argumentList)}"
+            var rendered = arguments.Count > 0
+                ? $"{fileName} {string.Join(' ', arguments)}"
                 : fileName;
             throw new InvalidOperationException($"{rendered} failed ({process.ExitCode}): {stderr}");
         }
 
         return (process.ExitCode, stdout, stderr);
+    }
+
+    private static Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken,
+        bool throwOnError)
+        => RunProcessAsync(fileName, arguments, cancellationToken, throwOnError, stdin: null);
+
+    private async Task<(int ExitCode, string Stdout, string Stderr)> StreamStdinToRemoteShellAsync(
+        string contextName,
+        string remoteCommand,
+        Stream stdin,
+        CancellationToken cancellationToken)
+    {
+        var sshConfigPath = Path.Combine(GetSshDir(), "config");
+        var args = new List<string>
+        {
+            "-F", sshConfigPath,
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=120",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=8",
+            contextName,
+            remoteCommand,
+        };
+        return await RunProcessAsync("ssh", args, cancellationToken, throwOnError: false, stdin: stdin);
+    }
+
+    private static Task<(int ExitCode, string Stdout, string Stderr)> StreamStdinToShellAsync(
+        string command,
+        Stream stdin,
+        CancellationToken cancellationToken)
+    {
+        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        var fileName = isWindows ? "cmd.exe" : "/bin/sh";
+        var arguments = isWindows
+            ? new List<string> { "/c", command }
+            : new List<string> { "-c", command };
+        return RunProcessAsync(fileName, arguments, cancellationToken, throwOnError: false, stdin: stdin);
+    }
+
+    private async Task ExtractClientArchiveOnRemoteAsync(
+        string contextName,
+        string workVolume,
+        string destinationVolume,
+        CancellationToken cancellationToken)
+    {
+        const string script = """
+            set -e
+            apk add --no-cache unzip p7zip >/dev/null
+            ARCH=/work/upload.archive
+            mkdir -p /work/extract
+            if unzip -t "$ARCH" >/dev/null 2>&1; then
+              unzip -q "$ARCH" -d /work/extract
+            elif 7z t "$ARCH" >/dev/null 2>&1; then
+              7z x -o/work/extract "$ARCH"
+            elif tar -tf "$ARCH" >/dev/null 2>&1; then
+              tar -xf "$ARCH" -C /work/extract
+            elif tar -tzf "$ARCH" >/dev/null 2>&1; then
+              tar -xzf "$ARCH" -C /work/extract
+            else
+              echo "Unsupported archive format on the remote host." >&2
+              exit 1
+            fi
+            find_root() {
+              local base="$1"
+              if [ -f "$base/Wow.exe" ] || [ -f "$base/WoW.exe" ]; then echo "$base"; return 0; fi
+              if [ -d "$base/Data" ] && ls "$base"/Data/*.MPQ >/dev/null 2>&1; then echo "$base"; return 0; fi
+              return 1
+            }
+            ROOT=""
+            if find_root /work/extract; then ROOT=/work/extract; fi
+            if [ -z "$ROOT" ]; then
+              for d in /work/extract/*/; do
+                [ -d "$d" ] || continue
+                if find_root "${d%/}"; then ROOT="${d%/}"; break; fi
+                for nested in "$d"*/; do
+                  [ -d "$nested" ] || continue
+                  if find_root "${nested%/}"; then ROOT="${nested%/}"; break 2; fi
+                done
+              done
+            fi
+            if [ -z "$ROOT" ]; then
+              echo "The uploaded archive does not look like a WoW client (no Wow.exe or Data/*.MPQ found)." >&2
+              exit 1
+            fi
+            cp -a "$ROOT"/. /dest/
+            """;
+
+        var remoteCommand =
+            $"docker run --rm -v {workVolume}:/work -v {destinationVolume}:/dest alpine:3.20 sh -c {ShellQuote(script)}";
+        var (exit, _, stderr) = await RunSshAsync(contextName, ["sh", "-c", remoteCommand], cancellationToken);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to extract the client archive on the remote engine: {stderr.Trim()}");
+        }
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunShellAsync(string command, CancellationToken cancellationToken)
@@ -1353,6 +2540,56 @@ public sealed class RemoteEngineService : IRemoteEngineService
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to set unix mode on {Path}", path);
+        }
+    }
+
+    private static string ManagementTunnelKey(string stackId, int remotePort) => $"{stackId}:{remotePort}";
+
+    private static bool IsTunnelAlive(ManagementTunnel tunnel) =>
+        !tunnel.Process.HasExited;
+
+    private static int AllocateLocalPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    private void StopManagementTunnels(string stackId)
+    {
+        var prefix = stackId + ":";
+        foreach (var key in _managementTunnels.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+        {
+            if (_managementTunnels.TryRemove(key, out var tunnel))
+            {
+                StopManagementTunnel(key, tunnel);
+            }
+        }
+    }
+
+    private void StopManagementTunnel(string tunnelKey, ManagementTunnel tunnel)
+    {
+        try
+        {
+            if (!tunnel.Process.HasExited)
+            {
+                tunnel.Process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to stop SSH management tunnel {TunnelKey}", tunnelKey);
+        }
+        finally
+        {
+            tunnel.Process.Dispose();
         }
     }
 }

@@ -1,7 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { stackApi, buildApi } from '@/services/api'
-import { StackStatus } from '@/types/stack.types'
+import { DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type { StackServiceDto, StackServiceAction } from '@/types/stack.types'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { stackKeys } from '@/hooks/useStacks'
@@ -38,6 +38,7 @@ import ArmoryNetworkField from '@/components/launcher/ArmoryNetworkField'
 import StackNewsTab from '@/components/launcher/StackNewsTab'
 import DockerTab from '@/components/docker/DockerTab'
 import ExternalReconnectPanel from '@/components/stacks/ExternalReconnectPanel'
+import ExternalVpcSecurityPanel from '@/components/stacks/ExternalVpcSecurityPanel'
 import InitialBuildRequiredPanel from '@/components/stacks/InitialBuildRequiredPanel'
 import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
@@ -71,6 +72,7 @@ const formatRelativeTime = (date: string | Date): string => {
 
 type StackTabId =
   | 'overview'
+  | 'vpc-overview'
   | 'accounts'
   | 'characters'
   | 'realms'
@@ -95,6 +97,11 @@ type StackTabId =
 // standalone tabs; multi-tab groups render a secondary row of sub-tabs when active.
 const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: string }[] }[] = [
   { id: 'overview', label: 'Overview', tabs: [{ id: 'overview', label: 'Overview' }] },
+  {
+    id: 'vpc-overview',
+    label: 'VPC overview',
+    tabs: [{ id: 'vpc-overview', label: 'VPC overview' }],
+  },
   {
     id: 'client',
     label: 'Client',
@@ -204,6 +211,22 @@ function StackDetailsPageContent() {
       return shouldPollForStatus || shouldPollForRecent ? 5000 : false
     },
   })
+
+  const isExternalStack = stack?.configuration.deployment?.target === DeploymentTarget.External
+
+  const visibleTabGroups = useMemo(
+    () => TAB_GROUPS.filter((group) => group.id !== 'vpc-overview' || isExternalStack),
+    [isExternalStack],
+  )
+
+  useEffect(() => {
+    if (activeTab === 'vpc-overview' && stack && !isExternalStack) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('tab')
+      setSearchParams(next, { replace: true })
+      setActiveTab('overview')
+    }
+  }, [activeTab, stack, isExternalStack, searchParams, setSearchParams])
 
   const { data: diskUsage } = useDockerDiskUsage()
   const { data: armoryNetwork } = useQuery({
@@ -565,9 +588,11 @@ function StackDetailsPageContent() {
       stack.status === StackStatus.Stopped)
   const realmlistHost =
     launcherProfile?.effectiveRealmlistHost || stack.configuration.advanced.realmlistHost
+  const externalHost = stack.configuration.deployment?.externalHost?.trim()
+  const armoryBrowseHost = isExternalStack ? (externalHost || realmlistHost) : realmlistHost
   const armoryUrl =
     armoryNetwork && stack.armoryPort > 0
-      ? resolveArmoryBrowseUrl(armoryNetwork.effectiveBindAddress, stack.armoryPort, realmlistHost)
+      ? resolveArmoryBrowseUrl(armoryNetwork.effectiveBindAddress, stack.armoryPort, armoryBrowseHost)
       : null
 
   const selectTab = (tab: StackTabId) => {
@@ -754,12 +779,13 @@ function StackDetailsPageContent() {
       {/* Tabs Navigation (grouped) */}
       {(() => {
         const activeGroup =
-          TAB_GROUPS.find((group) => group.tabs.some((tab) => tab.id === activeTab)) ?? TAB_GROUPS[0]
+          visibleTabGroups.find((group) => group.tabs.some((tab) => tab.id === activeTab)) ??
+          visibleTabGroups[0]
         return (
           <div className="mb-6">
             <div className="border-b border-gray-200">
               <nav className="flex flex-wrap gap-6">
-                {TAB_GROUPS.map((group) => {
+                {visibleTabGroups.map((group) => {
                   const isActive = group.id === activeGroup.id
                   return (
                     <button
@@ -997,9 +1023,21 @@ function StackDetailsPageContent() {
         </div>
       )}
 
-      <div className="mb-8">
-        <ExternalReconnectPanel stack={stack} />
-      </div>
+      {isExternalStack && stack.needsExternalReconnect && (
+        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <p className="text-sm text-amber-950">
+            This external stack needs SSH credentials to reach the remote Docker engine.{' '}
+            <button
+              type="button"
+              onClick={() => selectTab('vpc-overview')}
+              className="font-medium underline hover:text-amber-900"
+            >
+              Open VPC overview
+            </button>{' '}
+            to reconnect.
+          </p>
+        </div>
+      )}
 
       {/* Module setup warnings */}
       <ModuleSetupWarnings stack={stack} />
@@ -1471,6 +1509,13 @@ function StackDetailsPageContent() {
         </div>
       </div>
         </>
+      )}
+
+      {activeTab === 'vpc-overview' && isExternalStack && (
+        <div className="mb-8 space-y-4">
+          <ExternalReconnectPanel stack={stack} />
+          <ExternalVpcSecurityPanel stack={stack} />
+        </div>
       )}
 
       {/* Delete Confirmation Modal */}

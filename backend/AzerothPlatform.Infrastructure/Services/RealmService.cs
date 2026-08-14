@@ -181,14 +181,16 @@ public class RealmService : IRealmService
         stack.RealmlistHostOverride = host;
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        var realmAddress = RealmlistHostResolver.ResolveForRealmAddress(host, cancellationToken);
+
         // Apply to the live realmlist so the change takes effect immediately without a restart. A stack
         // has a single world address, so every realm row shares it (both the public address clients are
         // redirected to and the localAddress served to same-LAN clients).
         using var connection = await _connectionFactory.CreateConnectionAsync(stackId, "auth", cancellationToken);
         const string updateSql = "UPDATE realmlist SET address = @Host, localAddress = @Host";
-        await connection.ExecuteAsync(new CommandDefinition(updateSql, new { Host = host }, cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(updateSql, new { Host = realmAddress }, cancellationToken: cancellationToken));
 
-        _logger.LogInformation("Set realmlist address for stack {StackId} to '{Host}'.", stackId, host);
+        _logger.LogInformation("Set realmlist address for stack {StackId} to '{Host}'.", stackId, realmAddress);
 
         // The realmlist host feeds each registry entry's connection info; re-push so launchers pick up
         // the new address across the replicated registry. Best-effort: never fail the address change.

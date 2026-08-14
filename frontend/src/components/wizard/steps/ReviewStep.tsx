@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { WizardForm } from '@/components/wizard/types'
 import { useServerTypes } from '@/hooks/useModules'
-import { ServerType, type PortFieldPath, type SuggestedPorts } from '@/types/stack.types'
+import { ServerType, DeploymentTarget, type PortFieldPath, type SuggestedPorts } from '@/types/stack.types'
 
 interface ReviewStepProps {
   form: WizardForm
@@ -111,6 +111,33 @@ export function ReviewStep({
           Configuration looks good!
         </div>
       )}
+
+      <Section title="Deployment">
+        <ReviewRow
+          label="Target"
+          value={
+            values.deployment?.target === DeploymentTarget.External
+              ? 'External VPC'
+              : 'Local'
+          }
+        />
+        {values.deployment?.target === DeploymentTarget.External && (
+          <>
+            <ReviewRow label="Remote Host" value={values.deployment.externalHost || '—'} />
+            <ReviewRow label="SSH Port" value={values.deployment.externalSshPort ?? 22} />
+            <ReviewRow label="SSH User" value={values.deployment.externalSshUser || '—'} />
+            <ReviewRow label="Connection Verified" value={values.deployment.connectionVerified ? 'Yes' : 'No'} />
+            <ReviewRow
+              label="First Time Setup"
+              value={values.deployment.firstTimeSetupCompleted ? 'Completed' : 'Not completed'}
+            />
+            <ReviewRow
+              label="Cloud SG Acknowledged"
+              value={values.deployment.cloudSecurityGroupAcknowledged ? 'Yes' : 'No'}
+            />
+          </>
+        )}
+      </Section>
 
       <Section title="Server">
         <ReviewRow label="Stack Name" value={values.stackName || '—'} />

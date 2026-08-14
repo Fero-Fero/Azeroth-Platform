@@ -11,16 +11,61 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: {
+    // SignalR ships misplaced /*#__PURE__*/ annotations that Rolldown warns on (aspnetcore#55286).
+    rolldownOptions: {
+      checks: {
+        invalidAnnotation: false,
+      },
       output: {
-        manualChunks: (id) => {
-            if (id.includes('node_modules/@microsoft/signalr')) return 'vendor-signalr'
-            if (id.includes('node_modules/@tanstack/react-query')) return 'vendor-query'
-            if (id.includes('node_modules/react-hook-form') || id.includes('node_modules/@hookform') || id.includes('node_modules/zod')) return 'vendor-forms'
-            if (id.includes('node_modules/lucide-react') || id.includes('node_modules/sonner') || id.includes('node_modules/clsx') || id.includes('node_modules/tailwind-merge')) return 'vendor-ui'
-            if (id.includes('node_modules/axios')) return 'vendor-http'
-            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom') || id.includes('node_modules/scheduler')) return 'vendor-react'
-          },
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-signalr',
+              test: /node_modules[\\/]@microsoft[\\/]signalr/,
+              priority: 30,
+            },
+            {
+              name: 'vendor-tiptap',
+              test: /node_modules[\\/]@tiptap/,
+              priority: 25,
+            },
+            {
+              name: 'vendor-markdown',
+              test: /node_modules[\\/](react-markdown|remark-|rehype-|unist-|mdast-|micromark|markdown-table)/,
+              priority: 24,
+            },
+            {
+              name: 'vendor-forms',
+              test: /node_modules[\\/](react-hook-form|@hookform|zod)/,
+              priority: 23,
+            },
+            {
+              name: 'vendor-query',
+              test: /node_modules[\\/]@tanstack[\\/]react-query/,
+              priority: 22,
+            },
+            {
+              name: 'vendor-grid',
+              test: /node_modules[\\/]react-grid-layout/,
+              priority: 21,
+            },
+            {
+              name: 'vendor-ui',
+              test: /node_modules[\\/](lucide-react|sonner|clsx|tailwind-merge)/,
+              priority: 20,
+            },
+            {
+              name: 'vendor-http',
+              test: /node_modules[\\/]axios/,
+              priority: 19,
+            },
+            {
+              name: 'vendor-react',
+              test: /node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/,
+              priority: 18,
+            },
+          ],
+        },
       },
     },
   },
@@ -30,6 +75,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:5128',
         changeOrigin: true,
+        timeout: 300_000,
       },
       '/hubs': {
         target: 'http://localhost:5128',

@@ -246,6 +246,8 @@ actually runs.
 **Remote host requirements:** reachable over SSH from the manager, Docker installed, and the SSH user
 able to run it (e.g. a non-root user in the `docker` group).
 
+See [EXTERNAL-VPC-SETUP.md](./EXTERNAL-VPC-SETUP.md) for the first-time Linux VPC setup and security role plan.
+
 **Steps:**
 
 1. Install and launch the platform (see [Local setup](#local-setup--everything-on-this-machine)).

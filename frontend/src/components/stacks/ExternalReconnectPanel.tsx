@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { AlertCircle, Loader2, Plug } from 'lucide-react'
+import { SshPrivateKeyField } from '@/components/wizard/common/SshPrivateKeyField'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { stackApi, systemApi } from '@/services/api'
 import { stackKeys } from '@/hooks/useStacks'
@@ -118,16 +119,14 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
                   className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
                 />
               </label>
-              <label className="block text-sm sm:col-span-2">
-                <span className="text-gray-700">SSH private key (required to reconnect)</span>
-                <textarea
+              <div className="sm:col-span-2">
+                <SshPrivateKeyField
+                  id={`reconnect-ssh-key-${stack.stackId}`}
                   value={privateKey}
-                  onChange={(e) => setPrivateKey(e.target.value)}
-                  rows={4}
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs"
+                  onChange={setPrivateKey}
+                  hint="Required to reconnect. Paste or select a key file from this machine."
                 />
-              </label>
+              </div>
             </div>
           )}
 

@@ -261,6 +261,7 @@ public sealed class StackDockerService : IStackDockerService
 
         var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
         var contextArg = ContextArg(dockerContext);
+        var isRemoteEngine = !string.IsNullOrWhiteSpace(contextArg);
         var project = DockerComposeOverrideGenerator.GetComposeProjectName(stackId);
         var containers = await _dockerService.ListContainersAsync(project, dockerContext, cancellationToken);
         var hasContainers = containers.Count > 0;
@@ -276,8 +277,13 @@ public sealed class StackDockerService : IStackDockerService
             activeImageRefs.Add(reference);
         }
 
-        var volumeUsage = await GetVolumeUsageAsync(contextArg, cancellationToken);
-        var diskUsage = await GetDiskUsageAsync(cancellationToken);
+        // Remote engines: `system df -v` and per-image inspects are very slow over SSH — skip or defer them.
+        var volumeUsage = isRemoteEngine
+            ? new Dictionary<string, (long? SizeBytes, int Links)>(StringComparer.OrdinalIgnoreCase)
+            : await GetVolumeUsageAsync(contextArg, cancellationToken);
+        var diskUsage = isRemoteEngine
+            ? await GetRemoteEngineDiskUsageAsync(contextArg, cancellationToken)
+            : await GetDiskUsageAsync(cancellationToken);
 
         var buildFiles = DescribeBuildFiles(stackId, stackBusy, hasContainers, buildInProgress);
         var images = await ListStackImagesAsync(
@@ -287,17 +293,33 @@ public sealed class StackDockerService : IStackDockerService
             managedStackIds,
             anyClientEnabled,
             cancellationToken);
-        var allPlatformImages = await ListAllPlatformImagesAsync(
-            contextArg,
-            activeImageRefs,
-            managedStackIds,
-            anyClientEnabled,
-            cancellationToken);
-        var currentIds = images.Select(i => i.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var unusedImages = allPlatformImages
-            .Where(i => !currentIds.Contains(i.Id))
-            .ToList();
-        var obsoleteBuildDirs = await ListObsoleteBuildDirsAsync(managedStackIds, cancellationToken);
+        List<StackDockerImageDto> allPlatformImages;
+        List<StackDockerImageDto> unusedImages;
+        List<DockerObsoleteBuildDirDto> obsoleteBuildDirs;
+        List<StackDockerVolumeDto> allManagedVolumes;
+        if (isRemoteEngine)
+        {
+            // The remote tab is scoped to this stack's engine — don't scan every managed stack id or the
+            // whole remote daemon (that was dozens of SSH round trips and timed out the UI).
+            allPlatformImages = images;
+            unusedImages = [];
+            obsoleteBuildDirs = [];
+        }
+        else
+        {
+            allPlatformImages = await ListAllPlatformImagesAsync(
+                contextArg,
+                activeImageRefs,
+                managedStackIds,
+                anyClientEnabled,
+                cancellationToken);
+            var currentIds = images.Select(i => i.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            unusedImages = allPlatformImages
+                .Where(i => !currentIds.Contains(i.Id))
+                .ToList();
+            obsoleteBuildDirs = await ListObsoleteBuildDirsAsync(managedStackIds, cancellationToken);
+        }
+
         var danglingImages = await ListDanglingImagesAsync(contextArg, cancellationToken);
         var reclaimableBreakdown = BuildReclaimableBreakdown(
             diskUsage,
@@ -315,11 +337,18 @@ public sealed class StackDockerService : IStackDockerService
             hasContainers,
             stackBusy,
             cancellationToken);
-        var allManagedVolumes = await ListAllManagedStackVolumesAsync(
-            managedStackIds,
-            contextArg,
-            volumeUsage,
-            cancellationToken);
+        if (!isRemoteEngine)
+        {
+            allManagedVolumes = await ListAllManagedStackVolumesAsync(
+                managedStackIds,
+                contextArg,
+                volumeUsage,
+                cancellationToken);
+        }
+        else
+        {
+            allManagedVolumes = volumes;
+        }
 
         return new StackDockerOverviewDto
         {
@@ -2000,8 +2029,7 @@ public sealed class StackDockerService : IStackDockerService
                 continue;
             }
 
-            var sizeBytes = await GetImageSizeBytesAsync(contextArg, row.ID, cancellationToken)
-                ?? ParseHumanSize(row.Size);
+            var sizeBytes = await ResolveImageSizeBytesAsync(contextArg, row, cancellationToken);
             var (isActive, reason) = ClassifyImage(
                 reference,
                 row.ID,
@@ -2056,8 +2084,7 @@ public sealed class StackDockerService : IStackDockerService
                 continue;
             }
 
-            var sizeBytes = await GetImageSizeBytesAsync(contextArg, row.ID, cancellationToken)
-                ?? ParseHumanSize(row.Size);
+            var sizeBytes = await ResolveImageSizeBytesAsync(contextArg, row, cancellationToken);
             images.Add(new StackDockerImageDto
             {
                 Id = row.ID,
@@ -2472,35 +2499,45 @@ public sealed class StackDockerService : IStackDockerService
     {
         var names = GetExpectedVolumeNames(stackId, project);
         var volumes = new List<StackDockerVolumeDto>();
+        var existingVolumes = await ListExistingVolumeNamesAsync(contextArg, cancellationToken);
 
         foreach (var name in names)
         {
-            var (existsExit, _, _) = await RunDockerAsync($"{contextArg}volume inspect {name}", cancellationToken);
-            if (existsExit != 0)
+            if (existingVolumes is not null)
             {
-                continue;
+                if (!existingVolumes.Contains(name))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                var (existsExit, _, _) = await RunDockerAsync($"{contextArg}volume inspect {name}", cancellationToken);
+                if (existsExit != 0)
+                {
+                    continue;
+                }
             }
 
             volumeUsage.TryGetValue(name, out var usage);
-            var (containerExit, containerOutput, _) = await RunDockerAsync(
-                $"{contextArg}ps -a --filter volume={name} -q",
-                cancellationToken);
-            var linkCount = usage.Links > 0
-                ? usage.Links
-                : containerOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
-
-            var active = true;
-            string? reason = linkCount > 0
-                ? "Mounted by one or more containers."
-                : "Data volume for a managed stack.";
+            var linkCount = usage.Links;
+            if (linkCount <= 0 && existingVolumes is null)
+            {
+                var (containerExit, containerOutput, _) = await RunDockerAsync(
+                    $"{contextArg}ps -a --filter volume={name} -q",
+                    cancellationToken);
+                linkCount = containerOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+            }
 
             volumes.Add(new StackDockerVolumeDto
             {
                 Name = name,
                 SizeBytes = usage.SizeBytes,
                 LinkCount = linkCount,
-                IsActive = active,
-                ActiveReason = reason,
+                IsActive = true,
+                ActiveReason = linkCount > 0
+                    ? "Mounted by one or more containers."
+                    : "Data volume for a managed stack.",
             });
         }
 
@@ -2846,6 +2883,64 @@ public sealed class StackDockerService : IStackDockerService
 
     private static string ContextArg(string? dockerContext) =>
         string.IsNullOrWhiteSpace(dockerContext) ? string.Empty : $"--context {dockerContext} ";
+
+    private async Task<HashSet<string>?> ListExistingVolumeNamesAsync(
+        string contextArg,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(contextArg))
+        {
+            return null;
+        }
+
+        var (exitCode, output, _) = await RunDockerAsync($"{contextArg}volume ls -q", cancellationToken);
+        if (exitCode != 0)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<DockerDiskUsageDto> GetRemoteEngineDiskUsageAsync(
+        string contextArg,
+        CancellationToken cancellationToken)
+    {
+        var usage = new DockerDiskUsageDto();
+        var (dfExit, dfOutput, _) = await RunDockerAsync(
+            $"{contextArg}run --rm alpine:3.20 df -B1 --output=size,used,avail,pcent /",
+            cancellationToken);
+        if (dfExit == 0)
+        {
+            ParseHostDisk(dfOutput, usage);
+        }
+
+        var (sysExit, sysOutput, _) = await RunDockerAsync($"{contextArg}system df", cancellationToken);
+        if (sysExit == 0)
+        {
+            ParseDockerSystemDf(sysOutput, usage);
+        }
+
+        usage.IsWarning = usage.UsedPercent >= DiskWarningThresholdPercent;
+        return usage;
+    }
+
+    private async Task<long> ResolveImageSizeBytesAsync(
+        string contextArg,
+        DockerImageRow row,
+        CancellationToken cancellationToken)
+    {
+        var fromListing = ParseHumanSize(row.Size);
+        if (!string.IsNullOrWhiteSpace(contextArg))
+        {
+            // Remote engines: one `docker image inspect` per image over SSH adds minutes of latency.
+            return fromListing;
+        }
+
+        return await GetImageSizeBytesAsync(contextArg, row.ID, cancellationToken) ?? fromListing;
+    }
 
     private async Task<long?> GetImageSizeBytesAsync(string contextArg, string imageId, CancellationToken cancellationToken)
     {

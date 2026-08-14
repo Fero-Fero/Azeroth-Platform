@@ -128,6 +128,8 @@ export interface StackConfigurationDto {
 export interface NetworkInfoDto {
   addresses: string[]
   suggestedRealmlistHost: string
+  /** Client IP as CIDR for cloud SSH rules, e.g. 203.0.113.10/32 */
+  suggestedAdminSourceCidr?: string
 }
 
 export interface ArmoryNetworkConfig {
@@ -143,10 +145,90 @@ export interface ArmoryNetworkConfig {
   armoryRunning: boolean
 }
 
+export interface RemotePrerequisiteCheckDto {
+  name: string
+  passed: boolean
+  message: string
+}
+
+export enum RemoteConnectionTestPhase {
+  Full = 0,
+  SshOnly = 1,
+  PrerequisitesOnly = 2,
+}
+
+export interface RemoteConnectionTestRequestDto {
+  deployment: DeploymentConfigDto
+  phase?: RemoteConnectionTestPhase
+}
+
 export interface RemoteConnectionTestResultDto {
   success: boolean
   message: string
   serverVersion?: string
+  prerequisites?: RemotePrerequisiteCheckDto[]
+}
+
+export interface RemoteSetupResultDto {
+  success: boolean
+  message: string
+  serverVersion?: string
+  steps?: RemotePrerequisiteCheckDto[]
+}
+
+export enum RemoteHostOs {
+  Linux = 0,
+  Windows = 1,
+}
+
+export interface RemoteSetupOptionsDto {
+  remoteOs: RemoteHostOs
+  enableHostFirewall: boolean
+  enableUnattendedUpgrades: boolean
+  authServerPort: number
+  worldServerPort: number
+  armoryPort: number
+  clientPort: number
+  sshPort: number
+}
+
+export interface RemoteProvisionRequestDto {
+  deployment: DeploymentConfigDto
+  options: RemoteSetupOptionsDto
+}
+
+export interface VpcSecurityRoleDto {
+  id: string
+  name: string
+  description: string
+  exposure: string
+  hostFirewall: boolean
+  cloudSecurityGroup: boolean
+  dockerHandlesBind: boolean
+  adminSettingsLocation: string
+  defaultPorts: number[]
+}
+
+export interface VpcSecurityCatalogDto {
+  roles: VpcSecurityRoleDto[]
+  documentationPath: string
+}
+
+export interface VpcSecurityRuleDto {
+  roleId: string
+  port: number
+  protocol: string
+  action: string
+  source: string
+  description: string
+}
+
+export interface VpcSecurityProfileDto {
+  host: string
+  hostFirewallRules: VpcSecurityRuleDto[]
+  cloudSecurityGroupRules: VpcSecurityRuleDto[]
+  deniedPorts: VpcSecurityRuleDto[]
+  notes: string
 }
 
 // Build DTOs

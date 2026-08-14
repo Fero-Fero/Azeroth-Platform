@@ -120,6 +120,14 @@ export const stackApi = {
     apiClient.get<import('@/types/stack.types').ArmoryNetworkConfig>(`/stacks/${stackId}/armory/network`),
   updateArmoryNetwork: (stackId: string, config: import('@/types/stack.types').ArmoryNetworkConfig) =>
     apiClient.put<import('@/types/stack.types').ArmoryNetworkConfig>(`/stacks/${stackId}/armory/network`, config),
+  vpcSecurityProfile: (stackId: string) =>
+    apiClient.get<import('@/types/stack.types').VpcSecurityProfileDto>(`/stacks/${stackId}/vpc-security-profile`),
+  syncVpcFirewall: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
+      `/stacks/${stackId}/sync-vpc-firewall`,
+      undefined,
+      { timeout: 300_000 },
+    ),
   armoryAccountsStatus: (stackId: string) =>
     apiClient.get<import('@/types/stack.types').ArmoryAccountsStatusDto>(`/stacks/${stackId}/armory/accounts-status`),
   sendArmoryTestEmail: (stackId: string, testEmailAddress: string) =>
@@ -161,7 +169,10 @@ export const stackApi = {
     apiClient.get<DatabaseCredentialsDto>(`/stacks/${stackId}/database-credentials`),
 
   getDockerOverview: (stackId: string) =>
-    apiClient.get<import('@/types/docker.types').StackDockerOverviewDto>(`/stacks/${stackId}/docker`),
+    apiClient.get<import('@/types/docker.types').StackDockerOverviewDto>(`/stacks/${stackId}/docker`, {
+      // External stacks query the remote engine over SSH; many docker calls can take a while.
+      timeout: 180_000,
+    }),
 
   deleteDockerBuildFiles: (stackId: string) =>
     apiClient.delete<import('@/types/docker.types').StackDockerDeleteResultDto>(`/stacks/${stackId}/docker/build-files`),
@@ -180,6 +191,7 @@ export const stackApi = {
   getDockerVolumeAudit: (stackId: string) =>
     apiClient.get<import('@/types/docker.types').DockerVolumeAuditDto>(
       `/stacks/${stackId}/docker/volume-audit`,
+      { timeout: 180_000 },
     ),
 
   cleanupDockerVolumeAudit: (
@@ -341,11 +353,34 @@ export const validationApi = {
 export const systemApi = {
   network: () =>
     apiClient.get<import('@/types/stack.types').NetworkInfoDto>('/system/network'),
-  testRemoteConnection: (deployment: import('@/types/stack.types').DeploymentConfigDto) =>
+  testRemoteConnection: (
+    deployment: import('@/types/stack.types').DeploymentConfigDto,
+    phase?: import('@/types/stack.types').RemoteConnectionTestPhase
+  ) =>
     apiClient.post<import('@/types/stack.types').RemoteConnectionTestResultDto>(
       '/system/test-remote-connection',
-      deployment
+      { deployment, phase: phase ?? 0 }
     ),
+  provisionRemoteHost: (request: import('@/types/stack.types').RemoteProvisionRequestDto) =>
+    apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
+      '/system/provision-remote-host',
+      request
+    ),
+  vpcSecurityRoles: () =>
+    apiClient.get<import('@/types/stack.types').VpcSecurityCatalogDto>('/system/vpc-security-roles'),
+  vpcSecurityProfile: (params: {
+    host: string
+    authPort?: number
+    worldPort?: number
+    armoryPort?: number
+    clientPort?: number
+    databasePort?: number
+    soapPort?: number
+    sshPort?: number
+  }) =>
+    apiClient.get<import('@/types/stack.types').VpcSecurityProfileDto>('/system/vpc-security-profile', {
+      params,
+    }),
 }
 
 

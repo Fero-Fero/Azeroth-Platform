@@ -118,6 +118,31 @@ public class StacksController : ControllerBase
         }
     }
 
+    [HttpGet("{stackId}/vpc-security-profile")]
+    public async Task<ActionResult<VpcSecurityProfileDto>> GetVpcSecurityProfile(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var profile = await _stackService.GetVpcSecurityProfileAsync(stackId, cancellationToken);
+        return profile is null ? NotFound() : Ok(profile);
+    }
+
+    [HttpPost("{stackId}/sync-vpc-firewall")]
+    public async Task<ActionResult<RemoteSetupResultDto>> SyncVpcFirewall(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _stackService.SyncVpcFirewallAsync(stackId, cancellationToken);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("{stackId}")]
     public async Task<IActionResult> Delete(string stackId, CancellationToken cancellationToken)
     {

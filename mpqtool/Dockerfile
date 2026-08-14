@@ -43,7 +43,8 @@ RUN apt-get update \
 
 COPY --from=build /src/mkmpq /usr/local/bin/mkmpq
 COPY create-patch-mpq.sh /usr/local/bin/create-patch-mpq.sh
-RUN chmod +x /usr/local/bin/create-patch-mpq.sh
+RUN sed -i 's/\r$//' /usr/local/bin/create-patch-mpq.sh \
+    && chmod +x /usr/local/bin/create-patch-mpq.sh
 
 WORKDIR /work
 ENTRYPOINT ["/usr/local/bin/create-patch-mpq.sh"]

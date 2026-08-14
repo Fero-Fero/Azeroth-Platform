@@ -87,6 +87,7 @@ public static class DependencyInjection
         services.AddSingleton<IServerTypeCatalog, ServerTypeCatalog>();
         services.AddScoped<IStackConfigurationValidator, StackConfigurationValidator>();
         services.AddSingleton<IRemoteEngineService, RemoteEngineService>();
+        services.AddScoped<IStackImageShippingService, StackImageShippingService>();
         services.AddScoped<IStackService, StackService>();
         services.AddScoped<IStackDockerService, StackDockerService>();
         services.AddScoped<IStackVersionService, StackVersionService>();

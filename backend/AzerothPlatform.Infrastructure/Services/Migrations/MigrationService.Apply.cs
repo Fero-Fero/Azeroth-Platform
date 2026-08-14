@@ -943,6 +943,8 @@ public sealed partial class MigrationService
 
         AddLog(result, "Ensuring the WDBX editor image is available (built once, then cached)...");
         await _imageService.EnsureWdbxImageAsync(cancellationToken);
+        await SidecarImageShipping.ShipToStackEngineIfNeededAsync(
+            stack, _remoteEngine, _migrationOptions.WdbxImage, cancellationToken);
 
         // Temp work dir under the stack root; seeded into a throwaway work volume for the tool run.
         var workDir = Path.Combine(stackRoot, ".migration-tmp", $"{patchKey}-{Guid.NewGuid():N}");
@@ -1246,6 +1248,8 @@ public sealed partial class MigrationService
             AddLog(result, $"Building {mpqName} from raw content in {patchKey}...");
 
             await _imageService.EnsureMpqToolImageAsync(cancellationToken);
+            await SidecarImageShipping.ShipToStackEngineIfNeededAsync(
+                stack, _remoteEngine, _migrationOptions.MpqToolImage, cancellationToken);
 
             var toolArgs = $"\"{mpqName}\" \"{contentDirName}\"";
             var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
@@ -1662,6 +1666,8 @@ public sealed partial class MigrationService
 
         AddLog(result, "Ensuring the MPQ tool image is available (built once, then cached)...");
         await _imageService.EnsureMpqToolImageAsync(cancellationToken);
+        await SidecarImageShipping.ShipToStackEngineIfNeededAsync(
+            stack, _remoteEngine, _migrationOptions.MpqToolImage, cancellationToken);
 
         // Stage the DBCs under DBFilesClient/ in a work dir seeded into a throwaway work volume.
         var workDir = Path.Combine(stackRoot, ".migration-tmp", $"patchd-{Guid.NewGuid():N}");

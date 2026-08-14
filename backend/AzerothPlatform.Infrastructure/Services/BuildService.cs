@@ -30,23 +30,16 @@ public sealed class BuildService : IBuildService
     private readonly DockerOptions _dockerOptions;
     private readonly MigrationOptions _migrationOptions;
     private readonly IBuildEventPublisher _eventPublisher;
-    private readonly IRemoteEngineService _remoteEngine;
-    private readonly IArmoryImageService _armoryImageService;
-    private readonly IClientServerImageService _clientImageService;
+    private readonly IStackImageShippingService _stackImageShipping;
     private readonly IServerTypeCatalog _serverTypeCatalog;
-    private readonly string _clientImageName;
     private readonly ILogger<BuildService> _logger;
 
     public BuildService(
         IServiceScopeFactory scopeFactory,
         IOptions<DockerOptions> dockerOptions,
         IOptions<MigrationOptions> migrationOptions,
-        IOptions<ArmoryOptions> armoryOptions,
-        IOptions<ClientServerOptions> clientServerOptions,
         IBuildEventPublisher eventPublisher,
-        IRemoteEngineService remoteEngine,
-        IArmoryImageService armoryImageService,
-        IClientServerImageService clientImageService,
+        IStackImageShippingService stackImageShipping,
         IServerTypeCatalog serverTypeCatalog,
         ILogger<BuildService> logger)
     {
@@ -54,11 +47,8 @@ public sealed class BuildService : IBuildService
         _dockerOptions = dockerOptions.Value;
         _migrationOptions = migrationOptions.Value;
         _eventPublisher = eventPublisher;
-        _remoteEngine = remoteEngine;
-        _armoryImageService = armoryImageService;
-        _clientImageService = clientImageService;
+        _stackImageShipping = stackImageShipping;
         _serverTypeCatalog = serverTypeCatalog;
-        _clientImageName = clientServerOptions.Value.ImageName;
         _logger = logger;
         
         // Resolve relative paths from the current directory (project root when using dotnet run/watch)
@@ -924,55 +914,15 @@ public sealed class BuildService : IBuildService
     }
 
     /// <summary>
-    /// The locally-built image tags for a stack (worldserver/authserver/db-import). These are the only
-    /// images the platform builds; upstream images (mysql, base tools) are pulled by the remote engine.
-    /// </summary>
-    private static IReadOnlyList<string> StackImageTags(string stackId) => new[]
-    {
-        $"acore/ac-wotlk-worldserver:{stackId}",
-        $"acore/ac-wotlk-authserver:{stackId}",
-        $"acore/ac-wotlk-db-import:{stackId}",
-    };
-
-    /// <summary>
     /// Streams the locally-built stack images plus the shared armory + client-server images to the
     /// remote engine (best-effort, logged), so a subsequent remote <c>compose up</c> finds every image
     /// it needs and the external stack serves its own armory + client files.
     /// </summary>
     private async Task ShipImagesToRemoteAsync(ManagedStackEntity stack)
     {
-        // Ensure the images exist locally before shipping them (they may not have been built yet on a
-        // first external deploy). The armory image is per-stack; the client-server image is shared.
-        try
-        {
-            await _armoryImageService.EnsureImageAsync(stack.Id, CancellationToken.None);
-            await _clientImageService.EnsureImageAsync(cancellationToken: CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to ensure armory/client images for stack {StackId}", stack.Id);
-            await AddLogAsync(stack.Id, $"WARNING: failed to build images: {ex.Message}");
-        }
-
-        var tags = StackImageTags(stack.Id)
-            .Append(_armoryImageService.ImageNameFor(stack.Id))
-            .Append(_clientImageName)
-            .ToList();
-
-        foreach (var tag in tags)
-        {
-            try
-            {
-                await AddLogAsync(stack.Id, $"Shipping image {tag} to remote engine...");
-                await _remoteEngine.ShipImageAsync(stack, tag, CancellationToken.None);
-                await AddLogAsync(stack.Id, $"Shipped {tag}.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to ship image {Image} to remote for stack {StackId}", tag, stack.Id);
-                await AddLogAsync(stack.Id, $"WARNING: failed to ship {tag}: {ex.Message}");
-            }
-        }
+        await AddLogAsync(stack.Id, "Shipping built images to remote engine...");
+        await _stackImageShipping.ShipStackImagesAsync(stack, includeArmory: true, includeClient: true, CancellationToken.None);
+        await AddLogAsync(stack.Id, "Remote image shipping finished.");
     }
 
     /// <summary>

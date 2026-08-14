@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ServerType, DeploymentTarget } from '@/types/stack.types'
+import { ServerType, DeploymentTarget, RemoteHostOs } from '@/types/stack.types'
 import { DEFAULT_ARMORY_EMAIL } from '@/lib/armory-email-defaults'
 
 export const serverConfigSchema = z.object({
@@ -72,6 +72,11 @@ export const deploymentSchema = z.object({
       externalSshPort: z.coerce.number().int().min(1).max(65535).default(22),
       externalSshUser: z.string().max(64).optional().default(''),
       externalSshPrivateKey: z.string().optional().default(''),
+      connectionVerified: z.boolean().optional().default(false),
+      firstTimeSetupCompleted: z.boolean().optional().default(false),
+      remoteOs: z.nativeEnum(RemoteHostOs).optional().default(RemoteHostOs.Linux),
+      enableHostFirewall: z.boolean().optional().default(true),
+      cloudSecurityGroupAcknowledged: z.boolean().optional().default(false),
     })
     .superRefine((deployment, ctx) => {
       if (deployment.target === DeploymentTarget.External) {
@@ -189,6 +194,11 @@ export const WIZARD_DEFAULTS: WizardFormData = {
     externalSshPort: 22,
     externalSshUser: '',
     externalSshPrivateKey: '',
+    connectionVerified: false,
+    firstTimeSetupCompleted: false,
+    remoteOs: RemoteHostOs.Linux,
+    enableHostFirewall: true,
+    cloudSecurityGroupAcknowledged: false,
   },
   armoryAccounts: {
     useEmailConfirmation: false,
@@ -198,11 +208,12 @@ export const WIZARD_DEFAULTS: WizardFormData = {
 }
 
 export const STEP_TRIGGER_FIELDS_BY_ID: Record<string, Array<keyof WizardFormData>> = {
+  deployment: ['deployment'],
   'server-config': ['stackName', 'serverType', 'customFork'],
   modules: ['moduleIds'],
   database: ['database'],
   ports: ['ports'],
-  advanced: ['advanced', 'deployment', 'armoryAccounts'],
+  advanced: ['advanced', 'armoryAccounts'],
   email: ['armoryAccounts'],
   review: [],
 }
