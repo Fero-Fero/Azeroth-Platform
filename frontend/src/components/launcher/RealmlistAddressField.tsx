@@ -2,20 +2,21 @@ import { useEffect, useState } from 'react'
 import { Loader2, Save, CheckCircle2, LocateFixed, AlertCircle } from 'lucide-react'
 import { useLauncherProfile } from '@/hooks/useLauncher'
 import { useSetRealmAddress } from '@/hooks/useRealms'
+import { useStackJob } from '@/hooks/useStackJob'
 import { systemApi } from '@/services/api'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import { browserLanHost, detectBrowserLanIp, detectManagerLanHost, isPrivateIPv4 } from '@/lib/network'
+import { isPublicHostApplyJob, PublicHostApplyStepsPanel } from '@/components/stacks/PublicHostApplyStepsPanel'
 
 /**
- * Shared realmlist host editor used by both the stack Overview and the Server → Realms tab so the two
- * always stay in lockstep. Saving performs the full stack public-host update in one step:
- *   1. persists the stack's realmlist host override (survives restarts),
- *   2. applies it to the live realmlist DB and regenerated runtime env/config,
- *   3. refreshes launcher/armory/client/server processes that consume that host.
+ * Shared realmlist host editor. Saving persists the address immediately, then runs a background job
+ * that temporarily starts required containers when the stack is stopped, applies the live realmlist,
+ * refreshes the launcher registry, and restores the previous stack state.
  */
 export default function RealmlistAddressField({ stackId }: { stackId: string }) {
   const { data, isLoading } = useLauncherProfile(stackId)
   const setAddress = useSetRealmAddress(stackId)
+  const { job: stackJob, applyStatus } = useStackJob(stackId)
 
   const [value, setValue] = useState('')
   const [initialized, setInitialized] = useState(false)
@@ -30,22 +31,14 @@ export default function RealmlistAddressField({ stackId }: { stackId: string }) 
     }
   }, [data, initialized])
 
-  if (isLoading || !data) {
-    return (
-      <div className="inline-flex items-center gap-2 text-sm text-gray-400">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-      </div>
-    )
-  }
-
-  const busy = setAddress.isPending
-  const effectiveHost = value.trim() || data.effectiveRealmlistHost
+  const applyJob = isPublicHostApplyJob(stackJob) ? stackJob : null
+  const busy = setAddress.isPending || applyJob?.isRunning === true
+  const effectiveHost = value.trim() || data?.effectiveRealmlistHost || ''
 
   const onDetectIp = async () => {
     setErr(null)
     setDetecting(true)
     try {
-      // Prefer the manager API first: in Docker it reads HOST_LAN_IP; on bare metal it scans NICs.
       const res = await systemApi.network()
       const apiHost = res.data.suggestedRealmlistHost?.trim()
       if (apiHost) {
@@ -53,13 +46,13 @@ export default function RealmlistAddressField({ stackId }: { stackId: string }) 
         return
       }
 
-      const browserHost = browserLanHost() || await detectBrowserLanIp() || await detectManagerLanHost()
+      const browserHost = browserLanHost() || (await detectBrowserLanIp()) || (await detectManagerLanHost())
       if (browserHost) {
         setValue(browserHost)
         return
       }
 
-      const effective = data.effectiveRealmlistHost?.trim()
+      const effective = data?.effectiveRealmlistHost?.trim()
       if (effective && isPrivateIPv4(effective)) {
         setValue(effective)
         return
@@ -81,13 +74,21 @@ export default function RealmlistAddressField({ stackId }: { stackId: string }) 
       return
     }
     try {
-      // Backend persists the override, applies the live DB realmlist, and rescans the launcher client.
-      await setAddress.mutateAsync(host)
+      const res = await setAddress.mutateAsync(host)
+      applyStatus(res.data.job)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
       setErr(errorMessage(e))
     }
+  }
+
+  if (isLoading || !data) {
+    return (
+      <div className="inline-flex items-center gap-2 text-sm text-gray-400">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      </div>
+    )
   }
 
   return (
@@ -115,22 +116,26 @@ export default function RealmlistAddressField({ stackId }: { stackId: string }) 
           onClick={onSave}
           disabled={busy || detecting || value.trim().length === 0}
           className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          title="Save and force-apply this host across the stack"
+          title="Save and apply this host across the stack"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Save
         </button>
-        {saved && (
+        {saved && !applyJob?.isRunning && (
           <span className="inline-flex items-center gap-1 py-2 text-sm text-green-600">
             <CheckCircle2 className="h-4 w-4" /> Saved
           </span>
         )}
       </div>
       <p className="mt-2 text-xs text-gray-500">
-        Effective: <span className="font-mono">{effectiveHost}:{data.realmlistPort}</span>. Saving force-applies
-        this host across the stack, including the live realmlist, regenerated runtime config, launcher client,
-        and player-facing web services.
+        Effective: <span className="font-mono">{effectiveHost}:{data.realmlistPort}</span>. The address is saved
+        immediately. If the stack is stopped, required containers are started briefly to update the live
+        realmlist and launcher registry, then shut down again.
       </p>
+
+      {applyJob?.isRunning ? <PublicHostApplyStepsPanel job={applyJob} /> : null}
+      {applyJob?.phase === 'Failed' ? <PublicHostApplyStepsPanel job={applyJob} /> : null}
+
       {err && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
           <AlertCircle className="h-4 w-4" /> {err}

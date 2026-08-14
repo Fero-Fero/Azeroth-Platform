@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -25,6 +26,24 @@ public sealed class StackService : IStackService
     private static readonly TimeSpan LifecycleVerificationTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan InitContainerVerificationTimeout = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan LifecyclePollInterval = TimeSpan.FromSeconds(2);
+    private const int DatabaseReadyConsecutivePings = 3;
+    /// <summary>Max time to wait for an external stack's Docker engine probe during a detail refresh.</summary>
+    private static readonly TimeSpan ExternalRuntimeProbeTimeout = TimeSpan.FromSeconds(45);
+    /// <summary>How often to re-verify the SOAP admin row during stack detail refreshes (MySQL over SSH is slow).</summary>
+    private static readonly TimeSpan SoapAdminReconcileMinInterval = TimeSpan.FromMinutes(5);
+    private static readonly ConcurrentDictionary<string, DateTime> LastSoapAdminReconcileAt = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, ExternalRuntimeProbeCache> ExternalRuntimeProbeCaches = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, StackDetailsDto> StackListStatusCaches = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ExternalProbeLocks = new(StringComparer.Ordinal);
+    private static readonly TimeSpan ExternalRuntimeProbeCacheTtl = TimeSpan.FromMinutes(3);
+
+    private sealed record ExternalRuntimeProbeCache(
+        List<ContainerStatusDto> Containers,
+        List<StackServiceDto> Services,
+        StackStatus RuntimeStatus,
+        bool? EngineReachable,
+        string? EngineError,
+        DateTime CachedAt);
 
     // The uid/gid the AzerothCore service containers run as (see DOCKER_USER_ID/DOCKER_GROUP_ID below).
     private const int AcoreServiceUid = 1000;
@@ -52,6 +71,8 @@ public sealed class StackService : IStackService
     private readonly IStackJobService _stackJobService;
     private readonly IStackLauncherService _stackLauncher;
     private readonly IStackImageShippingService _stackImageShipping;
+    private readonly IArmoryDatabaseProvisioningService _armoryDatabase;
+    private readonly IMySqlConnectionFactory _connectionFactory;
 
     public StackService(
         AzerothCoreDbContext dbContext, 
@@ -74,7 +95,9 @@ public sealed class StackService : IStackService
         IStackRegistryService registry,
         IStackJobService stackJobService,
         IStackLauncherService stackLauncher,
-        IStackImageShippingService stackImageShipping)
+        IStackImageShippingService stackImageShipping,
+        IArmoryDatabaseProvisioningService armoryDatabase,
+        IMySqlConnectionFactory connectionFactory)
     {
         _dbContext = dbContext;
         _dockerService = dockerService;
@@ -97,6 +120,8 @@ public sealed class StackService : IStackService
         _stackJobService = stackJobService;
         _stackLauncher = stackLauncher;
         _stackImageShipping = stackImageShipping;
+        _armoryDatabase = armoryDatabase;
+        _connectionFactory = connectionFactory;
     }
 
     /// <summary>
@@ -118,14 +143,57 @@ public sealed class StackService : IStackService
     public async Task<IReadOnlyList<StackDetailsDto>> ListAsync(CancellationToken cancellationToken = default)
     {
         var stacks = await _dbContext.ManagedStacks
+            .AsNoTracking()
             .OrderByDescending(stack => stack.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var stackDtos = new List<StackDetailsDto>(stacks.Count);
-        foreach (var stack in stacks)
+        // The stacks overview only needs DB-backed status and config. Probing Docker on every stack
+        // (especially external VPC engines over SSH) makes the list unbearably slow.
+        var stackDtos = new StackDetailsDto[stacks.Count];
+        await Task.WhenAll(stacks.Select(async (stack, index) =>
         {
-            stackDtos.Add(await MapAsync(stack, cancellationToken));
+            if (StackListStatusCaches.TryGetValue(stack.Id, out var cached))
+            {
+                stackDtos[index] = cached;
+                return;
+            }
+
+            stackDtos[index] = await MapAsync(stack, probeRuntime: false, cancellationToken);
+        }));
+
+        return stackDtos;
+    }
+
+    public async Task<IReadOnlyList<StackDetailsDto>> ProbeAllStacksForListAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var stacks = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .OrderByDescending(stack => stack.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        if (stacks.Count == 0)
+        {
+            return Array.Empty<StackDetailsDto>();
         }
+
+        using var probeGate = new SemaphoreSlim(4);
+        var stackDtos = new StackDetailsDto[stacks.Count];
+        await Task.WhenAll(stacks.Select(async (stack, index) =>
+        {
+            await probeGate.WaitAsync(cancellationToken);
+            try
+            {
+                var dto = await MapAsync(stack, probeRuntime: true, cancellationToken);
+                StackListStatusCaches[stack.Id] = dto;
+                await PersistProbedStackStatusAsync(stack.Id, dto.Status, cancellationToken);
+                stackDtos[index] = dto;
+            }
+            finally
+            {
+                probeGate.Release();
+            }
+        }));
 
         return stackDtos;
     }
@@ -133,23 +201,84 @@ public sealed class StackService : IStackService
     public async Task<StackDetailsDto?> GetAsync(string stackId, CancellationToken cancellationToken = default)
     {
         var stack = await _dbContext.ManagedStacks
+            .AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
 
-        return stack is null
-            ? null
-            : await MapAsync(stack, cancellationToken);
+        if (stack is null)
+        {
+            return null;
+        }
+
+        var dto = await MapAsync(stack, probeRuntime: true, cancellationToken);
+        StackListStatusCaches[stackId] = dto;
+        await TryReconcileStaleFailedStatusAsync(stackId, dto.Status, cancellationToken);
+        return dto;
+    }
+
+    private async Task PersistProbedStackStatusAsync(
+        string stackId,
+        StackStatus probedStatus,
+        CancellationToken cancellationToken)
+    {
+        if (_stackJobService.GetStatus(stackId) is { IsRunning: true })
+        {
+            return;
+        }
+
+        if (probedStatus is StackStatus.Starting or StackStatus.Initializing or StackStatus.Building)
+        {
+            return;
+        }
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+        if (stack is null || stack.Status == probedStatus)
+        {
+            return;
+        }
+
+        stack.Status = probedStatus;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Clears a stale <see cref="StackStatus.Failed"/> marker once the stack is actually stopped again
+    /// (common after a VPC reboot or a failed start while SSH was down).
+    /// </summary>
+    private async Task TryReconcileStaleFailedStatusAsync(
+        string stackId, StackStatus displayedStatus, CancellationToken cancellationToken)
+    {
+        if (displayedStatus != StackStatus.Stopped)
+        {
+            return;
+        }
+
+        if (_stackJobService.GetStatus(stackId) is { IsRunning: true })
+        {
+            return;
+        }
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+        if (stack is null || stack.Status != StackStatus.Failed)
+        {
+            return;
+        }
+
+        stack.Status = StackStatus.Stopped;
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<StackDetailsDto> CreateAsync(StackConfigurationDto configuration, CancellationToken cancellationToken = default)
     {
         var stackId = Guid.NewGuid().ToString("N");
         var deployment = configuration.Deployment ?? new DeploymentConfigDto();
-        var externalHost = (deployment.ExternalHost ?? string.Empty).Trim();
+        var externalHost = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost ?? string.Empty);
 
         // Realmlist host resolution: explicit value wins; otherwise for External stacks default to the
         // remote host so clients are pointed at the droplet. Local stacks fall back to the global
         // default (Migrations:RealmlistHost) when left blank.
-        var realmlistHost = (configuration.Advanced.RealmlistHost ?? string.Empty).Trim();
+        var realmlistHost = RealmlistHostResolver.NormalizeHost(configuration.Advanced.RealmlistHost ?? string.Empty);
         if (string.IsNullOrWhiteSpace(realmlistHost) && deployment.Target == DeploymentTarget.External)
         {
             realmlistHost = externalHost;
@@ -256,7 +385,7 @@ public sealed class StackService : IStackService
         }
 
         await RepushRegistrySafeAsync(cancellationToken);
-        return await MapAsync(stack, cancellationToken);
+        return await MapAsync(stack, probeRuntime: true, cancellationToken);
     }
 
     public async Task<StackDetailsDto?> UpdateAsync(string stackId, StackConfigurationDto configuration, CancellationToken cancellationToken = default)
@@ -303,7 +432,7 @@ public sealed class StackService : IStackService
         var (updatedServiceEnvJson, updatedWorldserverEnvJson) = BuildEnvJson(configuration.Advanced);
         stack.CustomEnvVarsJson = updatedWorldserverEnvJson;
         stack.ServiceEnvVarsJson = updatedServiceEnvJson;
-        stack.RealmlistHostOverride = (configuration.Advanced.RealmlistHost ?? string.Empty).Trim();
+        stack.RealmlistHostOverride = RealmlistHostResolver.NormalizeHost(configuration.Advanced.RealmlistHost ?? string.Empty);
         ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
 
         // Post-create deployment editing: the target itself is fixed (flipping local<->external is a
@@ -314,7 +443,7 @@ public sealed class StackService : IStackService
             var d = configuration.Deployment;
             if (!string.IsNullOrWhiteSpace(d.ExternalHost))
             {
-                stack.ExternalHost = d.ExternalHost.Trim();
+                stack.ExternalHost = RealmlistHostResolver.NormalizeHost(d.ExternalHost);
             }
             if (d.ExternalSshPort > 0)
             {
@@ -363,7 +492,7 @@ public sealed class StackService : IStackService
 
         if (realmlistHostChanged)
         {
-            await UpdateRealmlistAddressAsync(stack, cancellationToken);
+            await UpdateRealmlistAddressAsync(stack, cancellationToken: cancellationToken);
             await RepushRegistrySafeAsync(cancellationToken);
             await RescanStackClientSafeAsync(stack.Id, cancellationToken);
         }
@@ -374,7 +503,7 @@ public sealed class StackService : IStackService
         // with an already-populated dataset are a no-op so we don't rebuild the image on every edit.
         MaybeQueueArmoryDbcSync(stack, oldArmoryLoadDbcs);
 
-        return await MapAsync(stack, cancellationToken);
+        return await MapAsync(stack, probeRuntime: true, cancellationToken);
     }
 
     public async Task<StackDetailsDto?> ReconnectExternalAsync(
@@ -395,17 +524,27 @@ public sealed class StackService : IStackService
         }
 
         if (string.IsNullOrWhiteSpace(deployment.ExternalHost)
-            || string.IsNullOrWhiteSpace(deployment.ExternalSshUser)
-            || string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey))
+            || string.IsNullOrWhiteSpace(deployment.ExternalSshUser))
         {
-            throw new InvalidOperationException("Remote host, SSH user, and private key are required to reconnect.");
+            throw new InvalidOperationException("Remote host and SSH user are required to reconnect.");
+        }
+
+        var privateKey = deployment.ExternalSshPrivateKey;
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+            {
+                throw new InvalidOperationException("SSH private key is required to reconnect.");
+            }
+
+            privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
         }
 
         var test = await _remoteEngine.TestConnectionAsync(
             deployment.ExternalHost.Trim(),
             deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort,
             deployment.ExternalSshUser.Trim(),
-            deployment.ExternalSshPrivateKey,
+            privateKey,
             cancellationToken: cancellationToken);
         if (!test.Success)
         {
@@ -414,42 +553,280 @@ public sealed class StackService : IStackService
                 : test.Message);
         }
 
-        stack.ExternalHost = deployment.ExternalHost.Trim();
+        var previousExternalHost = RealmlistHostResolver.NormalizeHost(stack.ExternalHost);
+        var previousResolvedHost = string.IsNullOrWhiteSpace(previousExternalHost)
+            ? string.Empty
+            : RealmlistHostResolver.ResolveForRealmAddress(previousExternalHost, cancellationToken);
+        var overrideHost = RealmlistHostResolver.NormalizeHost(stack.RealmlistHostOverride);
+
+        stack.ExternalHost = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost);
         stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
         stack.ExternalSshUser = deployment.ExternalSshUser.Trim();
-        stack.ExternalSshPrivateKey = _secretProtector.Protect(deployment.ExternalSshPrivateKey);
+        if (!string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey))
+        {
+            stack.ExternalSshPrivateKey = _secretProtector.Protect(deployment.ExternalSshPrivateKey);
+        }
+
+        if (string.IsNullOrWhiteSpace(overrideHost)
+            || string.Equals(overrideHost, previousExternalHost, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(previousResolvedHost)
+                && string.Equals(overrideHost, previousResolvedHost, StringComparison.OrdinalIgnoreCase)))
+        {
+            stack.RealmlistHostOverride = RealmlistHostResolver.ResolveForRealmAddress(
+                stack.ExternalHost,
+                cancellationToken);
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
         await _remoteEngine.EnsureContextAsync(stack, cancellationToken);
+        await UpdateRealmlistAddressAsync(stack, throwOnFailure: false, cancellationToken);
         _logger.LogInformation("Reconnected external stack {StackId} to {Host}.", stackId, stack.ExternalHost);
-        return await MapAsync(stack, cancellationToken);
+        return await MapAsync(stack, probeRuntime: true, cancellationToken);
     }
 
-    public async Task<bool> ApplyStackPublicHostAsync(
+    public async Task<SetRealmAddressResponseDto> BeginApplyStackPublicHostAsync(
         string stackId, string host, CancellationToken cancellationToken = default)
     {
-        host = (host ?? string.Empty).Trim();
+        await PersistStackPublicHostAsync(stackId, host, cancellationToken);
+
+        var stack = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .SingleAsync(s => s.Id == stackId, cancellationToken);
+
+        var snapshot = await CaptureServiceSnapshotAsync(stackId, cancellationToken);
+        var job = _stackJobService.Enqueue(
+            stackId,
+            StackJobAction.ApplyPublicHost,
+            new PublicHostApplyPlanDto
+            {
+                WasFullyStopped = snapshot.WasFullyStopped,
+                ClientEnabled = stack.ClientEnabled,
+                ArmoryEnabled = stack.ArmoryEnabled,
+                DatabaseRunning = snapshot.Database,
+                AuthRunning = snapshot.Auth,
+                WorldRunning = snapshot.World,
+                ClientRunning = snapshot.Client,
+                ArmoryRunning = snapshot.Armory,
+                ArmoryAssetsRunning = snapshot.ArmoryAssets,
+            });
+        return new SetRealmAddressResponseDto
+        {
+            Host = ResolveRealmlistHost(stack),
+            Job = job,
+        };
+    }
+
+    public async Task ApplyStackPublicHostLiveAsync(
+        string stackId,
+        Action<PublicHostApplyStepDto>? reportStep,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Stack '{stackId}' was not found.");
+
+        var repoPath = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
+        if (!Directory.Exists(repoPath))
+        {
+            throw new InvalidOperationException("Stack has not been built yet.");
+        }
+
+        var snapshot = await CaptureServiceSnapshotAsync(stackId, cancellationToken);
+        var startedDatabase = false;
+        var startedClient = false;
+        var restoreCompleted = false;
+        string? activeStepId = null;
+        string? activeStepLabel = null;
+
+        void Report(string id, string label, PublicHostApplyStepStatus status, string? detail = null) =>
+            reportStep?.Invoke(new PublicHostApplyStepDto
+            {
+                Id = id,
+                Label = label,
+                Status = status,
+                Detail = detail,
+            });
+
+        void BeginStep(string id, string label)
+        {
+            activeStepId = id;
+            activeStepLabel = label;
+            Report(id, label, PublicHostApplyStepStatus.Running);
+        }
+
+        void CompleteStep(string id, string label, string? detail = null)
+        {
+            activeStepId = null;
+            activeStepLabel = null;
+            Report(id, label, PublicHostApplyStepStatus.Completed, detail);
+        }
+
+        void SkipStep(string id, string label, string? detail = null)
+        {
+            if (activeStepId == id)
+            {
+                activeStepId = null;
+                activeStepLabel = null;
+            }
+
+            Report(id, label, PublicHostApplyStepStatus.Skipped, detail);
+        }
+
+        async Task RestoreTemporaryServicesAsync(bool throwOnFailure)
+        {
+            if (restoreCompleted || !snapshot.WasFullyStopped || (!startedDatabase && !startedClient))
+            {
+                return;
+            }
+
+            BeginStep("restore", "Restore previous stack state");
+            try
+            {
+                if (startedClient)
+                {
+                    await RunDockerComposeAsync(stackId, "stop client", repoPath, cancellationToken);
+                }
+
+                if (startedDatabase)
+                {
+                    await RunDockerComposeAsync(stackId, "stop ac-database", repoPath, cancellationToken);
+                }
+
+                stack.Status = StackStatus.Stopped;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                CompleteStep("restore", "Restore previous stack state");
+                restoreCompleted = true;
+            }
+            catch (Exception restoreEx)
+            {
+                _logger.LogWarning(
+                    restoreEx,
+                    "Failed restoring stack state after public host apply for stack {StackId}.",
+                    stackId);
+                Report("restore", "Restore previous stack state", PublicHostApplyStepStatus.Failed, restoreEx.Message);
+                activeStepId = null;
+                activeStepLabel = null;
+                if (throwOnFailure)
+                {
+                    throw;
+                }
+            }
+        }
+
+        try
+        {
+            if (!snapshot.Database)
+            {
+                BeginStep("database", "Start database");
+                await RunDockerComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
+                await WaitForDatabaseServiceAsync(stackId, cancellationToken);
+                await WaitForDatabaseReadyAsync(stack, stackId, cancellationToken);
+                startedDatabase = true;
+                CompleteStep("database", "Start database");
+            }
+            else
+            {
+                SkipStep("database", "Start database", "Database already running.");
+            }
+
+            BeginStep("realmlist", "Update realmlist in MySQL");
+            await UpdateRealmlistInDatabaseAsync(stack, cancellationToken);
+            CompleteStep("realmlist", "Update realmlist in MySQL");
+
+            if (stack.ClientEnabled)
+            {
+                if (!snapshot.Client)
+                {
+                    BeginStep("client", "Start client server");
+                    await RunDockerComposeAsync(stackId, "up -d client", repoPath, cancellationToken);
+                    startedClient = true;
+                    CompleteStep("client", "Start client server");
+                }
+                else
+                {
+                    SkipStep("client", "Start client server", "Client already running.");
+                }
+
+                BeginStep("registry", "Update launcher registry");
+                await RepushRegistrySafeAsync(cancellationToken);
+                CompleteStep("registry", "Update launcher registry");
+
+                BeginStep("rescan", "Refresh client manifest");
+                await RescanStackClientSafeAsync(stackId, cancellationToken);
+                CompleteStep("rescan", "Refresh client manifest");
+            }
+
+            if (!snapshot.WasFullyStopped)
+            {
+                await RecreatePublicHostServicesAsync(
+                    stack,
+                    repoPath,
+                    snapshot,
+                    BeginStep,
+                    (id, label) => CompleteStep(id, label),
+                    SkipStep,
+                    cancellationToken);
+            }
+            else
+            {
+                SkipRecreateStepsWhenFullyStopped(stack, snapshot, SkipStep);
+            }
+
+            if (snapshot.WasFullyStopped && (startedDatabase || startedClient))
+            {
+                await RestoreTemporaryServicesAsync(throwOnFailure: true);
+            }
+            else if (snapshot.WasFullyStopped)
+            {
+                SkipStep("restore", "Restore previous stack state", "Nothing needed.");
+                restoreCompleted = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed applying public host for stack {StackId}.", stackId);
+            if (activeStepId is not null && activeStepLabel is not null)
+            {
+                Report(activeStepId, activeStepLabel, PublicHostApplyStepStatus.Failed, ex.Message);
+            }
+
+            await RestoreTemporaryServicesAsync(throwOnFailure: false);
+            throw;
+        }
+    }
+
+    private async Task PersistStackPublicHostAsync(string stackId, string host, CancellationToken cancellationToken)
+    {
+        host = RealmlistHostResolver.NormalizeHost(host);
         if (host.Length is < 1 or > 255)
         {
             throw new ArgumentException("Stack public host must be between 1 and 255 characters.", nameof(host));
         }
 
         var stack = await _dbContext.ManagedStacks
-            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
-        if (stack is null)
-        {
-            return false;
-        }
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Stack '{stackId}' was not found.");
 
         EnsureStackLifecycleAllowed(stack, "update the public host of");
 
         stack.RealmlistHostOverride = host;
-
-        // If the operator chose a concrete machine IP, also clear stale armory/client bind addresses by
-        // binding those player-facing HTTP ports to the same current interface. DNS names remain realmlist
-        // hosts only; Docker port publishing cannot bind to a hostname.
-        if (System.Net.IPAddress.TryParse(host, out _))
+        if (System.Net.IPAddress.TryParse(host, out var parsedHost))
         {
-            stack.PublishBindAddress = host;
+            // Realmlist address is what players dial; Docker publish bind is which local NIC listens.
+            // On cloud VPCs the public/elastic IP is NAT-mapped and cannot be bound (EADDRNOTAVAIL).
+            if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                if (string.Equals(stack.PublishBindAddress, host, StringComparison.OrdinalIgnoreCase)
+                    || (!RealmlistHostResolver.IsPrivateOrNonRoutableIpv4Literal(host)
+                        && string.Equals(stack.PublishBindAddress, parsedHost.ToString(), StringComparison.OrdinalIgnoreCase)))
+                {
+                    stack.PublishBindAddress = string.Empty;
+                }
+            }
+            else if (IsDockerPublishBindAddress(parsedHost))
+            {
+                stack.PublishBindAddress = parsedHost.ToString();
+            }
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -458,14 +835,52 @@ public sealed class StackService : IStackService
         if (Directory.Exists(repoPath))
         {
             await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken);
-            await RecreatePublicHostServicesAsync(stack, repoPath, cancellationToken);
+        }
+    }
+
+    private sealed record ServiceSnapshot(
+        bool Database,
+        bool Auth,
+        bool World,
+        bool Client,
+        bool Armory,
+        bool ArmoryAssets)
+    {
+        public bool WasFullyStopped => !Database && !Auth && !World && !Client && !Armory && !ArmoryAssets;
+    }
+
+    private async Task<ServiceSnapshot> CaptureServiceSnapshotAsync(string stackId, CancellationToken cancellationToken)
+    {
+        var containers = await GetContainersAsync(stackId, cancellationToken);
+        static bool Running(IEnumerable<ContainerStatusDto> list, Func<ContainerStatusDto, bool> match) =>
+            list.Any(c => match(c) && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase));
+
+        return new ServiceSnapshot(
+            Database: Running(containers, c => c.Name.Contains("database", StringComparison.OrdinalIgnoreCase)),
+            Auth: Running(containers, c => c.Name.Contains("authserver", StringComparison.OrdinalIgnoreCase)),
+            World: Running(containers, c => c.Name.Contains("worldserver", StringComparison.OrdinalIgnoreCase)),
+            Client: Running(containers, c => c.Name.EndsWith("-client", StringComparison.OrdinalIgnoreCase)),
+            Armory: Running(containers, c => c.Name.EndsWith("-armory", StringComparison.OrdinalIgnoreCase)),
+            ArmoryAssets: Running(containers, c => c.Name.EndsWith("-armory-assets", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task UpdateRealmlistInDatabaseAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    {
+        var host = ResolveRealmlistHost(stack);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException("No realmlist host configured for this stack.");
         }
 
-        await UpdateRealmlistAddressAsync(stack, cancellationToken);
-        await RepushRegistrySafeAsync(cancellationToken);
-        await RescanStackClientSafeAsync(stack.Id, cancellationToken);
+        var realmAddress = RealmlistHostResolver.ResolveForRealmAddress(host, cancellationToken);
+        if (!string.Equals(host, realmAddress, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(stack.RealmlistHostOverride, host, StringComparison.OrdinalIgnoreCase))
+        {
+            stack.RealmlistHostOverride = realmAddress;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
 
-        return true;
+        await ExecuteRealmlistUpdateViaDockerAsync(stack, realmAddress, throwOnFailure: true, cancellationToken);
     }
 
     /// <summary>
@@ -507,57 +922,92 @@ public sealed class StackService : IStackService
         }
     }
 
-    private async Task RecreatePublicHostServicesAsync(
-        ManagedStackEntity stack, string repoPath, CancellationToken cancellationToken)
+    private static void SkipRecreateStepsWhenFullyStopped(
+        ManagedStackEntity stack,
+        ServiceSnapshot snapshot,
+        Action<string, string, string?> skipStep)
     {
-        var containers = await GetContainersAsync(stack.Id, cancellationToken);
-        var services = new List<string>();
-
-        if (containers.Any(c =>
-                c.Name.Contains("authserver", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)))
+        const string reason = "Stack was stopped — service was not running.";
+        skipStep("recreate-auth", "Recreate auth server", reason);
+        skipStep("recreate-world", "Recreate world server", reason);
+        if (stack.ArmoryEnabled)
         {
-            services.Add("ac-authserver");
+            skipStep("recreate-armory", "Recreate armory", reason);
+            skipStep("recreate-armory-assets", "Recreate armory assets", reason);
         }
 
-        if (containers.Any(c =>
-                c.Name.Contains("worldserver", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)))
+        if (stack.ClientEnabled)
         {
-            services.Add("ac-worldserver");
+            skipStep("recreate-client", "Recreate client server", reason);
+        }
+    }
+
+    private async Task RecreatePublicHostServicesAsync(
+        ManagedStackEntity stack,
+        string repoPath,
+        ServiceSnapshot snapshot,
+        Action<string, string> beginStep,
+        Action<string, string> completeStep,
+        Action<string, string, string?> skipStep,
+        CancellationToken cancellationToken)
+    {
+        var recreatePlans = new List<(string StepId, string Label, string ComposeService, bool WasRunning)>
+        {
+            ("recreate-auth", "Recreate auth server", "ac-authserver", snapshot.Auth),
+            ("recreate-world", "Recreate world server", "ac-worldserver", snapshot.World),
+        };
+
+        if (stack.ArmoryEnabled)
+        {
+            recreatePlans.Add(("recreate-armory", "Recreate armory", "frontend-armory", snapshot.Armory));
+            recreatePlans.Add(("recreate-armory-assets", "Recreate armory assets", "armory-assets", snapshot.ArmoryAssets));
         }
 
-        if (stack.ArmoryEnabled && containers.Any(c =>
-                c.Name.EndsWith("-armory", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)))
+        if (stack.ClientEnabled)
         {
-            services.Add("frontend-armory");
+            recreatePlans.Add(("recreate-client", "Recreate client server", "client", snapshot.Client));
         }
 
-        if (stack.ArmoryEnabled && containers.Any(c =>
-                c.Name.EndsWith("-armory-assets", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)))
+        var servicesToRecreate = new List<string>();
+        foreach (var (stepId, label, composeService, wasRunning) in recreatePlans)
         {
-            services.Add("armory-assets");
+            if (!wasRunning)
+            {
+                skipStep(stepId, label, "Service was not running.");
+                continue;
+            }
+
+            servicesToRecreate.Add(composeService);
         }
 
-        if (stack.ClientEnabled && containers.Any(c =>
-                c.Name.EndsWith("-client", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)))
-        {
-            services.Add("client");
-        }
-
-        if (services.Count == 0)
+        if (servicesToRecreate.Count == 0)
         {
             return;
         }
 
+        foreach (var (stepId, label, composeService, wasRunning) in recreatePlans)
+        {
+            if (!wasRunning)
+            {
+                continue;
+            }
+
+            beginStep(stepId, label);
+        }
+
         await RunDockerComposeAsync(
             stack.Id,
-            $"up -d --force-recreate --no-deps {string.Join(' ', services.Distinct())}",
+            $"up -d --force-recreate --no-deps {string.Join(' ', servicesToRecreate.Distinct())}",
             repoPath,
             cancellationToken);
+
+        foreach (var (stepId, label, _, wasRunning) in recreatePlans)
+        {
+            if (wasRunning)
+            {
+                completeStep(stepId, label);
+            }
+        }
     }
 
     /// <summary>
@@ -588,28 +1038,18 @@ public sealed class StackService : IStackService
             return false;
         }
 
+        var isExternal = stack.DeploymentTarget == DeploymentTarget.External;
         var stackPath = GetStackPath(stackId);
         var repoPath = Path.Combine(stackPath, "azerothcore-wotlk");
 
-        // Stop containers if running
-        try
+        if (isExternal)
         {
-            if (Directory.Exists(repoPath))
-            {
-                await RunDockerComposeAsync(stackId, "down -v", repoPath, cancellationToken);
-            }
-        }
-        catch
-        {
-            // Container might not exist, continue with cleanup
-        }
+            // VPC / external stacks: detach from the manager only. Containers, volumes, and images on
+            // the remote host are left untouched — operators manage those on the VPS directly.
+            _logger.LogInformation(
+                "Removing external stack {StackId} from the manager (remote Docker resources are not stopped).",
+                stackId);
 
-        // Remove Docker images and all per-stack volumes/containers on the engine (local or remote).
-        await CleanupStackDockerFootprintAsync(stack, cancellationToken);
-
-        // External stacks: also remove the SSH docker context/key material.
-        if (stack.DeploymentTarget == DeploymentTarget.External)
-        {
             try
             {
                 await _remoteEngine.RemoveContextAsync(stack, cancellationToken);
@@ -618,6 +1058,22 @@ public sealed class StackService : IStackService
             {
                 _logger.LogWarning(ex, "Failed to remove remote docker context for external stack {StackId}", stack.Id);
             }
+        }
+        else
+        {
+            try
+            {
+                if (Directory.Exists(repoPath))
+                {
+                    await RunDockerComposeAsync(stackId, "down -v", repoPath, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "compose down failed during delete of local stack {StackId}", stackId);
+            }
+
+            await CleanupStackDockerFootprintAsync(stack, cancellationToken);
         }
 
         CleanupManagerPersistentData(stackId);
@@ -643,8 +1099,10 @@ public sealed class StackService : IStackService
         _dbContext.ManagedStacks.Remove(stack);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        // Drop the stack from the replicated registry on the remaining visible stacks.
-        await RepushRegistrySafeAsync(cancellationToken);
+        StackListStatusCaches.TryRemove(stackId, out _);
+        ExternalRuntimeProbeCaches.TryRemove(stackId, out _);
+
+        _ = Task.Run(() => RepushRegistrySafeAsync(CancellationToken.None));
         return true;
     }
 
@@ -672,6 +1130,8 @@ public sealed class StackService : IStackService
 
         try
         {
+            ReportLifecycleProgress(stackId, "Preparing stack images…");
+
             // Start the armory alongside the stack. Best-effort: if the image can't be built we
             // simply omit it from the compose so the game servers still start.
             var armoryReady = await TryEnsureArmoryImageAsync(stack.Id, cancellationToken);
@@ -681,11 +1141,22 @@ public sealed class StackService : IStackService
             // engine) and only render it into the compose when it's actually available.
             var clientReady = stack.ClientEnabled && await TryEnsureClientImageAsync(stack, cancellationToken);
 
+            ReportLifecycleProgress(stackId, "Updating runtime configuration…");
             await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: armoryReady, includeClient: clientReady);
+
+            if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                ReportLifecycleProgress(
+                    stackId,
+                    "Checking remote engine images (large images are only transferred once)…");
+            }
+
             await ShipExternalStackImagesAsync(stack, armoryReady, clientReady, cancellationToken);
             await BringStackUpAsync(stack, stackId, repoPath, armoryReady, clientReady, cancellationToken);
+
+            ReportLifecycleProgress(stackId, "Waiting for game servers to become healthy…");
             await WaitForRunningServicesAsync(stackId, cancellationToken);
-            await UpdateRealmlistAddressAsync(stack, cancellationToken);
+            await UpdateRealmlistAddressAsync(stack, cancellationToken: cancellationToken);
 
             stack.Status = StackStatus.Running;
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -782,8 +1253,14 @@ public sealed class StackService : IStackService
         }
     }
 
-    public async Task<bool> StopAsync(string stackId, CancellationToken cancellationToken = default)
+    public async Task<bool> StopAsync(string stackId, CancellationToken cancellationToken = default) =>
+        await ForceStopAsync(stackId, cancellationToken);
+
+    public async Task<bool> ForceStopAsync(string stackId, CancellationToken cancellationToken = default)
     {
+        // Detach from the HTTP/job caller so shutdown completes even if they navigate away.
+        cancellationToken = CancellationToken.None;
+
         var stack = await _dbContext.ManagedStacks
             .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
 
@@ -803,13 +1280,46 @@ public sealed class StackService : IStackService
         var repoPath = Path.Combine(stackPath, "azerothcore-wotlk");
         try
         {
-            await RunDockerComposeAsync(stackId, "down", repoPath, cancellationToken);
-            await WaitForStackToStopAsync(stackId, cancellationToken);
+            ReportLifecycleProgress(stackId, "Stopping stack containers…");
 
-            // `down` also removes the armory container.
+            // Stop crash-looping services first (`restart: unless-stopped` keeps respawning until explicitly stopped).
+            await RunDockerComposeAsync(
+                stackId,
+                "stop -t 5 ac-authserver ac-worldserver frontend-armory armory-assets client",
+                repoPath,
+                cancellationToken,
+                throwOnError: false);
+
+            // Compose can fail silently on external stacks (SSH/context hiccups); force-remove by the
+            // pinned container_name values we always generate for this stack.
+            await ForceRemoveAllStackContainersByNameAsync(stackId, stack, cancellationToken);
+
+            await RunDockerComposeAsync(
+                stackId,
+                "down --timeout 10 --remove-orphans",
+                repoPath,
+                cancellationToken,
+                throwOnError: false);
+
+            await ForceRemoveAllStackContainersByNameAsync(stackId, stack, cancellationToken);
+            await WaitForStackToStopAsync(stackId, stack, cancellationToken);
+            await RemoveRemainingStackContainersAsync(stackId, stack, cancellationToken);
+
             stack.ArmoryEnabled = false;
             stack.Status = StackStatus.Stopped;
             await _dbContext.SaveChangesAsync(cancellationToken);
+
+            if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                CacheExternalRuntimeProbe(
+                    stackId,
+                    [],
+                    BuildServiceList([]),
+                    StackStatus.Stopped,
+                    true,
+                    null);
+            }
+
             return true;
         }
         catch
@@ -852,7 +1362,7 @@ public sealed class StackService : IStackService
             await ShipExternalStackImagesAsync(stack, armoryReady, clientReady, cancellationToken);
             await BringStackUpAsync(stack, stackId, repoPath, armoryReady, clientReady, cancellationToken);
             await WaitForRunningServicesAsync(stackId, cancellationToken);
-            await UpdateRealmlistAddressAsync(stack, cancellationToken);
+            await UpdateRealmlistAddressAsync(stack, cancellationToken: cancellationToken);
 
             stack.Status = StackStatus.Running;
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -885,9 +1395,10 @@ public sealed class StackService : IStackService
         // Regenerate .env + override (adds/refreshes the lua_scripts mount) then force-recreate the
         // game servers so they re-read config files and load newly-added Lua scripts.
         await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken);
+        await UpdateRealmlistAddressAsync(stack, throwOnFailure: true, cancellationToken);
         await RunDockerComposeAsync(
             stackId,
-            "up -d --force-recreate ac-worldserver ac-authserver",
+            "up -d --force-recreate --no-deps ac-worldserver ac-authserver",
             repoPath,
             cancellationToken);
 
@@ -984,9 +1495,10 @@ public sealed class StackService : IStackService
     {
         var localStack = stack.DeploymentTarget != DeploymentTarget.External;
         string effectiveBind;
-        if (!string.IsNullOrWhiteSpace(stack.PublishBindAddress))
+        var resolvedPublishBind = ResolvePublishBindIp(stack);
+        if (resolvedPublishBind is not null)
         {
-            effectiveBind = stack.PublishBindAddress.Trim();
+            effectiveBind = resolvedPublishBind;
         }
         else if (localStack)
         {
@@ -1105,8 +1617,15 @@ public sealed class StackService : IStackService
         {
             await _armoryImageService.EnsureImageAsync(stackId, cancellationToken);
         }
+
         stack.ArmoryEnabled = true;
-        await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: true);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await EnsureRuntimeConfigurationAsync(
+            stack,
+            repoPath,
+            cancellationToken,
+            includeArmory: true,
+            includeClient: stack.ClientEnabled);
         await ShipExternalStackImagesAsync(stack, includeArmory: true, includeClient: false, cancellationToken);
 
         // The armory reads the stack's auth/characters/world databases, so the DB must be up.
@@ -1119,7 +1638,10 @@ public sealed class StackService : IStackService
             _logger.LogInformation("Armory start requested for stack {StackId} but its database is not running; starting the database first.", stackId);
             await RunDockerComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
             await WaitForDatabaseServiceAsync(stackId, cancellationToken);
+            await WaitForDatabaseReadyAsync(stack, stackId, cancellationToken);
         }
+
+        await _armoryDatabase.EnsureProvisionedAsync(stackId, cancellationToken);
 
         var recreate = forceRecreate ? " --force-recreate" : string.Empty;
         if (forceRecreate)
@@ -1127,7 +1649,18 @@ public sealed class StackService : IStackService
             await PrepareFixedNameServiceRecreateAsync(stackId, stack, "frontend-armory", repoPath, cancellationToken);
         }
 
-        await RunDockerComposeAsync(stackId, $"up -d{recreate} frontend-armory", repoPath, cancellationToken);
+        var armoryOptions = BuildArmoryComposeOptions(stack);
+        var armoryServices = new List<string> { "frontend-armory" };
+        if (armoryOptions.AssetsAvailable)
+        {
+            armoryServices.Add("armory-assets");
+        }
+
+        await RunDockerComposeAsync(
+            stackId,
+            $"up -d --no-deps{recreate} {string.Join(' ', armoryServices)}",
+            repoPath,
+            cancellationToken);
 
         try
         {
@@ -1140,7 +1673,123 @@ public sealed class StackService : IStackService
 
         await TrySyncExternalWebFirewallAsync(stack, cancellationToken);
 
+        return true;
+    }
+
+    /// <summary>
+    /// Brings up the per-stack client file-server container. Mirrors <see cref="StartArmoryInternalAsync"/>.
+    /// </summary>
+    public async Task<bool> StartClientAsync(string stackId, bool forceRecreate = false, CancellationToken cancellationToken = default)
+    {
+        cancellationToken = CancellationToken.None;
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+
+        if (stack is null)
+        {
+            return false;
+        }
+
+        EnsureStackLifecycleAllowed(stack, "start the client files service of");
+
+        var repoPath = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
+        if (!Directory.Exists(repoPath))
+        {
+            throw new InvalidOperationException("Stack has not been built yet.");
+        }
+
+        if (forceRecreate)
+        {
+            await _clientServerImageService.RebuildImageAsync(dockerContext: null, cancellationToken);
+        }
+        else
+        {
+            await _clientServerImageService.EnsureImageAsync(dockerContext: null, cancellationToken);
+        }
+
+        stack.ClientEnabled = true;
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await EnsureRuntimeConfigurationAsync(
+            stack,
+            repoPath,
+            cancellationToken,
+            includeArmory: stack.ArmoryEnabled,
+            includeClient: true);
+        await ShipExternalStackImagesAsync(stack, includeArmory: false, includeClient: true, cancellationToken);
+
+        if (forceRecreate)
+        {
+            await PrepareFixedNameServiceRecreateAsync(stackId, stack, "client", repoPath, cancellationToken);
+        }
+
+        var recreate = forceRecreate ? " --force-recreate" : string.Empty;
+        await RunDockerComposeAsync(
+            stackId,
+            $"up -d --no-deps{recreate} client",
+            repoPath,
+            cancellationToken);
+
+        await RepushRegistrySafeAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> StopClientAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken = CancellationToken.None;
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+
+        if (stack is null)
+        {
+            return false;
+        }
+
+        var repoPath = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
+        stack.ClientEnabled = false;
+        if (Directory.Exists(repoPath))
+        {
+            await RunDockerComposeAsync(stackId, "rm -sf client", repoPath, cancellationToken, throwOnError: false);
+            await EnsureRuntimeConfigurationAsync(
+                stack,
+                repoPath,
+                cancellationToken,
+                includeArmory: stack.ArmoryEnabled,
+                includeClient: false);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> RestartClientAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken = CancellationToken.None;
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+
+        if (stack is null)
+        {
+            return false;
+        }
+
+        var repoPath = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
+        if (!Directory.Exists(repoPath))
+        {
+            throw new InvalidOperationException("Stack has not been built yet.");
+        }
+
+        stack.ClientEnabled = true;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await EnsureRuntimeConfigurationAsync(
+            stack,
+            repoPath,
+            cancellationToken,
+            includeArmory: stack.ArmoryEnabled,
+            includeClient: true);
+        await RunDockerComposeAsync(stackId, "restart client", repoPath, cancellationToken);
         return true;
     }
 
@@ -1165,7 +1814,7 @@ public sealed class StackService : IStackService
         {
             // stop + rm so the containers disappear from the stack view; the stack itself is untouched.
             // The asset sidecar (armory-assets) is torn down with the armory it serves.
-            await RunDockerComposeAsync(stackId, "rm -sf frontend-armory armory-assets", repoPath, cancellationToken);
+            await RunDockerComposeAsync(stackId, "rm -sf frontend-armory armory-assets", repoPath, cancellationToken, throwOnError: false);
             // Regenerate the override without the armory so a later full `up -d` won't recreate it.
             await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: false);
         }
@@ -1194,24 +1843,87 @@ public sealed class StackService : IStackService
         if (stack.DeploymentTarget != DeploymentTarget.External)
         {
             await RunDockerComposeAsync(stackId, "up -d", repoPath, cancellationToken);
+            if (armoryReady)
+            {
+                await WaitForDatabaseServiceAsync(stackId, cancellationToken);
+                await _armoryDatabase.EnsureProvisionedAsync(stackId, cancellationToken);
+            }
+
             return;
         }
 
         var containerPrefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
 
+        // Stop game servers first so crash-looping auth/world processes cannot hammer MySQL while the
+        // database is starting or db-import is running.
+        ReportLifecycleProgress(stackId, "Stopping game servers before database startup…");
+        await RunDockerComposeAsync(
+            stackId,
+            "stop ac-authserver ac-worldserver frontend-armory armory-assets client",
+            repoPath,
+            cancellationToken,
+            throwOnError: false);
+
+        ReportLifecycleProgress(stackId, "Starting database on the VPC…");
         await RunDockerComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
         await WaitForDatabaseServiceAsync(stackId, cancellationToken);
 
-        await RunDockerComposeAsync(stackId, "up -d ac-db-import ac-client-data-init", repoPath, cancellationToken);
-        await WaitForInitContainerAsync(stackId, $"{containerPrefix}-db-import", "DB import", cancellationToken);
-        await WaitForInitContainerAsync(stackId, $"{containerPrefix}-client-data-init", "Client data init", cancellationToken);
+        var dbImportName = $"{containerPrefix}-db-import";
+        var clientDataName = $"{containerPrefix}-client-data-init";
+        var dbImportDone = await IsDbImportCompleteAsync(stack, stackId, dbImportName, cancellationToken);
+        var clientDataDone = await IsClientDataInitCompleteAsync(stack, stackId, clientDataName, cancellationToken);
+
+        var initServices = new List<string>();
+        if (!dbImportDone)
+        {
+            initServices.Add("ac-db-import");
+        }
+
+        if (!clientDataDone)
+        {
+            initServices.Add("ac-client-data-init");
+        }
+
+        if (initServices.Count > 0)
+        {
+            ReportLifecycleProgress(
+                stackId,
+                initServices.Count == 2
+                    ? "Running first-time database and client-data setup (one-time; can take several minutes)…"
+                    : $"Running setup: {string.Join(", ", initServices)}…");
+            await RunDockerComposeAsync(stackId, $"up -d {string.Join(' ', initServices)}", repoPath, cancellationToken);
+            if (!dbImportDone)
+            {
+                await WaitForInitContainerAsync(stackId, dbImportName, "DB import", cancellationToken);
+            }
+
+            if (!clientDataDone)
+            {
+                await WaitForInitContainerAsync(stackId, clientDataName, "Client data init", cancellationToken);
+            }
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Skipping init containers for stack {StackId} — db-import and client-data-init already completed.",
+                stackId);
+        }
 
         // db-import hammers MySQL; wait until it accepts connections again before game servers start.
+        ReportLifecycleProgress(stackId, "Waiting for MySQL to accept connections…");
         await WaitForDatabaseReadyAsync(stack, stackId, cancellationToken);
+
+        if (armoryReady)
+        {
+            ReportLifecycleProgress(stackId, "Provisioning armory database…");
+            await _armoryDatabase.EnsureProvisionedAsync(stackId, cancellationToken);
+            await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: true, includeClient: clientReady);
+        }
 
         // Auth validates that realmlist.address resolves from inside its container — set the row before
         // auth/world start, and store a literal IP (not an EC2 hostname Docker DNS cannot resolve).
-        await UpdateRealmlistAddressAsync(stack, cancellationToken);
+        ReportLifecycleProgress(stackId, "Updating realm address in MySQL…");
+        await UpdateRealmlistAddressAsync(stack, throwOnFailure: true, cancellationToken);
 
         var services = new List<string> { "ac-authserver", "ac-worldserver" };
         if (armoryReady)
@@ -1230,8 +1942,156 @@ public sealed class StackService : IStackService
             services.Add("client");
         }
 
-        await RunDockerComposeAsync(stackId, $"up -d {string.Join(' ', services)}", repoPath, cancellationToken);
+        ReportLifecycleProgress(
+            stackId,
+            $"Starting {services.Count} service container(s) on the VPC…");
+        // `--no-deps` is critical: the base compose requires ac-db-import to have completed, and after
+        // `compose down` that one-shot container is gone — compose would otherwise re-run db-import while
+        // auth/world start, hammering MySQL and causing "Lost connection to MySQL server" errors.
+        await RunDockerComposeAsync(
+            stackId,
+            $"up -d --no-deps {string.Join(' ', services)}",
+            repoPath,
+            cancellationToken);
     }
+
+    /// <summary>True when a one-shot init container exists and exited successfully.</summary>
+    private async Task<bool> IsInitContainerCompleteAsync(
+        string stackId,
+        string containerName,
+        CancellationToken cancellationToken)
+    {
+        var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "docker",
+            Arguments = $"{contextArg}inspect -f \"{{{{.State.Status}}}}|{{{{.State.ExitCode}}}}\" {containerName}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+
+        if (process is null)
+        {
+            return false;
+        }
+
+        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        if (process.ExitCode != 0)
+        {
+            return false;
+        }
+
+        var parts = stdout.Trim().Split('|');
+        var status = parts.Length > 0 ? parts[0].Trim() : string.Empty;
+        if (!status.Equals("exited", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return parts.Length > 1
+               && int.TryParse(parts[1].Trim(), out var exitCode)
+               && exitCode == 0;
+    }
+
+    /// <summary>
+    /// True when db-import finished. After <c>compose down</c> the one-shot container is removed but the
+    /// MySQL volume retains the imported schema — fall back to checking that before re-running import.
+    /// </summary>
+    private async Task<bool> IsDbImportCompleteAsync(
+        ManagedStackEntity stack,
+        string stackId,
+        string dbImportContainerName,
+        CancellationToken cancellationToken)
+    {
+        if (await IsInitContainerCompleteAsync(stackId, dbImportContainerName, cancellationToken))
+        {
+            return true;
+        }
+
+        if (!await IsAzerothCoreDatabasePopulatedAsync(stack, stackId, cancellationToken))
+        {
+            return false;
+        }
+
+        // World schema can exist while acore_auth.realmlist is still empty (skipped import, manual DB
+        // work, or starting auth before a full stack start). Treat as incomplete so db-import runs once.
+        return await IsRealmlistPopulatedAsync(stack, stackId, cancellationToken);
+    }
+
+    /// <summary>
+    /// True when client-data-init finished. After <c>compose down</c> the container is removed but the
+    /// client-data volume retains downloaded DBCs.
+    /// </summary>
+    private async Task<bool> IsClientDataInitCompleteAsync(
+        ManagedStackEntity stack,
+        string stackId,
+        string clientDataContainerName,
+        CancellationToken cancellationToken)
+    {
+        if (await IsInitContainerCompleteAsync(stackId, clientDataContainerName, cancellationToken))
+        {
+            return true;
+        }
+
+        var clientDataVolume = $"{DockerComposeOverrideGenerator.GetComposeProjectName(stackId)}_ac-client-data";
+        var dbcCount = await _remoteEngine.CountVolumeFilesAsync(
+            stack,
+            clientDataVolume,
+            "dbc",
+            "*.dbc",
+            cancellationToken);
+        return dbcCount > 0;
+    }
+
+    private async Task<bool> IsAzerothCoreDatabasePopulatedAsync(
+        ManagedStackEntity stack,
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var containerPrefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
+        var containerName = $"{containerPrefix}-database";
+        var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+        var arguments =
+            $"{contextArg}exec {containerName} mysql -N -uroot " +
+            $"-p{stack.DatabaseRootPassword} -e " +
+            "\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='acore_world' AND table_name='version';\"";
+
+        var (exitCode, stdout, _) = await RunDockerCliAsync(arguments, cancellationToken);
+        if (exitCode != 0)
+        {
+            return false;
+        }
+
+        return int.TryParse(stdout.Trim(), out var tableCount) && tableCount > 0;
+    }
+
+    private async Task<bool> IsRealmlistPopulatedAsync(
+        ManagedStackEntity stack,
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var containerPrefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
+        var containerName = $"{containerPrefix}-database";
+        var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+        var arguments =
+            $"{contextArg}exec {containerName} mysql -N -uroot " +
+            $"-p{stack.DatabaseRootPassword} -e " +
+            "\"SELECT COUNT(*) FROM acore_auth.realmlist;\"";
+
+        var (exitCode, stdout, _) = await RunDockerCliAsync(arguments, cancellationToken);
+        if (exitCode != 0)
+        {
+            return false;
+        }
+
+        return int.TryParse(stdout.Trim(), out var rowCount) && rowCount > 0;
+    }
+
+    private void ReportLifecycleProgress(string stackId, string message) =>
+        _stackJobService.ReportProgress(stackId, message);
 
     /// <summary>Waits for a one-shot init container to exit successfully on the stack's engine.</summary>
     private async Task WaitForInitContainerAsync(
@@ -1390,7 +2250,12 @@ public sealed class StackService : IStackService
         return Path.Combine(baseDir, stackId);
     }
 
-    private async Task RunDockerComposeAsync(string stackId, string arguments, string workingDirectory, CancellationToken cancellationToken)
+    private async Task RunDockerComposeAsync(
+        string stackId,
+        string arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken,
+        bool throwOnError = true)
     {
         var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stackId);
         var dockerContext = await ResolveDockerContextAsync(stackId, cancellationToken);
@@ -1454,7 +2319,7 @@ public sealed class StackService : IStackService
         process.BeginErrorReadLine();
         await process.WaitForExitAsync(cancellationToken);
 
-        if (process.ExitCode != 0)
+        if (throwOnError && process.ExitCode != 0)
         {
             var errorOutput = stderr.Count > 0
                 ? string.Join(Environment.NewLine, stderr)
@@ -1540,20 +2405,46 @@ public sealed class StackService : IStackService
         return context is null ? string.Empty : $"--context {context} ";
     }
 
-    private string ResolveRealmlistHost(ManagedStackEntity stack) =>
-        string.IsNullOrWhiteSpace(stack.RealmlistHostOverride) ? _migrationOptions.RealmlistHost : stack.RealmlistHostOverride;
+    private string ResolveRealmlistHost(ManagedStackEntity stack)
+    {
+        var host = RealmlistHostResolver.NormalizeHost(string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
+            ? string.Empty
+            : stack.RealmlistHostOverride);
+
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            host = RealmlistHostResolver.NormalizeHost(_migrationOptions.RealmlistHost);
+        }
+
+        if (string.IsNullOrWhiteSpace(host) && stack.DeploymentTarget == DeploymentTarget.External)
+        {
+            host = RealmlistHostResolver.NormalizeHost(stack.ExternalHost);
+        }
+
+        return host;
+    }
 
     /// <summary>
     /// Idempotently rewrites the acore_auth.realmlist row (id 1) so the auth server hands connecting
     /// clients the correct world address/port. Without this the upstream db-import default of
     /// 127.0.0.1:8085 is served and non-local clients cannot connect even after a successful login.
-    /// Best-effort: a failure here is logged but does not fail the stack start.
+    /// Best-effort unless <paramref name="throwOnFailure"/> is true (used before auth/world start).
     /// </summary>
-    private async Task UpdateRealmlistAddressAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    private async Task UpdateRealmlistAddressAsync(
+        ManagedStackEntity stack,
+        bool throwOnFailure = false,
+        CancellationToken cancellationToken = default)
     {
         var host = ResolveRealmlistHost(stack);
         if (string.IsNullOrWhiteSpace(host))
         {
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException(
+                    "No realmlist host configured for this stack. Set the realm address on the Realms tab " +
+                    "or update the VPC connection for external stacks.");
+            }
+
             _logger.LogWarning("No realmlist host resolved for stack {StackId}; leaving DB realmlist untouched.", stack.Id);
             return;
         }
@@ -1576,47 +2467,100 @@ public sealed class StackService : IStackService
 
         try
         {
-            var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
-            var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
-            var containers = await _dockerService.ListContainersAsync(composeProjectName, dockerContext, cancellationToken);
-            var databaseContainer = containers
-                .FirstOrDefault(c => c.Name.Contains("database", StringComparison.OrdinalIgnoreCase));
-
-            if (databaseContainer is null)
-            {
-                _logger.LogWarning("Database container not found for stack {StackId}; skipping realmlist update.", stack.Id);
-                return;
-            }
-
-            var realmName = string.IsNullOrWhiteSpace(stack.RealmName) ? "AzerothCore" : stack.RealmName;
-            var sql =
-                $"UPDATE acore_auth.realmlist SET address='{EscapeSqlLiteral(realmAddress)}', " +
-                $"localAddress='{EscapeSqlLiteral(realmAddress)}', localSubnetMask='255.255.255.0', " +
-                $"port={stack.WorldServerPort}, name='{EscapeSqlLiteral(realmName)}' WHERE id=1;";
-
-            var contextArg = await GetDockerContextArgAsync(stack.Id, cancellationToken);
-            var arguments =
-                $"{contextArg}exec -i {databaseContainer.Name} mysql -uroot " +
-                $"-p{stack.DatabaseRootPassword} -e \"{sql.Replace("\"", "\\\"")}\"";
-
-            var (exitCode, _, error) = await RunDockerCliAsync(arguments, cancellationToken);
-            if (exitCode != 0)
-            {
-                var actualError = string.Join("\n", (error ?? string.Empty)
-                    .Split('\n')
-                    .Where(line => !line.Contains("Using a password on the command line", StringComparison.OrdinalIgnoreCase)));
-                _logger.LogWarning("Realmlist update for stack {StackId} exited {Exit}: {Error}", stack.Id, exitCode, actualError);
-            }
-            else
-            {
-                _logger.LogInformation("Realmlist for stack {StackId} set to {Host}:{Port} ({Realm}).",
-                    stack.Id, realmAddress, stack.WorldServerPort, realmName);
-            }
+            await ExecuteRealmlistUpdateViaDockerAsync(stack, realmAddress, throwOnFailure, cancellationToken);
         }
         catch (Exception ex)
         {
+            if (throwOnFailure)
+            {
+                throw;
+            }
+
             _logger.LogWarning(ex, "Failed to update acore_auth.realmlist for stack {StackId}.", stack.Id);
         }
+    }
+
+    /// <summary>
+    /// Updates acore_auth.realmlist via <c>docker exec … mysql</c> so external stacks do not depend on
+    /// the SSH management tunnel reaching the published MySQL port on the remote host.
+    /// </summary>
+    private async Task ExecuteRealmlistUpdateViaDockerAsync(
+        ManagedStackEntity stack,
+        string realmAddress,
+        bool throwOnFailure,
+        CancellationToken cancellationToken)
+    {
+        var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
+        var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
+        var containers = await _dockerService.ListContainersAsync(
+            composeProjectName,
+            dockerContext,
+            cancellationToken: cancellationToken);
+        var databaseContainer = containers
+            .FirstOrDefault(c => c.Name.Contains("database", StringComparison.OrdinalIgnoreCase));
+
+        if (databaseContainer is null)
+        {
+            var message = "Database container not found.";
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException(message);
+            }
+
+            _logger.LogWarning("Database container not found for stack {StackId}; skipping realmlist update.", stack.Id);
+            return;
+        }
+
+        var realmName = string.IsNullOrWhiteSpace(stack.RealmName) ? "AzerothCore" : stack.RealmName;
+        var sql =
+            "INSERT INTO acore_auth.realmlist " +
+            "(id, name, address, localAddress, localSubnetMask, port, icon, flag, timezone, allowedSecurityLevel, population, gamebuild) " +
+            $"VALUES (1, '{EscapeSqlLiteral(realmName)}', '{EscapeSqlLiteral(realmAddress)}', " +
+            $"'{EscapeSqlLiteral(realmAddress)}', '255.255.255.0', {stack.WorldServerPort}, 0, 0, 1, 0, 0, 12340) " +
+            "ON DUPLICATE KEY UPDATE " +
+            $"name='{EscapeSqlLiteral(realmName)}', " +
+            $"address='{EscapeSqlLiteral(realmAddress)}', " +
+            $"localAddress='{EscapeSqlLiteral(realmAddress)}', " +
+            "localSubnetMask='255.255.255.0', " +
+            $"port={stack.WorldServerPort}, " +
+            "flag=0;";
+
+        var contextArg = await GetDockerContextArgAsync(stack.Id, cancellationToken);
+        var arguments =
+            $"{contextArg}exec -i {databaseContainer.Name} mysql -uroot " +
+            $"-p{stack.DatabaseRootPassword} -e \"{sql.Replace("\"", "\\\"")}\"";
+
+        var (exitCode, _, error) = await RunDockerCliAsync(arguments, cancellationToken);
+        if (exitCode != 0)
+        {
+            var actualError = string.Join("\n", (error ?? string.Empty)
+                .Split('\n')
+                .Where(line => !line.Contains("Using a password on the command line", StringComparison.OrdinalIgnoreCase)))
+                .Trim();
+            if (string.IsNullOrWhiteSpace(actualError))
+            {
+                actualError = $"mysql exited with code {exitCode}.";
+            }
+
+            if (throwOnFailure)
+            {
+                throw new InvalidOperationException($"Failed updating realmlist in MySQL: {actualError}");
+            }
+
+            _logger.LogWarning(
+                "Realmlist update for stack {StackId} exited {Exit}: {Error}",
+                stack.Id,
+                exitCode,
+                actualError);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Realmlist for stack {StackId} set to {Host}:{Port} ({Realm}).",
+            stack.Id,
+            realmAddress,
+            stack.WorldServerPort,
+            realmName);
     }
 
     private static string EscapeSqlLiteral(string value) =>
@@ -1647,7 +2591,10 @@ public sealed class StackService : IStackService
         return (process.ExitCode, stdout, stderr);
     }
 
-    private async Task<StackDetailsDto> MapAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    private async Task<StackDetailsDto> MapAsync(
+        ManagedStackEntity stack,
+        bool probeRuntime,
+        CancellationToken cancellationToken)
     {
         // Get cached update status
         var outdatedModules = string.IsNullOrEmpty(stack.OutdatedModulesJson)
@@ -1694,12 +2641,62 @@ public sealed class StackService : IStackService
             RequiredRuntimeArtifactVersion = RuntimeArtifactTemplate.CurrentVersion
         };
 
-        // Get containers and determine actual runtime status
-        var containers = await GetContainersAsync(stack.Id, cancellationToken);
-        var services = BuildServiceList(containers);
-        await EnrichArmoryHealthAsync(stack.Id, services, containers, cancellationToken);
-        containers = ApplyServiceHealthToContainers(containers, services);
-        var runtimeStatus = DetermineRuntimeStatus(stack.Status, containers);
+        List<ContainerStatusDto> containers;
+        List<StackServiceDto> services;
+        StackStatus runtimeStatus;
+        var externalReconnect = EvaluateExternalReconnect(stack);
+        bool? dockerEngineAvailable = null;
+        string? dockerEngineUnavailableReason = null;
+
+        // A lifecycle job hammers the remote Docker engine over SSH; skip the live probe so detail
+        // refreshes stay fast and the UI can show job progress instead of hanging on docker ps.
+        var activeJob = _stackJobService.GetStatus(stack.Id);
+        var skipRuntimeProbe = activeJob is { IsRunning: true };
+
+        if (probeRuntime && !skipRuntimeProbe)
+        {
+            RuntimeProbeResult probeResult;
+            if (ShouldServeCachedExternalProbeOnly(stack)
+                && TryRestoreExternalRuntimeProbeCache(
+                    stack.Id,
+                    out var cachedContainers,
+                    out var cachedServices,
+                    out var cachedRuntimeStatus,
+                    out var cachedEngineAvailable,
+                    out var cachedEngineError)
+                && cachedRuntimeStatus is StackStatus.Stopped or StackStatus.Failed)
+            {
+                probeResult = new RuntimeProbeResult(
+                    cachedContainers,
+                    cachedServices,
+                    cachedRuntimeStatus,
+                    cachedEngineAvailable,
+                    cachedEngineError);
+            }
+            else if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                probeResult = await WithExternalProbeLockAsync(
+                    stack.Id,
+                    () => ProbeRuntimeAsync(stack, externalReconnect, cancellationToken),
+                    cancellationToken);
+            }
+            else
+            {
+                probeResult = await ProbeRuntimeAsync(stack, externalReconnect, cancellationToken);
+            }
+
+            containers = probeResult.Containers;
+            services = probeResult.Services;
+            runtimeStatus = probeResult.RuntimeStatus;
+            dockerEngineAvailable = probeResult.EngineAvailable;
+            dockerEngineUnavailableReason = probeResult.EngineUnavailableReason;
+        }
+        else
+        {
+            containers = [];
+            services = BuildServiceList(containers);
+            runtimeStatus = stack.Status;
+        }
 
         // While a detached start/restart/start-database job is running, report Starting so both the list
         // and detail views reflect the in-progress operation (containers aren't up yet, so the raw
@@ -1710,8 +2707,51 @@ public sealed class StackService : IStackService
         {
             runtimeStatus = StackStatus.Starting;
         }
+        else if (job is { IsRunning: true, Action: StackJobAction.Stop })
+        {
+            runtimeStatus = StackStatus.Stopped;
+        }
+        else if (stack.Status == StackStatus.Failed
+                 && runtimeStatus == StackStatus.Stopped
+                 && job is not { IsRunning: true })
+        {
+            // A prior lifecycle job failed (often while the VPC was unreachable). Once containers are
+            // actually down again — e.g. after a reboot — present Stopped so operators can restart.
+            runtimeStatus = StackStatus.Stopped;
+        }
+        else if (!probeRuntime
+                 && stack.Status == StackStatus.Failed
+                 && job is not { IsRunning: true })
+        {
+            runtimeStatus = StackStatus.Stopped;
+        }
 
-        var externalReconnect = EvaluateExternalReconnect(stack);
+        var armoryRunning = probeRuntime
+            ? containers.Any(c =>
+                c.Name.Contains("armory", StringComparison.OrdinalIgnoreCase)
+                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase))
+            : false;
+
+        var isAdminAccountInitialized = stack.IsAdminAccountInitialized;
+        var adminAccountInitializedAt = stack.AdminAccountInitializedAt;
+        var dbContainerRunning = containers.Any(c =>
+            c.Name.Contains("database", StringComparison.OrdinalIgnoreCase)
+            && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase));
+        var canAttemptSoapReconcile = dbContainerRunning
+            || (stack.DeploymentTarget == DeploymentTarget.External && !externalReconnect.NeedsReconnect);
+
+        if (probeRuntime && !skipRuntimeProbe && canAttemptSoapReconcile)
+        {
+            var shouldReconcileSoap = !LastSoapAdminReconcileAt.TryGetValue(stack.Id, out var lastReconcile)
+                || DateTime.UtcNow - lastReconcile >= SoapAdminReconcileMinInterval;
+            if (shouldReconcileSoap)
+            {
+                var reconciled = await ReconcileSoapAdminFlagAsync(stack, cancellationToken);
+                isAdminAccountInitialized = reconciled.Initialized;
+                adminAccountInitializedAt = reconciled.InitializedAt;
+                LastSoapAdminReconcileAt[stack.Id] = DateTime.UtcNow;
+            }
+        }
 
         return new StackDetailsDto
         {
@@ -1769,17 +2809,150 @@ public sealed class StackService : IStackService
                 ArmoryAccounts = MapArmoryAccountsConfig(stack)
             },
             UpdateStatus = updateStatus,
-            IsAdminAccountInitialized = stack.IsAdminAccountInitialized,
-            AdminAccountInitializedAt = stack.AdminAccountInitializedAt,
+            IsAdminAccountInitialized = isAdminAccountInitialized,
+            AdminAccountInitializedAt = adminAccountInitializedAt,
             ArmoryPort = stack.ArmoryPort,
-            ArmoryRunning = containers.Any(c =>
-                c.Name.Contains("armory", StringComparison.OrdinalIgnoreCase)
-                && c.Status.Contains("running", StringComparison.OrdinalIgnoreCase)),
+            ArmoryRunning = armoryRunning,
             ModulesPendingRebuild = GetModulesPendingRebuild(stack.Id, Deserialize<List<string>>(stack.ModuleIdsJson) ?? []),
             NeedsExternalReconnect = externalReconnect.NeedsReconnect,
             ExternalReconnectReason = externalReconnect.Reason,
+            DockerEngineAvailable = dockerEngineAvailable,
+            DockerEngineUnavailableReason = dockerEngineUnavailableReason,
             HasCompletedBuild = stack.LastBuiltAt.HasValue || !string.IsNullOrEmpty(stack.CoreCommitSha),
         };
+    }
+
+    private sealed record RuntimeProbeResult(
+        List<ContainerStatusDto> Containers,
+        List<StackServiceDto> Services,
+        StackStatus RuntimeStatus,
+        bool? EngineAvailable,
+        string? EngineUnavailableReason);
+
+    private static bool ShouldServeCachedExternalProbeOnly(ManagedStackEntity stack) =>
+        stack.DeploymentTarget == DeploymentTarget.External
+        && stack.Status is StackStatus.Stopped or StackStatus.Failed;
+
+    private async Task<RuntimeProbeResult> ProbeRuntimeAsync(
+        ManagedStackEntity stack,
+        (bool NeedsReconnect, string? Reason) externalReconnect,
+        CancellationToken cancellationToken)
+    {
+        List<ContainerStatusDto> containers;
+        List<StackServiceDto> services;
+        StackStatus runtimeStatus;
+        bool? dockerEngineAvailable;
+        string? dockerEngineUnavailableReason;
+
+        string? dockerContext = null;
+        using var probeTimeoutCts = stack.DeploymentTarget == DeploymentTarget.External
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            : null;
+        if (probeTimeoutCts is not null)
+        {
+            probeTimeoutCts.CancelAfter(ExternalRuntimeProbeTimeout);
+        }
+
+        var probeToken = probeTimeoutCts?.Token ?? cancellationToken;
+
+        try
+        {
+            if (!externalReconnect.NeedsReconnect
+                && stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                dockerContext = await ResolveDockerContextAsync(stack, probeToken);
+            }
+
+            var containerProbe = await GetContainersWithEngineStatusAsync(stack, dockerContext, probeToken);
+            containers = containerProbe.Containers;
+            dockerEngineAvailable = containerProbe.EngineReachable;
+            dockerEngineUnavailableReason = containerProbe.EngineError;
+
+            if (stack.DeploymentTarget == DeploymentTarget.External
+                && dockerEngineAvailable == false
+                && !externalReconnect.NeedsReconnect)
+            {
+                var (sshAvailable, sshMessage) = await _remoteEngine.ProbeRemoteDockerAsync(stack, probeToken);
+                if (sshAvailable)
+                {
+                    dockerEngineAvailable = true;
+                    dockerEngineUnavailableReason = null;
+                }
+                else if (!string.IsNullOrWhiteSpace(sshMessage))
+                {
+                    dockerEngineUnavailableReason = sshMessage;
+                }
+            }
+
+            services = BuildServiceList(containers);
+            if (stack.DeploymentTarget != DeploymentTarget.External)
+            {
+                await EnrichArmoryHealthAsync(stack.Id, services, containers, probeToken);
+            }
+
+            containers = ApplyServiceHealthToContainers(containers, services);
+            runtimeStatus = DetermineRuntimeStatus(stack.Status, containers);
+
+            if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                CacheExternalRuntimeProbe(
+                    stack.Id,
+                    containers,
+                    services,
+                    runtimeStatus,
+                    dockerEngineAvailable,
+                    dockerEngineUnavailableReason);
+            }
+        }
+        catch (OperationCanceledException) when (probeTimeoutCts?.IsCancellationRequested == true)
+        {
+            _logger.LogWarning("Timed out probing the remote Docker engine for stack {StackId}.", stack.Id);
+            if (TryRestoreExternalRuntimeProbeCache(
+                    stack.Id,
+                    out containers,
+                    out services,
+                    out runtimeStatus,
+                    out dockerEngineAvailable,
+                    out _))
+            {
+                dockerEngineUnavailableReason =
+                    "Timed out refreshing live status from the VPC; showing the last successful probe.";
+            }
+            else
+            {
+                containers = [];
+                services = BuildServiceList(containers);
+                runtimeStatus = stack.Status;
+                dockerEngineAvailable = null;
+                dockerEngineUnavailableReason =
+                    "Timed out connecting to the remote Docker engine. The VPC may be under heavy load or unreachable. "
+                    + "If a start/stop job is running, wait for it to finish and refresh.";
+            }
+        }
+
+        return new RuntimeProbeResult(
+            containers,
+            services,
+            runtimeStatus,
+            dockerEngineAvailable,
+            dockerEngineUnavailableReason);
+    }
+
+    private static async Task<T> WithExternalProbeLockAsync<T>(
+        string stackId,
+        Func<Task<T>> action,
+        CancellationToken cancellationToken)
+    {
+        var gate = ExternalProbeLocks.GetOrAdd(stackId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private (bool NeedsReconnect, string? Reason) EvaluateExternalReconnect(ManagedStackEntity stack)
@@ -1830,18 +3003,74 @@ public sealed class StackService : IStackService
 
     private async Task<List<ContainerStatusDto>> GetContainersAsync(string stackId, CancellationToken cancellationToken)
     {
-        try
-        {
-            var dockerContext = await ResolveDockerContextAsync(stackId, cancellationToken);
-            var containers = await _dockerService.ListContainersAsync(
-                DockerComposeOverrideGenerator.GetComposeProjectName(stackId), dockerContext, cancellationToken);
-            return containers.ToList();
-        }
-        catch (Exception)
+        var stack = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null)
         {
             return [];
         }
+
+        return await GetContainersAsync(stack, cancellationToken);
     }
+
+    private async Task<List<ContainerStatusDto>> GetContainersAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    {
+        var probe = await ListStackContainersAsync(stack, cancellationToken);
+        return probe.Containers;
+    }
+
+    private async Task<(List<ContainerStatusDto> Containers, bool EngineReachable, string? EngineError)>
+        ListStackContainersAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dockerContext = stack.DeploymentTarget == DeploymentTarget.External
+                ? await ResolveDockerContextAsync(stack, cancellationToken)
+                : null;
+
+            var projectName = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
+            var byProject = await _dockerService.ListContainersWithEngineStatusAsync(
+                projectName,
+                dockerContext,
+                cancellationToken: cancellationToken);
+            if (!byProject.EngineReachable)
+            {
+                return ([], false, byProject.EngineError);
+            }
+
+            var merged = byProject.Containers.ToDictionary(
+                container => container.ContainerId,
+                container => container,
+                StringComparer.OrdinalIgnoreCase);
+
+            var prefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
+            var byName = await _dockerService.ListContainersWithEngineStatusAsync(
+                dockerContext: dockerContext,
+                nameContains: prefix,
+                cancellationToken: cancellationToken);
+            if (byName.EngineReachable)
+            {
+                foreach (var container in byName.Containers)
+                {
+                    merged[container.ContainerId] = container;
+                }
+            }
+
+            return (merged.Values.ToList(), true, null);
+        }
+        catch (Exception ex)
+        {
+            return ([], false, ex.Message);
+        }
+    }
+
+    private async Task<(List<ContainerStatusDto> Containers, bool EngineReachable, string? EngineError)>
+        GetContainersWithEngineStatusAsync(
+            ManagedStackEntity stack,
+            string? dockerContext,
+            CancellationToken cancellationToken) =>
+        await ListStackContainersAsync(stack, cancellationToken);
 
     /// <summary>
     /// The stack's canonical, always-shown services in display order. Every stack can run these, so
@@ -2095,7 +3324,12 @@ public sealed class StackService : IStackService
                     throw new InvalidOperationException("Stack has not been built yet.");
                 }
 
-                await EnsureRuntimeConfigurationAsync(armoryStack, armoryRepo, armoryToken, includeArmory: true);
+                await EnsureRuntimeConfigurationAsync(
+                    armoryStack,
+                    armoryRepo,
+                    armoryToken,
+                    includeArmory: true,
+                    includeClient: armoryStack.ClientEnabled);
                 await RunDockerComposeAsync(stackId, "restart frontend-armory", armoryRepo, armoryToken);
                 return true;
             }
@@ -2104,39 +3338,6 @@ public sealed class StackService : IStackService
             // fresh container so config/env changes are actually applied. Runs detached from the
             // request token (see StartArmoryInternalAsync).
             return await StartArmoryInternalAsync(stackId, action == StackServiceAction.Recreate);
-        }
-
-        // The client-server runs the shared azeroth-platform-client image built from the manager's baked
-        // source. "Rebuild & Restart" must rebuild that image so ClientServer code changes are actually
-        // picked up — a plain force-recreate would reuse the cached image (mirrors the armory's
-        // rebuild-on-recreate). Runs detached from the request token so a page refresh can't interrupt it.
-        if (string.Equals(service, "client", StringComparison.OrdinalIgnoreCase)
-            && action == StackServiceAction.Recreate)
-        {
-            var clientToken = CancellationToken.None;
-            var clientStack = await _dbContext.ManagedStacks
-                .SingleOrDefaultAsync(item => item.Id == stackId, clientToken);
-            if (clientStack is null) { return false; }
-
-            EnsureStackLifecycleAllowed(clientStack, "control a service of");
-
-            var clientRepo = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
-            if (!Directory.Exists(clientRepo))
-            {
-                throw new InvalidOperationException("Stack has not been built yet.");
-            }
-
-            await _clientServerImageService.RebuildImageAsync(dockerContext: null, clientToken);
-
-            await EnsureRuntimeConfigurationAsync(clientStack, clientRepo, clientToken, includeClient: true);
-            await ShipExternalStackImagesAsync(clientStack, includeArmory: false, includeClient: true, clientToken);
-            await PrepareFixedNameServiceRecreateAsync(stackId, clientStack, "client", clientRepo, clientToken);
-            await RunDockerComposeAsync(stackId, "up -d --force-recreate --no-deps client", clientRepo, clientToken);
-
-            // A recreated client container starts with only its env fallback portal; re-push the
-            // registry (which also refreshes each stack's branding + news) so it self-heals immediately.
-            await RepushRegistrySafeAsync(clientToken);
-            return true;
         }
 
         // Recreating the database would tear down and rebuild the container. Its data lives in a
@@ -2176,6 +3377,13 @@ public sealed class StackService : IStackService
                 // service available, then bring just this service up. `up -d` also starts any
                 // compose depends_on (e.g. the database) so a single service can be started safely.
                 await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: stack.ArmoryEnabled);
+                if (IsGameServerService(service))
+                {
+                    // Auth refuses to start when acore_auth.realmlist is empty or holds an unresolvable
+                    // address. Full stack start seeds this in BringStackUpAsync; per-container starts must too.
+                    await UpdateRealmlistAddressAsync(stack, throwOnFailure: true, cancellationToken);
+                }
+
                 if (action == StackServiceAction.Recreate)
                 {
                     await PrepareFixedNameServiceRecreateAsync(stackId, stack, service, repoPath, cancellationToken);
@@ -2186,15 +3394,159 @@ public sealed class StackService : IStackService
                 break;
 
             case StackServiceAction.Stop:
-                await RunDockerComposeAsync(stackId, $"stop {service}", repoPath, cancellationToken);
+                if (await IsComposeServiceRestartingAsync(stackId, stack, service, cancellationToken))
+                {
+                    await ForceStopComposeServiceAsync(stackId, service, repoPath, cancellationToken);
+                }
+                else
+                {
+                    await RunDockerComposeAsync(stackId, $"stop -t 30 {service}", repoPath, cancellationToken);
+                }
+
                 break;
 
             case StackServiceAction.Restart:
+                if (IsGameServerService(service))
+                {
+                    await UpdateRealmlistAddressAsync(stack, throwOnFailure: true, cancellationToken);
+                }
+
                 await RunDockerComposeAsync(stackId, $"restart {service}", repoPath, cancellationToken);
                 break;
         }
 
         return true;
+    }
+
+    private static bool IsGameServerService(string service) =>
+        string.Equals(service, "ac-authserver", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(service, "ac-worldserver", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Stops a compose service and removes its container so <c>restart: unless-stopped</c> cannot respawn it.
+    /// </summary>
+    private async Task ForceStopComposeServiceAsync(
+        string stackId,
+        string service,
+        string repoPath,
+        CancellationToken cancellationToken)
+    {
+        await RunDockerComposeAsync(stackId, $"stop -t 5 {service}", repoPath, cancellationToken, throwOnError: false);
+        await RunDockerComposeAsync(stackId, $"rm -sf {service}", repoPath, cancellationToken, throwOnError: false);
+    }
+
+    private async Task<bool> IsComposeServiceRestartingAsync(
+        string stackId,
+        ManagedStackEntity stack,
+        string composeService,
+        CancellationToken cancellationToken)
+    {
+        var containerName = DockerComposeOverrideGenerator.GetContainerNameForService(
+            stack.Id,
+            stack.StackName,
+            composeService);
+        if (containerName is null)
+        {
+            return false;
+        }
+
+        var probe = await ListStackContainersAsync(stack, cancellationToken);
+        if (!probe.EngineReachable)
+        {
+            return false;
+        }
+
+        var container = probe.Containers.FirstOrDefault(item =>
+            string.Equals(item.Name, containerName, StringComparison.OrdinalIgnoreCase)
+            || item.Name.Contains(containerName, StringComparison.OrdinalIgnoreCase));
+        return container is not null
+               && container.Status.Contains("restarting", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static readonly string[] StackContainerServices =
+    [
+        "ac-database",
+        "ac-authserver",
+        "ac-worldserver",
+        "frontend-armory",
+        "armory-assets",
+        "client",
+        "ac-db-import",
+        "ac-client-data-init",
+        "ac-tools",
+        "ac-dev-server",
+    ];
+
+    private async Task ForceRemoveAllStackContainersByNameAsync(
+        string stackId,
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+        foreach (var service in StackContainerServices)
+        {
+            var containerName = DockerComposeOverrideGenerator.GetContainerNameForService(
+                stack.Id,
+                stack.StackName,
+                service);
+            if (containerName is null)
+            {
+                continue;
+            }
+
+            var (exitCode, _, stderr) = await RunDockerCliAsync($"{contextArg}rm -f {containerName}", cancellationToken);
+            if (exitCode != 0
+                && !stderr.Contains("No such container", StringComparison.OrdinalIgnoreCase)
+                && !stderr.Contains("is not running", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug(
+                    "docker rm -f {ContainerName} on stack {StackId} exited {ExitCode}: {Stderr}",
+                    containerName,
+                    stackId,
+                    exitCode,
+                    stderr.Trim());
+            }
+        }
+    }
+
+    private async Task RemoveRemainingStackContainersAsync(
+        string stackId,
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        var probe = await ListStackContainersAsync(stack, cancellationToken);
+        if (!probe.EngineReachable)
+        {
+            _logger.LogWarning(
+                "Could not list containers while cleaning up stack {StackId}: {Error}",
+                stackId,
+                probe.EngineError);
+            await ForceRemoveAllStackContainersByNameAsync(stackId, stack, cancellationToken);
+            return;
+        }
+
+        if (probe.Containers.Count == 0)
+        {
+            return;
+        }
+
+        var prefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
+        var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+        foreach (var container in probe.Containers.Where(c =>
+                     IsActiveContainer(c) || c.Name.Contains(prefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            var (exitCode, _, stderr) = await RunDockerCliAsync($"{contextArg}rm -f {container.Name}", cancellationToken);
+            if (exitCode != 0
+                && !stderr.Contains("No such container", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug(
+                    "docker rm -f {ContainerName} on stack {StackId} exited {ExitCode}: {Stderr}",
+                    container.Name,
+                    stackId,
+                    exitCode,
+                    stderr.Trim());
+            }
+        }
     }
 
     /// <summary>
@@ -2272,6 +3624,50 @@ public sealed class StackService : IStackService
         return StackStatus.Degraded;
     }
 
+    private static void CacheExternalRuntimeProbe(
+        string stackId,
+        List<ContainerStatusDto> containers,
+        List<StackServiceDto> services,
+        StackStatus runtimeStatus,
+        bool? engineReachable,
+        string? engineError)
+    {
+        ExternalRuntimeProbeCaches[stackId] = new ExternalRuntimeProbeCache(
+            containers,
+            services,
+            runtimeStatus,
+            engineReachable,
+            engineError,
+            DateTime.UtcNow);
+    }
+
+    private static bool TryRestoreExternalRuntimeProbeCache(
+        string stackId,
+        out List<ContainerStatusDto> containers,
+        out List<StackServiceDto> services,
+        out StackStatus runtimeStatus,
+        out bool? engineReachable,
+        out string? engineError)
+    {
+        if (ExternalRuntimeProbeCaches.TryGetValue(stackId, out var cached)
+            && DateTime.UtcNow - cached.CachedAt <= ExternalRuntimeProbeCacheTtl)
+        {
+            containers = cached.Containers;
+            services = cached.Services;
+            runtimeStatus = cached.RuntimeStatus;
+            engineReachable = cached.EngineReachable;
+            engineError = cached.EngineError;
+            return true;
+        }
+
+        containers = [];
+        services = [];
+        runtimeStatus = StackStatus.Stopped;
+        engineReachable = null;
+        engineError = null;
+        return false;
+    }
+
     private async Task EnsureRuntimeConfigurationAsync(
         ManagedStackEntity stack,
         string repoPath,
@@ -2309,6 +3705,16 @@ public sealed class StackService : IStackService
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
+        if (renderArmory)
+        {
+            await _armoryDatabase.EnsurePasswordAsync(stack.Id, cancellationToken);
+            stack.ArmoryDatabasePasswordProtected = await _dbContext.ManagedStacks
+                .AsNoTracking()
+                .Where(item => item.Id == stack.Id)
+                .Select(item => item.ArmoryDatabasePasswordProtected)
+                .SingleAsync(cancellationToken);
+        }
+
         // Server config (etc) and logs are pre-seeded named volumes for every stack (local and external).
         // Docker treats the slash-less volume names as named-volume references, declared external in the
         // override and resolved to the volumes the manager seeds below.
@@ -2331,7 +3737,7 @@ public sealed class StackService : IStackService
         // operator can expose the armory/client on LAN/VPC/all-interfaces without hand-editing this .env
         // (which is unreachable once the stack is pushed to a remote host). Blank falls back to the policy
         // default: loopback for local stacks, all interfaces for external ones.
-        var publishBindIp = TryParseBindAddress(stack.PublishBindAddress);
+        var publishBindIp = ResolvePublishBindIp(stack);
         var publishBind = publishBindIp is not null
             ? publishBindIp + ":"
             : (localStack ? WithColon(_dockerOptions.PublishBindAddress, "127.0.0.1") : string.Empty);
@@ -2374,7 +3780,7 @@ public sealed class StackService : IStackService
 
         // Every stack references pre-seeded named volumes (no host bind mounts), so create + populate
         // those volumes on the stack's engine before compose brings the stack up.
-        await SeedStackVolumesAsync(stack, repoPath, cancellationToken);
+        await SeedStackVolumesAsync(stack, repoPath, renderArmory, renderClient, cancellationToken);
     }
 
     /// <summary>
@@ -2383,7 +3789,12 @@ public sealed class StackService : IStackService
     /// local daemon, or the remote engine for external stacks). Best-effort per volume so a transient
     /// hiccup on one does not abort the whole start.
     /// </summary>
-    private async Task SeedStackVolumesAsync(ManagedStackEntity stack, string repoPath, CancellationToken cancellationToken)
+    private async Task SeedStackVolumesAsync(
+        ManagedStackEntity stack,
+        string repoPath,
+        bool seedArmoryAssets,
+        bool seedClientVolumes,
+        CancellationToken cancellationToken)
     {
         var modulesDir = Path.Combine(repoPath, "modules");
         if (Directory.Exists(modulesDir))
@@ -2413,7 +3824,7 @@ public sealed class StackService : IStackService
         await _remoteEngine.SetVolumeOwnershipAsync(stack, logsVolume, AcoreServiceUid, AcoreServiceGid, cancellationToken);
 
         // Armory 3D model-viewer dataset lives in the stack's armory-assets volume (uploaded via Armory tab).
-        if (stack.ArmoryEnabled)
+        if (seedArmoryAssets)
         {
             var assetsVolume = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id);
             if (!await _remoteEngine.VolumeExistsAsync(stack, assetsVolume, cancellationToken))
@@ -2440,7 +3851,7 @@ public sealed class StackService : IStackService
         // Client volumes: the shared base (seeded once per host — skip if already present since it's
         // ~17 GB), plus this stack's overlay + cache (created + seeded even when empty so the
         // external:true declarations resolve).
-        if (stack.ClientEnabled)
+        if (seedClientVolumes)
         {
             // Per-stack base client (uploaded on the stack's Client tab). Seed it if the stack has a base
             // uploaded and its volume is not yet populated (skip re-seeding the ~17 GB base on every start;
@@ -2607,12 +4018,11 @@ public sealed class StackService : IStackService
             ManagedPrefixes = managedPrefixes,
             AuthToken = authToken,
             ManifestPrivateKey = _manifestSigningKeys.PrivateKeyPkcs8Base64,
-            // The container verifies player logins against this stack's auth DB (reached over the host's
-            // published DB port, same channel the armory uses), so a VPC/external stack needs no manager.
+            // The container verifies player logins against this stack's auth DB on the compose network.
             LoginEnabled = true,
             RequireLogin = true,
-            DbHost = "host.docker.internal",
-            DbPort = stack.DatabasePort,
+            DbHost = DockerComposeOverrideGenerator.InternalDatabaseHost,
+            DbPort = DockerComposeOverrideGenerator.InternalDatabasePort,
             DbUser = "root",
             DbPassword = stack.DatabaseRootPassword,
             // Portal fallback identity (used until the manager pushes the full replicated registry).
@@ -2630,17 +4040,21 @@ public sealed class StackService : IStackService
     {
         var realmName = string.IsNullOrWhiteSpace(stack.RealmName) ? stack.StackName : stack.RealmName;
         var (assetProxyUrl, assetsAvailable) = ResolveArmoryAssets(stack);
+        var armoryDbPassword = string.IsNullOrWhiteSpace(stack.ArmoryDatabasePasswordProtected)
+            ? throw new InvalidOperationException(
+                $"Armory database credentials are not initialized for stack '{stack.Id}'. Regenerate runtime configuration.")
+            : _secretProtector.Unprotect(stack.ArmoryDatabasePasswordProtected);
         return new ArmoryComposeOptions
         {
             ImageName = _armoryImageService.ImageNameFor(stack.Id),
             WebsiteName = string.IsNullOrWhiteSpace(realmName) ? "Armory" : $"{realmName}",
             RealmName = string.IsNullOrWhiteSpace(realmName) ? "AzerothCore" : realmName,
             RealmId = 1,
-            // The armory reaches the stack's MySQL over the host's published DB port.
-            DbHost = "host.docker.internal",
-            DbPort = stack.DatabasePort,
-            DbUser = "root",
-            DbPassword = stack.DatabaseRootPassword,
+            // The armory reaches MySQL on the compose network (not the host-published port).
+            DbHost = DockerComposeOverrideGenerator.InternalDatabaseHost,
+            DbPort = DockerComposeOverrideGenerator.InternalDatabasePort,
+            DbUser = ArmoryDatabaseProvisioningService.MysqlUsername,
+            DbPassword = armoryDbPassword,
             PlatformApiUrl = _armoryOptions.PlatformApiUrl,
             PlatformPublicUrl = _armoryOptions.PublicUrl,
             StackId = stack.Id,
@@ -2816,6 +4230,7 @@ public sealed class StackService : IStackService
         var containerName = $"{containerPrefix}-database";
         var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
         var deadline = DateTime.UtcNow + LifecycleVerificationTimeout;
+        var consecutiveHealthyPings = 0;
 
         while (DateTime.UtcNow < deadline)
         {
@@ -2827,7 +4242,15 @@ public sealed class StackService : IStackService
             var (exitCode, _, _) = await RunDockerCliAsync(arguments, cancellationToken);
             if (exitCode == 0)
             {
-                return;
+                consecutiveHealthyPings++;
+                if (consecutiveHealthyPings >= DatabaseReadyConsecutivePings)
+                {
+                    return;
+                }
+            }
+            else
+            {
+                consecutiveHealthyPings = 0;
             }
 
             await Task.Delay(LifecyclePollInterval, cancellationToken);
@@ -2836,7 +4259,10 @@ public sealed class StackService : IStackService
         throw new InvalidOperationException("MySQL did not accept connections before the startup timeout elapsed.");
     }
 
-    private async Task WaitForStackToStopAsync(string stackId, CancellationToken cancellationToken)
+    private async Task WaitForStackToStopAsync(
+        string stackId,
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + LifecycleVerificationTimeout;
 
@@ -2844,8 +4270,14 @@ public sealed class StackService : IStackService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var containers = await GetContainersAsync(stackId, cancellationToken);
-            if (containers.Count == 0 || containers.All(container => !IsRunning(container)))
+            var probe = await ListStackContainersAsync(stack, cancellationToken);
+            if (!probe.EngineReachable)
+            {
+                await Task.Delay(LifecyclePollInterval, cancellationToken);
+                continue;
+            }
+
+            if (probe.Containers.Count == 0 || probe.Containers.All(container => !IsActiveContainer(container)))
             {
                 return;
             }
@@ -2853,7 +4285,11 @@ public sealed class StackService : IStackService
             await Task.Delay(LifecyclePollInterval, cancellationToken);
         }
 
-        throw new InvalidOperationException("Stack containers did not stop before the shutdown timeout elapsed.");
+        _logger.LogWarning(
+            "Stack {StackId} still has active containers after the stop timeout; force-removing by name.",
+            stackId);
+        await ForceRemoveAllStackContainersByNameAsync(stackId, stack, cancellationToken);
+        await RemoveRemainingStackContainersAsync(stackId, stack, cancellationToken);
     }
 
     private static bool HasRequiredRunningServices(IEnumerable<ContainerStatusDto> containers)
@@ -2868,10 +4304,16 @@ public sealed class StackService : IStackService
                 containerName.Contains(serviceName, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static bool IsRunning(ContainerStatusDto container)
+    private static bool IsRunning(ContainerStatusDto container) =>
+        container.Status.Contains("running", StringComparison.OrdinalIgnoreCase)
+        || container.Status.Contains("up", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsActiveContainer(ContainerStatusDto container)
     {
-        return container.Status.Contains("running", StringComparison.OrdinalIgnoreCase)
-            || container.Status.Contains("up", StringComparison.OrdinalIgnoreCase);
+        var status = container.Status.ToLowerInvariant();
+        return status.Contains("running")
+               || status.Contains("up")
+               || status.Contains("restarting");
     }
 
     private static void EnsureStackLifecycleAllowed(ManagedStackEntity stack, string operation)
@@ -3083,7 +4525,7 @@ public sealed class StackService : IStackService
             stackId, request.StackName);
 
         // 5. Return DTO
-        return await MapAsync(entity, cancellationToken);
+        return await MapAsync(entity, probeRuntime: true, cancellationToken);
     }
 
     private async Task ValidateImportAsync(
@@ -3260,17 +4702,63 @@ public sealed class StackService : IStackService
             throw new StackNotFoundException($"Stack with ID '{stackId}' not found.");
         }
 
-        // Check if already initialized
+        // Self-heal when the platform flag is stale in either direction.
         if (stack.IsAdminAccountInitialized)
         {
-            _logger.LogInformation("Admin account for stack {StackId} already initialized", stackId);
-            return null;
+            try
+            {
+                if (await SoapAdminAccountExistsAsync(stack, cancellationToken))
+                {
+                    _logger.LogInformation("Admin account for stack {StackId} already initialized", stackId);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Could not verify existing SOAP admin for stack {StackId} before init.",
+                    stackId);
+            }
+
+            _logger.LogWarning(
+                "Admin account flag set for stack {StackId} but no matching auth account exists; recreating.",
+                stackId);
+            stack.IsAdminAccountInitialized = false;
+            stack.AdminAccountInitializedAt = null;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            try
+            {
+                if (await SoapAdminAccountExistsAsync(stack, cancellationToken))
+                {
+                    stack.IsAdminAccountInitialized = true;
+                    stack.AdminAccountInitializedAt ??= DateTime.UtcNow;
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogInformation(
+                        "Detected existing SOAP admin account for stack {StackId}; marking initialized.",
+                        stackId);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Could not verify existing SOAP admin for stack {StackId} before init.",
+                    stackId);
+            }
         }
 
         // Verify stack is running
         var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stackId);
         var dockerContext = await ResolveDockerContextAsync(stack, cancellationToken);
-        var stackContainers = await _dockerService.ListContainersAsync(composeProjectName, dockerContext, cancellationToken);
+        var stackContainers = await _dockerService.ListContainersAsync(
+            composeProjectName,
+            dockerContext,
+            cancellationToken: cancellationToken);
 
         if (!stackContainers.Any())
         {
@@ -3369,6 +4857,86 @@ public sealed class StackService : IStackService
             _logger.LogError(ex, "Error creating admin account for stack {StackId}", stackId);
             throw new InvalidOperationException($"Failed to create admin account: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Returns the effective SOAP-admin flag for the UI. Promotes the platform flag when the auth account
+    /// row already exists, or clears a stale flag when the row is missing (e.g. after a DB wipe).
+    /// </summary>
+    private async Task<(bool Initialized, DateTime? InitializedAt)> ReconcileSoapAdminFlagAsync(
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await SoapAdminAccountExistsAsync(stack, cancellationToken))
+            {
+                if (!stack.IsAdminAccountInitialized)
+                {
+                    var tracked = await _dbContext.ManagedStacks
+                        .SingleOrDefaultAsync(item => item.Id == stack.Id, cancellationToken);
+                    if (tracked is not null)
+                    {
+                        tracked.IsAdminAccountInitialized = true;
+                        tracked.AdminAccountInitializedAt ??= DateTime.UtcNow;
+                        await _dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogInformation(
+                            "Detected existing SOAP admin account for stack {StackId}; marking initialized.",
+                            stack.Id);
+                        return (true, tracked.AdminAccountInitializedAt);
+                    }
+                }
+
+                return (true, stack.AdminAccountInitializedAt);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Could not verify SOAP admin account for stack {StackId}; keeping platform flag.",
+                stack.Id);
+            return (stack.IsAdminAccountInitialized, stack.AdminAccountInitializedAt);
+        }
+
+        if (!stack.IsAdminAccountInitialized)
+        {
+            return (false, null);
+        }
+
+        var staleTracked = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == stack.Id, cancellationToken);
+        if (staleTracked is not null && staleTracked.IsAdminAccountInitialized)
+        {
+            staleTracked.IsAdminAccountInitialized = false;
+            staleTracked.AdminAccountInitializedAt = null;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogWarning(
+                "Cleared stale SOAP admin flag for stack {StackId} — auth account row is missing.",
+                stack.Id);
+        }
+
+        return (false, null);
+    }
+
+    private async Task<bool> SoapAdminAccountExistsAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
+    {
+        await using var connection = await _connectionFactory.CreateConnectionAsync(stack.Id, "auth", cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT COUNT(*)
+            FROM account a
+            INNER JOIN account_access aa ON aa.id = a.id
+            WHERE UPPER(a.username) = UPPER(@username) AND aa.gmlevel >= 3
+            """;
+        var usernameParam = command.CreateParameter();
+        usernameParam.ParameterName = "@username";
+        usernameParam.Value = stack.SoapUsername;
+        command.Parameters.Add(usernameParam);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null && Convert.ToInt64(result) > 0;
     }
 
     public async Task<SoapCredentialsDto?> GetSoapCredentialsAsync(string stackId, CancellationToken cancellationToken = default)
@@ -3580,6 +5148,49 @@ public sealed class StackService : IStackService
         return await SyncExternalWebFirewallAsync(stack, cancellationToken);
     }
 
+    public async Task<RemoteSetupResultDto?> ProvisionVpcDockerAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null || stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            throw new InvalidOperationException("External stack is missing SSH credentials.");
+        }
+
+        var privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+        var result = await _remoteEngine.ProvisionRemoteHostAsync(
+            stack.ExternalHost,
+            stack.ExternalSshPort,
+            stack.ExternalSshUser,
+            privateKey,
+            new RemoteSetupOptionsDto
+            {
+                RemoteOs = RemoteHostOs.Linux,
+                EnableHostFirewall = false,
+                EnableUnattendedUpgrades = false,
+                AuthServerPort = stack.AuthServerPort,
+                WorldServerPort = stack.WorldServerPort,
+                ArmoryPort = stack.ArmoryPort,
+                ClientPort = stack.ClientPort,
+                SshPort = stack.ExternalSshPort
+            },
+            timeoutCts.Token);
+
+        if (result.Success)
+        {
+            await _remoteEngine.EnsureContextAsync(stack, cancellationToken);
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Best-effort ufw sync when external web ports change or the armory comes online. Failures are logged
     /// only — starting the armory must not fail because SSH/ufw hiccuped.
@@ -3649,11 +5260,125 @@ public sealed class StackService : IStackService
             stack.ExternalSshPort);
     }
 
+    public async Task<VpcFirewallStatusDto?> GetVpcFirewallStatusAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null || stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return null;
+        }
+
+        var profile = VpcSecurityCatalog.BuildProfile(
+            stack.ExternalHost,
+            stack.AuthServerPort,
+            stack.WorldServerPort,
+            stack.ArmoryPort,
+            stack.ClientPort,
+            stack.DatabasePort,
+            stack.SoapPort,
+            stack.ExternalSshPort);
+
+        var status = await _remoteEngine.ProbeHostFirewallAsync(stack, profile, cancellationToken);
+        await AppendDockerBindChecksAsync(stack, status, cancellationToken);
+
+        status.OverallHealthy = status.Checks.Count == 0
+            || status.Checks.All(c =>
+                c.Status is "ok" or "unknown" or "not-applicable");
+        status.Message = status.OverallHealthy
+            ? "Host firewall and Docker bind checks passed. Cloud security group rules must still be verified manually."
+            : "One or more security checks failed — review the items below.";
+
+        return status;
+    }
+
+    public async Task<VpcSshLogsDto?> GetVpcSshLogsAsync(
+        string stackId,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null || stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return null;
+        }
+
+        return await _remoteEngine.FetchSshAuthLogsAsync(stack, limit, cancellationToken);
+    }
+
+    private async Task AppendDockerBindChecksAsync(
+        ManagedStackEntity stack,
+        VpcFirewallStatusDto status,
+        CancellationToken cancellationToken)
+    {
+        var prefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
+        var bindChecks = new (string Container, int InternalPort, string Name, string RoleId, int HostPort)[]
+        {
+            ($"{prefix}-database", DockerComposeOverrideGenerator.InternalDatabasePort, "MySQL Docker bind", VpcSecurityCatalog.RoleManagement, stack.DatabasePort),
+            ($"{prefix}-worldserver", 7878, "SOAP Docker bind", VpcSecurityCatalog.RoleManagement, stack.SoapPort),
+        };
+
+        foreach (var (container, internalPort, name, roleId, hostPort) in bindChecks)
+        {
+            var check = new VpcSecurityCheckDto
+            {
+                Category = "docker-bind",
+                Name = name,
+                RoleId = roleId,
+                Port = hostPort
+            };
+
+            try
+            {
+                var endpoint = await _remoteEngine.TryResolveRemotePublishedEndpointAsync(
+                    stack,
+                    container,
+                    internalPort,
+                    cancellationToken);
+                if (endpoint is null)
+                {
+                    check.Status = "warning";
+                    check.Message = $"{container} is not publishing TCP {internalPort} — stack may be stopped.";
+                }
+                else if (IsLoopbackBind(endpoint.Value.Host))
+                {
+                    check.Status = "ok";
+                    check.Message = $"Published on {endpoint.Value.Host}:{endpoint.Value.Port} (manager/VPC-only).";
+                }
+                else if (string.Equals(endpoint.Value.Host, "0.0.0.0", StringComparison.Ordinal))
+                {
+                    check.Status = "error";
+                    check.Message = $"Published on 0.0.0.0:{endpoint.Value.Port} — should bind to 127.0.0.1 on external stacks.";
+                }
+                else
+                {
+                    check.Status = "warning";
+                    check.Message = $"Published on {endpoint.Value.Host}:{endpoint.Value.Port} — verify this is not publicly reachable.";
+                }
+            }
+            catch (Exception ex)
+            {
+                check.Status = "unknown";
+                check.Message = ex.Message;
+            }
+
+            status.Checks.Add(check);
+        }
+    }
+
+    private static bool IsLoopbackBind(string host)
+        => string.Equals(host, "127.0.0.1", StringComparison.Ordinal)
+           || string.Equals(host, "::1", StringComparison.Ordinal)
+           || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
+
     private string ResolveExternalDataPlaneBind(ManagedStackEntity stack)
     {
-        // Docker port publishing requires a numeric bind IP (or no prefix for all interfaces). ExternalHost
-        // is often a DNS name (e.g. ec2-…compute.amazonaws.com) used for SSH/realmlist — never pass that
-        // through to compose.
+        // The manager reaches MySQL/SOAP on external stacks via SSH -L …:127.0.0.1:{port} on the remote
+        // host. Those services must publish on loopback there; binding to a public/VPC IP breaks the tunnel
+        // ("Reading from the stream has failed") even when SSH itself still works.
         var configured = TryParseBindAddress(_dockerOptions.ExternalDataPlaneBindAddress);
         if (configured is not null)
         {
@@ -3663,18 +5388,11 @@ public sealed class StackService : IStackService
         if (!string.IsNullOrWhiteSpace(_dockerOptions.ExternalDataPlaneBindAddress))
         {
             _logger.LogWarning(
-                "Docker:ExternalDataPlaneBindAddress '{Bind}' is not a valid IP; ignoring.",
+                "Docker:ExternalDataPlaneBindAddress '{Bind}' is not a valid IP; using 127.0.0.1 on external stacks.",
                 _dockerOptions.ExternalDataPlaneBindAddress.Trim());
         }
 
-        var externalHostIp = TryParseBindAddress(stack.ExternalHost);
-        if (externalHostIp is not null)
-        {
-            return externalHostIp;
-        }
-
-        // Unset or hostname: publish MySQL/SOAP on all remote interfaces (see DockerOptions).
-        return string.Empty;
+        return "127.0.0.1";
     }
 
     /// <summary>Returns a bind IP when <paramref name="value"/> is blank or a valid IP; null for hostnames.</summary>
@@ -3688,4 +5406,47 @@ public sealed class StackService : IStackService
 
         return System.Net.IPAddress.TryParse(trimmed, out _) ? trimmed : null;
     }
+
+    /// <summary>
+    /// Resolves the IP Docker should bind for armory/client ports. External stacks ignore public/elastic
+    /// IPs stored in <see cref="ManagedStackEntity.PublishBindAddress"/> (realmlist host ≠ bind address).
+    /// </summary>
+    private string? ResolvePublishBindIp(ManagedStackEntity stack)
+    {
+        var configured = TryParseBindAddress(stack.PublishBindAddress);
+        if (configured is null)
+        {
+            return null;
+        }
+
+        if (string.Equals(configured, "0.0.0.0", StringComparison.Ordinal))
+        {
+            return configured;
+        }
+
+        if (!System.Net.IPAddress.TryParse(configured, out var parsed)
+            || !IsDockerPublishBindAddress(parsed))
+        {
+            _logger.LogWarning(
+                "Ignoring non-bindable PublishBindAddress '{Bind}' for stack {StackId}; using policy default.",
+                configured,
+                stack.Id);
+            return null;
+        }
+
+        if (stack.DeploymentTarget == DeploymentTarget.External
+            && !RealmlistHostResolver.IsPrivateOrNonRoutableIpv4Literal(configured))
+        {
+            _logger.LogWarning(
+                "PublishBindAddress '{Bind}' is a public IP and cannot be bound on the remote VPC host for stack {StackId}; using all interfaces.",
+                configured,
+                stack.Id);
+            return null;
+        }
+
+        return configured;
+    }
+
+    private static bool IsDockerPublishBindAddress(System.Net.IPAddress address) =>
+        address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
 }

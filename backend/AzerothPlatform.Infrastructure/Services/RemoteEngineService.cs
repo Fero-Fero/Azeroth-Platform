@@ -22,9 +22,13 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// </summary>
 public sealed class RemoteEngineService : IRemoteEngineService
 {
+    private const int ConnectionTestConnectTimeoutSeconds = 10;
+
     private readonly ILogger<RemoteEngineService> _logger;
     private readonly DockerOptions _dockerOptions;
     private readonly ISecretProtector _secretProtector;
+    private readonly ConcurrentDictionary<string, string> _verifiedContextEndpoints = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _lastSshConnectionEndpoints = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ManagementTunnel> _managementTunnels = new(StringComparer.Ordinal);
 
     private sealed class ManagementTunnel
@@ -70,23 +74,132 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         var contextName = GetContextName(stack.Id);
+        var sshPort = stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort;
+        var sshEndpoint = $"{stack.ExternalSshUser.Trim()}@{stack.ExternalHost.Trim()}:{sshPort}";
+        if (_lastSshConnectionEndpoints.TryGetValue(stack.Id, out var previousEndpoint)
+            && !string.Equals(previousEndpoint, sshEndpoint, StringComparison.Ordinal))
+        {
+            StopManagementTunnels(stack.Id);
+        }
+
+        _lastSshConnectionEndpoints[stack.Id] = sshEndpoint;
+
         // The stored key is encrypted at rest; decrypt just-in-time to write the on-disk identity file.
         var privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
-        WriteSshConfig(contextName, stack.ExternalHost.Trim(), stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort,
+        WriteSshConfig(contextName, stack.ExternalHost.Trim(), sshPort,
             stack.ExternalSshUser.Trim(), privateKey);
         await EnsureDockerContextAsync(
             contextName,
             stack.ExternalSshUser.Trim(),
             stack.ExternalHost.Trim(),
-            stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort,
+            sshPort,
             cancellationToken);
         return contextName;
+    }
+
+    public async Task<(bool Available, string? Message)> ProbeRemoteDockerAsync(
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken = default)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("ProbeRemoteDockerAsync is only valid for external stacks.");
+        }
+
+        var contextName = await EnsureContextAsync(stack, cancellationToken);
+        var host = stack.ExternalHost.Trim();
+        var user = stack.ExternalSshUser.Trim();
+        var port = stack.ExternalSshPort <= 0 ? 22 : stack.ExternalSshPort;
+
+        var (exitCode, stdout, stderr) = await RunSshAsync(
+            contextName,
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            cancellationToken);
+
+        if (exitCode != 0)
+        {
+            return (false, FormatRemoteDockerError(stderr, host, user, port));
+        }
+
+        var version = stdout.Trim();
+        return (true, string.IsNullOrWhiteSpace(version) ? null : $"Docker {version}");
+    }
+
+    public async Task<int?> TryResolveRemotePublishedPortAsync(
+        ManagedStackEntity stack,
+        string containerName,
+        int containerPort,
+        CancellationToken cancellationToken = default)
+    {
+        var endpoint = await TryResolveRemotePublishedEndpointAsync(stack, containerName, containerPort, cancellationToken);
+        return endpoint?.Port;
+    }
+
+    public async Task<(string Host, int Port)?> TryResolveRemotePublishedEndpointAsync(
+        ManagedStackEntity stack,
+        string containerName,
+        int containerPort,
+        CancellationToken cancellationToken = default)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(containerName) || containerPort is <= 0 or > 65535)
+        {
+            return null;
+        }
+
+        try
+        {
+            var contextName = await EnsureContextAsync(stack, cancellationToken);
+            var (exitCode, stdout, _) = await RunSshAsync(
+                contextName,
+                ["docker", "port", containerName, $"{containerPort}/tcp"],
+                cancellationToken);
+
+            if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            {
+                return null;
+            }
+
+            foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (TryParseDockerPublishedEndpoint(line, out var host, out var hostPort))
+                {
+                    return (host, hostPort);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Could not resolve published port for container {Container} ({ContainerPort}/tcp) on stack {StackId}.",
+                containerName,
+                containerPort,
+                stack.Id);
+        }
+
+        return null;
+    }
+
+    public void InvalidateManagementTunnel(ManagedStackEntity stack, int remotePort, string remoteHost = "127.0.0.1")
+    {
+        var tunnelKey = ManagementTunnelKey(stack.Id, NormalizeTunnelRemoteHost(remoteHost), remotePort);
+        if (_managementTunnels.TryRemove(tunnelKey, out var tunnel))
+        {
+            StopManagementTunnel(tunnelKey, tunnel);
+        }
     }
 
     public async Task RemoveContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default)
     {
         StopManagementTunnels(stack.Id);
+        _lastSshConnectionEndpoints.TryRemove(stack.Id, out _);
         var contextName = GetContextName(stack.Id);
+        _verifiedContextEndpoints.TryRemove(contextName, out _);
         await RunAsync("docker", $"context rm -f {contextName}", cancellationToken, throwOnError: false);
         RemoveSshConfigBlock(contextName);
     }
@@ -94,6 +207,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
     public async Task<(string Host, int Port)> GetManagementTunnelEndpointAsync(
         ManagedStackEntity stack,
         int remotePort,
+        string remoteHost = "127.0.0.1",
         CancellationToken cancellationToken = default)
     {
         if (stack.DeploymentTarget != DeploymentTarget.External)
@@ -106,7 +220,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
             throw new ArgumentOutOfRangeException(nameof(remotePort), remotePort, "Remote port must be between 1 and 65535.");
         }
 
-        var tunnelKey = ManagementTunnelKey(stack.Id, remotePort);
+        remoteHost = NormalizeTunnelRemoteHost(remoteHost);
+
+        var tunnelKey = ManagementTunnelKey(stack.Id, remoteHost, remotePort);
         if (_managementTunnels.TryGetValue(tunnelKey, out var existing) && IsTunnelAlive(existing))
         {
             return ("127.0.0.1", existing.LocalPort);
@@ -119,7 +235,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         var contextName = await EnsureContextAsync(stack, cancellationToken);
         var localPort = AllocateLocalPort();
-        var forward = $"127.0.0.1:{localPort}:127.0.0.1:{remotePort}";
+        var forward = $"127.0.0.1:{localPort}:{remoteHost}:{remotePort}";
         var sshConfigPath = Path.Combine(GetSshDir(), "config");
 
         var process = new Process
@@ -136,6 +252,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
         process.StartInfo.ArgumentList.Add(sshConfigPath);
         process.StartInfo.ArgumentList.Add("-o");
         process.StartInfo.ArgumentList.Add("BatchMode=yes");
+        process.StartInfo.ArgumentList.Add("-o");
+        process.StartInfo.ArgumentList.Add("ConnectTimeout=15");
         process.StartInfo.ArgumentList.Add("-o");
         process.StartInfo.ArgumentList.Add("ExitOnForwardFailure=yes");
         process.StartInfo.ArgumentList.Add("-o");
@@ -244,14 +362,14 @@ public sealed class RemoteEngineService : IRemoteEngineService
         try
         {
             WriteSshConfig(contextName, host, port, user, privateKey);
-            if (checkPrerequisites)
-            {
-                await EnsureDockerContextAsync(contextName, user, host, port, cancellationToken);
-            }
 
             if (checkSsh)
             {
-                var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+                var (sshExit, _, sshStderr) = await RunSshAsync(
+                    contextName,
+                    ["echo", "ok"],
+                    cancellationToken,
+                    ConnectionTestConnectTimeoutSeconds);
                 if (sshExit != 0)
                 {
                     prerequisites.Add(new RemotePrerequisiteCheckDto
@@ -263,9 +381,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     return new RemoteConnectionTestResultDto
                     {
                         Success = false,
-                        Message = "SSH connection failed from the platform. Your key may work in a local terminal " +
-                                  "but the manager process could not reach the host (check host/user/port, key paste, " +
-                                  "and outbound SSH from the platform container).",
+                        Message = GetSshSetupFailureSummary(sshStderr),
                         Prerequisites = prerequisites
                     };
                 }
@@ -298,11 +414,11 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 };
             }
 
-            // Probe Docker on the remote host over the same SSH session (matches `ssh … docker info` on EC2).
             var (remoteDockerExit, remoteDockerOut, remoteDockerErr) = await RunSshAsync(
                 contextName,
                 ["docker", "info", "--format", "{{.ServerVersion}}"],
-                cancellationToken);
+                cancellationToken,
+                ConnectionTestConnectTimeoutSeconds);
 
             if (remoteDockerExit != 0)
             {
@@ -330,40 +446,16 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Message = string.IsNullOrWhiteSpace(version) ? "Docker engine is running." : $"Docker {version}"
             });
 
-            var (composeExit, composeStdout, composeStderr) = await RunSshAsync(
-                contextName,
-                ["docker", "compose", "version", "--short"],
-                cancellationToken);
-
-            if (composeExit != 0)
-            {
-                var composeMessage = FormatRemoteDockerError(
-                    composeStderr,
-                    host,
-                    user,
-                    port,
-                    fallback: "Docker Compose plugin is not installed on the remote host.");
-                prerequisites.Add(new RemotePrerequisiteCheckDto
-                {
-                    Name = "Docker Compose",
-                    Passed = false,
-                    Message = composeMessage
-                });
-                return new RemoteConnectionTestResultDto
-                {
-                    Success = false,
-                    ServerVersion = version,
-                    Message = "Remote host has Docker but Docker Compose is missing.",
-                    Prerequisites = prerequisites
-                };
-            }
-
-            var composeVersion = composeStdout.Trim();
+            // Compose commands run on the platform manager via `docker --context … compose`; the VPC only
+            // needs the Docker Engine API. Report remote compose when present, but do not block reconnect.
+            var composeVersion = await TryGetRemoteComposeVersionAsync(contextName, cancellationToken);
             prerequisites.Add(new RemotePrerequisiteCheckDto
             {
                 Name = "Docker Compose",
                 Passed = true,
-                Message = string.IsNullOrWhiteSpace(composeVersion) ? "Docker Compose is available." : $"Compose {composeVersion}"
+                Message = composeVersion is not null
+                    ? $"Compose {composeVersion} also available on the VPC (optional)."
+                    : "Runs on the platform manager — not required on the VPC host."
             });
 
             return new RemoteConnectionTestResultDto
@@ -387,7 +479,6 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
         finally
         {
-            await RunAsync("docker", $"context rm -f {contextName}", cancellationToken, throwOnError: false);
             RemoveSshConfigBlock(contextName);
         }
     }
@@ -461,7 +552,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (sshExit != 0)
             {
-                return FailSetup(steps, "SSH connection failed. Fix credentials before running setup.");
+                return FailSetup(steps, GetSshSetupFailureSummary(sshStderr));
             }
 
             var dockerReady = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
@@ -473,15 +564,21 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     Passed = true,
                     Message = string.IsNullOrWhiteSpace(dockerReady.Version)
                         ? "Docker is already installed and running."
-                        : $"Docker {dockerReady.Version} is already running (Compose {dockerReady.ComposeVersion})."
+                        : dockerReady.ComposeVersion is not null
+                            ? $"Docker {dockerReady.Version} is already running (Compose {dockerReady.ComposeVersion} on VPC)."
+                            : $"Docker {dockerReady.Version} is already running."
                 });
             }
             else
             {
-                var dockerSteps = await InstallLinuxDockerAsync(contextName, user, steps, cancellationToken);
-                if (dockerSteps is not null)
+                var started = await TryStartRemoteDockerAsync(contextName, user, steps, cancellationToken);
+                if (!started)
                 {
-                    return dockerSteps;
+                    var dockerSteps = await InstallLinuxDockerAsync(contextName, user, steps, cancellationToken);
+                    if (dockerSteps is not null)
+                    {
+                        return dockerSteps;
+                    }
                 }
             }
 
@@ -586,6 +683,382 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
     }
 
+    public async Task<VpcFirewallStatusDto> ProbeHostFirewallAsync(
+        ManagedStackEntity stack,
+        VpcSecurityProfileDto profile,
+        CancellationToken cancellationToken = default)
+    {
+        profile ??= new VpcSecurityProfileDto();
+        var result = new VpcFirewallStatusDto();
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            result.Message = "Host firewall probes apply to external stacks only.";
+            return result;
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            result.Message = "SSH credentials are missing — reconnect from the SSH tab.";
+            return result;
+        }
+
+        var contextName = await EnsureContextAsync(stack, cancellationToken);
+        var (ufwInstalledExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "command -v ufw >/dev/null 2>&1",
+            cancellationToken);
+        result.UfwInstalled = ufwInstalledExit == 0;
+
+        var (statusExit, statusOut, statusErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoUfw("status verbose"),
+            cancellationToken);
+        if (statusExit != 0)
+        {
+            result.UfwActive = false;
+            result.UfwStatusSummary = FormatRemoteShellError(statusErr, statusOut);
+            result.Checks.Add(new VpcSecurityCheckDto
+            {
+                Category = "host-firewall",
+                Name = "ufw status",
+                Status = result.UfwInstalled ? "warning" : "error",
+                Message = result.UfwStatusSummary
+            });
+        }
+        else
+        {
+            result.UfwActive = statusOut.Contains("Status: active", StringComparison.OrdinalIgnoreCase);
+            result.UfwStatusSummary = SummarizeRemoteOutput(statusOut, "ufw status");
+        }
+
+        foreach (var rule in profile.HostFirewallRules)
+        {
+            var check = new VpcSecurityCheckDto
+            {
+                Category = "host-firewall",
+                Name = rule.Description,
+                RoleId = rule.RoleId,
+                Port = rule.Port
+            };
+
+            if (!result.UfwInstalled)
+            {
+                check.Status = "warning";
+                check.Message = "ufw is not installed on the remote host.";
+            }
+            else if (!result.UfwActive)
+            {
+                check.Status = "warning";
+                check.Message = "ufw is inactive — verify your cloud security group instead.";
+            }
+            else if (IsUfwPortAllowed(statusOut, rule.Port))
+            {
+                check.Status = "ok";
+                check.Message = $"Port {rule.Port}/tcp is allowed in ufw.";
+            }
+            else
+            {
+                check.Status = "error";
+                check.Message = $"Port {rule.Port}/tcp is not allowed in ufw — run Sync VPC firewall or allow it manually.";
+            }
+
+            result.Checks.Add(check);
+        }
+
+        foreach (var rule in profile.DeniedPorts)
+        {
+            var check = new VpcSecurityCheckDto
+            {
+                Category = "host-firewall",
+                Name = rule.Description,
+                RoleId = rule.RoleId,
+                Port = rule.Port
+            };
+
+            if (!result.UfwInstalled || !result.UfwActive)
+            {
+                check.Status = "unknown";
+                check.Message = "Cannot verify deny rules while ufw is unavailable or inactive.";
+            }
+            else if (IsUfwPortAllowed(statusOut, rule.Port))
+            {
+                check.Status = "error";
+                check.Message = $"Port {rule.Port}/tcp is allowed publicly in ufw — it should stay manager/VPC-only.";
+            }
+            else
+            {
+                check.Status = "ok";
+                check.Message = $"Port {rule.Port}/tcp is not opened in ufw.";
+            }
+
+            result.Checks.Add(check);
+        }
+
+        foreach (var rule in profile.CloudSecurityGroupRules)
+        {
+            result.Checks.Add(new VpcSecurityCheckDto
+            {
+                Category = "cloud-sg",
+                Name = rule.Description,
+                RoleId = rule.RoleId,
+                Port = rule.Port,
+                Status = "unknown",
+                Message = $"Verify inbound TCP {rule.Port} ({rule.Source}) in your cloud provider console."
+            });
+        }
+
+        result.OverallHealthy = result.Checks.Count == 0
+            || result.Checks.All(c =>
+                c.Status is "ok" or "unknown" or "not-applicable");
+        result.Message = result.OverallHealthy
+            ? "Host firewall checks passed. Cloud security group rules must still be verified manually."
+            : "One or more host firewall checks failed — review the items below.";
+        return result;
+    }
+
+    public async Task<VpcSshLogsDto> FetchSshAuthLogsAsync(
+        ManagedStackEntity stack,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        limit = Math.Clamp(limit, 1, 500);
+        var result = new VpcSshLogsDto();
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            result.Message = "SSH logs are available for external stacks only.";
+            return result;
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            result.Message = "SSH credentials are missing — reconnect from the SSH tab.";
+            return result;
+        }
+
+        var contextName = await EnsureContextAsync(stack, cancellationToken);
+        var shell = BuildSshAuthLogFetchShell(limit);
+        var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, shell, cancellationToken, connectTimeoutSeconds: 45);
+        if (exit != 0)
+        {
+            result.Message = FormatRemoteShellError(stderr, stdout);
+            return result;
+        }
+
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0)
+        {
+            result.Success = true;
+            result.Message = "No recent SSH authentication events were found.";
+            return result;
+        }
+
+        if (lines[0].StartsWith("SOURCE:", StringComparison.Ordinal))
+        {
+            result.LogSource = lines[0]["SOURCE:".Length..].Trim();
+            lines = lines.Skip(1).ToArray();
+        }
+
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var entry = ParseSshAuthLogLine(line);
+            if (entry is not null)
+            {
+                result.Entries.Add(entry);
+            }
+        }
+
+        result.Success = true;
+        result.Message = result.Entries.Count == 0
+            ? "No parseable SSH authentication events were found."
+            : $"Showing {result.Entries.Count} recent SSH event(s).";
+        return result;
+    }
+
+    private static string BuildSshAuthLogFetchShell(int limit)
+        => "set -e; " +
+           "PATTERN='sshd\\[[0-9]+\\]: (Accepted|Failed|Invalid|Connection closed by authenticating)'; " +
+           "collect() { grep -hE \"$PATTERN\" \"$@\" 2>/dev/null || true; }; " +
+           "TMP=\"$(mktemp)\"; " +
+           "collect /var/log/auth.log /var/log/secure >>\"$TMP\"; " +
+           "if command -v journalctl >/dev/null 2>&1; then journalctl -u ssh -u sshd --no-pager -S '14 days ago' 2>/dev/null | grep -E \"$PATTERN\" >>\"$TMP\" || true; fi; " +
+           "if [ ! -s \"$TMP\" ]; then rm -f \"$TMP\"; exit 0; fi; " +
+           "if [ -r /var/log/auth.log ]; then echo \"SOURCE:/var/log/auth.log\"; " +
+           "elif [ -r /var/log/secure ]; then echo \"SOURCE:/var/log/secure\"; " +
+           "else echo \"SOURCE:journalctl\"; fi; " +
+           $"sort -u \"$TMP\" | tail -n {limit}; rm -f \"$TMP\"";
+
+    private static VpcSshLogEntryDto? ParseSshAuthLogLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        var entry = new VpcSshLogEntryDto { RawLine = line.Trim() };
+        var sshIdx = line.IndexOf("sshd[", StringComparison.Ordinal);
+        if (sshIdx >= 0)
+        {
+            var bracketEnd = line.IndexOf("]: ", sshIdx, StringComparison.Ordinal);
+            if (bracketEnd < 0)
+            {
+                return null;
+            }
+
+            var payload = line[(bracketEnd + 3)..].Trim();
+            if (payload.StartsWith("Accepted ", StringComparison.Ordinal))
+            {
+                entry.EventType = "accepted";
+                ParseSshUserFrom(payload, "Accepted ", " for ", out var user);
+                entry.Username = user;
+            }
+            else if (payload.StartsWith("Failed password for invalid user ", StringComparison.Ordinal))
+            {
+                entry.EventType = "invalid-user";
+                ParseSshUserFrom(payload, "Failed password for invalid user ", " from ", out var user);
+                entry.Username = user;
+            }
+            else if (payload.StartsWith("Failed password for ", StringComparison.Ordinal))
+            {
+                entry.EventType = "failed";
+                ParseSshUserFrom(payload, "Failed password for ", " from ", out var user);
+                entry.Username = user;
+            }
+            else if (payload.StartsWith("Invalid user ", StringComparison.Ordinal))
+            {
+                entry.EventType = "invalid-user";
+                ParseSshUserFrom(payload, "Invalid user ", " from ", out var user);
+                entry.Username = user;
+            }
+            else if (payload.StartsWith("Connection closed by authenticating user ", StringComparison.Ordinal))
+            {
+                entry.EventType = "closed";
+                ParseSshUserFrom(payload, "Connection closed by authenticating user ", " ", out var user);
+                entry.Username = user;
+            }
+            else
+            {
+                return null;
+            }
+
+            var fromIdx = payload.IndexOf(" from ", StringComparison.Ordinal);
+            if (fromIdx >= 0)
+            {
+                var afterFrom = payload[(fromIdx + 6)..].Trim();
+                var space = afterFrom.IndexOf(' ');
+                entry.SourceIp = space > 0 ? afterFrom[..space] : afterFrom;
+            }
+        }
+
+        if (DateTimeOffset.TryParse(line.AsSpan(0, Math.Min(line.Length, 32)).Trim(), out var ts))
+        {
+            entry.Timestamp = ts;
+        }
+
+        return string.IsNullOrWhiteSpace(entry.EventType) ? null : entry;
+    }
+
+    private static void ParseSshUserFrom(string payload, string prefix, string suffix, out string? username)
+    {
+        username = null;
+        if (!payload.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var rest = payload[prefix.Length..];
+        var end = rest.IndexOf(suffix, StringComparison.Ordinal);
+        username = end >= 0 ? rest[..end].Trim() : rest.Trim();
+    }
+
+    private static bool IsUfwPortAllowed(string ufwStatus, int port)
+    {
+        if (string.IsNullOrWhiteSpace(ufwStatus))
+        {
+            return false;
+        }
+
+        foreach (var line in ufwStatus.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.Contains("ALLOW", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (line.StartsWith($"{port}/", StringComparison.Ordinal)
+                || line.Contains($" {port}/", StringComparison.Ordinal)
+                || line.Contains($":{port}/", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// When Docker is installed but the daemon is stopped, start/enable it without a full apt install.
+    /// Returns true when the engine responds after these steps.
+    /// </summary>
+    private async Task<bool> TryStartRemoteDockerAsync(
+        string contextName,
+        string user,
+        List<RemotePrerequisiteCheckDto> steps,
+        CancellationToken cancellationToken)
+    {
+        var (whichExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "command -v docker >/dev/null 2>&1",
+            cancellationToken);
+        if (whichExit != 0)
+        {
+            return false;
+        }
+
+        var startCommands = new (string Label, string Command)[]
+        {
+            ("Start Docker service", SudoNonInteractive("systemctl start docker")),
+            ("Enable Docker on boot", SudoNonInteractive("systemctl enable docker")),
+            ("Grant Docker access to SSH user", SudoNonInteractive($"usermod -aG docker {user}")),
+        };
+
+        foreach (var (label, command) in startCommands)
+        {
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, command, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = label,
+                Passed = exit == 0,
+                Message = exit == 0 ? SummarizeRemoteOutput(stdout, label) : FormatRemoteShellError(stderr, stdout)
+            });
+            if (exit != 0 && !label.StartsWith("Grant Docker", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        var ready = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
+        if (ready.Ready)
+        {
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Verify Docker Engine",
+                Passed = true,
+                Message = string.IsNullOrWhiteSpace(ready.Version)
+                    ? "Docker engine is responding."
+                    : ready.ComposeVersion is not null
+                        ? $"Docker {ready.Version} is running (Compose {ready.ComposeVersion} on VPC)."
+                        : $"Docker {ready.Version} is running."
+            });
+        }
+
+        return ready.Ready;
+    }
+
     private async Task<RemoteSetupResultDto?> InstallLinuxDockerAsync(
         string contextName,
         string user,
@@ -648,22 +1121,15 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return FailSetup(steps, "Docker was installed but the SSH user still cannot reach the engine.");
         }
 
-        var (composeExit, composeOut, composeErr) = await RunSshAsync(
-            contextName,
-            ["docker", "compose", "version", "--short"],
-            cancellationToken);
+        var composeVersion = await TryGetRemoteComposeVersionAsync(contextName, cancellationToken);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "Verify Docker Compose",
-            Passed = composeExit == 0,
-            Message = composeExit == 0
-                ? (string.IsNullOrWhiteSpace(composeOut.Trim()) ? "Docker Compose is available." : $"Compose {composeOut.Trim()}.")
-                : FormatRemoteDockerError(composeErr, string.Empty, user, 22, fallback: "Docker Compose plugin is missing.")
+            Passed = true,
+            Message = composeVersion is not null
+                ? $"Compose {composeVersion} available on the VPC (optional)."
+                : "Compose runs on the platform manager — not required on the VPC host."
         });
-        if (composeExit != 0)
-        {
-            return FailSetup(steps, "Docker Engine is running but Docker Compose is not available.");
-        }
 
         return null;
     }
@@ -861,16 +1327,25 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return (false, null, null);
         }
 
+        var version = dockerOut.Trim();
+        var composeVersion = await TryGetRemoteComposeVersionAsync(contextName, cancellationToken);
+        return (true, version, composeVersion);
+    }
+
+    private async Task<string?> TryGetRemoteComposeVersionAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
         var (composeExit, composeOut, _) = await RunSshAsync(
             contextName,
             ["docker", "compose", "version", "--short"],
             cancellationToken);
-        if (composeExit != 0)
+        if (composeExit != 0 || string.IsNullOrWhiteSpace(composeOut))
         {
-            return (false, dockerOut.Trim(), null);
+            return null;
         }
 
-        return (true, dockerOut.Trim(), composeOut.Trim());
+        return composeOut.Trim();
     }
 
     private async Task<bool> IsUnattendedUpgradesEnabledAsync(
@@ -963,11 +1438,46 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return message;
     }
 
-    private Task<(int ExitCode, string StdOut, string StdErr)> RunSshRemoteShellAsync(
+    private static bool ShellCommandUsesSudo(string command)
+        => command.Contains("sudo", StringComparison.Ordinal);
+
+    private static bool LooksLikeSudoFailure(string stderr, string stdout)
+    {
+        var message = $"{stderr} {stdout}";
+        return message.Contains("a password is required", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("sorry, you must have a tty", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("sudo: a terminal is required", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("usage: sudo", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("expected one of these actions", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunSshRemoteShellAsync(
         string contextName,
         string shellCommand,
-        CancellationToken cancellationToken)
-        => RunSshAsync(contextName, ["bash", "-lc", shellCommand], cancellationToken);
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds = 30)
+    {
+        var (exit, stdout, stderr) = await RunSshAsync(
+            contextName,
+            ["bash", "-lc", shellCommand],
+            cancellationToken,
+            connectTimeoutSeconds);
+
+        if (exit == 0 || !ShellCommandUsesSudo(shellCommand) || !LooksLikeSudoFailure(stderr, stdout))
+        {
+            return (exit, stdout, stderr);
+        }
+
+        // Some images (including stock Ubuntu AMIs) set sudo requiretty — retry with a TTY, which
+        // matches what works in an interactive SSH session.
+        var ttyCommand = shellCommand.Replace("sudo -n ", "sudo ", StringComparison.Ordinal);
+        return await RunSshAsync(
+            contextName,
+            ["bash", "-lc", ttyCommand],
+            cancellationToken,
+            connectTimeoutSeconds,
+            forceTty: true);
+    }
 
     /// <summary>
     /// SSRF allowlist check: returns true when <paramref name="host"/> resolves to a loopback or
@@ -1037,6 +1547,46 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         _logger.LogInformation("Shipped image {Image} to remote engine for stack {StackId}.", imageTag, stack.Id);
+    }
+
+    public async Task<bool> RemoteImageExistsAsync(
+        ManagedStackEntity stack,
+        string imageTag,
+        CancellationToken cancellationToken = default)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External || string.IsNullOrWhiteSpace(imageTag))
+        {
+            return false;
+        }
+
+        var contextName = await EnsureContextAsync(stack, cancellationToken);
+        if (await RemoteImageExistsOnContextAsync(contextName, imageTag, cancellationToken))
+        {
+            return true;
+        }
+
+        var slash = imageTag.IndexOf('/', StringComparison.Ordinal);
+        if (slash <= 0)
+        {
+            return false;
+        }
+
+        var localhostTag = $"localhost/{imageTag}";
+        return await RemoteImageExistsOnContextAsync(contextName, localhostTag, cancellationToken);
+    }
+
+    private static async Task<bool> RemoteImageExistsOnContextAsync(
+        string contextName,
+        string imageTag,
+        CancellationToken cancellationToken)
+    {
+        var quotedTag = imageTag.Contains('"') ? $"\"{imageTag.Replace("\"", "\\\"")}\"" : imageTag;
+        var (exitCode, stdout, _) = await RunAsync(
+            "docker",
+            $"--context {contextName} images -q {quotedTag}",
+            cancellationToken,
+            throwOnError: false);
+        return exitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
     }
 
     public async Task SeedVolumeFromArchiveStreamAsync(
@@ -1628,42 +2178,73 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         summary.VolumeExists = true;
-        var summaryScript =
+        // Prefer cheap checks (Wow.exe / Data/*.MPQ / du) over a full-tree file count, which can
+        // fail or time out on large (~17 GB) client volumes — especially over a remote docker context.
+        const string summaryScript =
             "set +e; " +
-            "files=$(find /dest -type f ! -name .hashcache.json ! -name .manifest.json 2>/dev/null | wc -l | tr -d \" \"); " +
-            "bytes=$(du -sb /dest 2>/dev/null | cut -f1); " +
-            "[ -n \"$bytes\" ] || bytes=0; " +
             "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
-            "mpq=0; if test -d /dest/Data; then find /dest/Data -maxdepth 1 -name \"*.MPQ\" -print -quit 2>/dev/null | grep -q . && mpq=1; fi; " +
+            "mpq=0; if test -d /dest/Data; then ls /dest/Data/*.MPQ >/dev/null 2>&1 && mpq=1; fi; " +
+            "bytes=$(du -sb /dest 2>/dev/null | cut -f1); [ -n \"$bytes\" ] || bytes=0; " +
+            "files=0; if [ \"$wow\" = \"1\" ] || [ \"$mpq\" = \"1\" ]; then " +
+            "files=$(find /dest -type f ! -name .hashcache.json ! -name .manifest.json 2>/dev/null | wc -l | tr -d \" \"); " +
+            "else find /dest -type f ! -name .hashcache.json ! -name .manifest.json -print -quit 2>/dev/null | grep -q . && files=1; fi; " +
             "printf \"AZP_SUMMARY:%s\\t%s\\t%s\\t%s\\n\" \"$files\" \"$bytes\" \"$wow\" \"$mpq\"";
-        var (exit, output, _) = await RunAlpineInVolumeAsync(
+        var (exit, output, stderr) = await RunAlpineInVolumeAsync(
             contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, summaryScript, cancellationToken);
-        if (exit != 0)
+        if (exit != 0 || !TryApplyVolumeSummaryLine(output, summary))
         {
-            return summary;
+            const string fallbackScript =
+                "set +e; " +
+                "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
+                "mpq=0; if test -d /dest/Data; then ls /dest/Data/*.MPQ >/dev/null 2>&1 && mpq=1; fi; " +
+                "bytes=$(du -sb /dest 2>/dev/null | cut -f1); [ -n \"$bytes\" ] || bytes=0; " +
+                "files=0; find /dest -type f ! -name .hashcache.json ! -name .manifest.json -print -quit 2>/dev/null | grep -q . && files=1; " +
+                "printf \"AZP_SUMMARY:%s\\t%s\\t%s\\t%s\\n\" \"$files\" \"$bytes\" \"$wow\" \"$mpq\"";
+            var (fallbackExit, fallbackOutput, fallbackErr) = await RunAlpineInVolumeAsync(
+                contextArg, volumeName, readOnly: true, mountAt: "/dest", workDir: null, fallbackScript, cancellationToken);
+            if (fallbackExit == 0 && TryApplyVolumeSummaryLine(fallbackOutput, summary))
+            {
+                return summary;
+            }
+
+            summary.InspectionFailed = true;
+            summary.InspectionError = string.IsNullOrWhiteSpace(fallbackErr)
+                ? (string.IsNullOrWhiteSpace(stderr) ? "Volume inspection failed." : stderr.Trim())
+                : fallbackErr.Trim();
+            _logger.LogWarning(
+                "Failed to inspect volume {Volume} for stack {StackId}: {Error}",
+                volumeName,
+                stack?.Id ?? "(local)",
+                summary.InspectionError);
         }
 
+        return summary;
+    }
+
+    private static bool TryApplyVolumeSummaryLine(string output, VolumeTreeSummary summary)
+    {
         var line = output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .LastOrDefault(l => l.StartsWith("AZP_SUMMARY:", StringComparison.Ordinal));
         if (line is null)
         {
-            return summary;
+            return false;
         }
 
         var payload = line["AZP_SUMMARY:".Length..];
         var parts = payload.Split('\t');
-        if (parts.Length >= 4)
+        if (parts.Length < 4)
         {
-            int.TryParse(parts[0].Trim(), out var fileCount);
-            long.TryParse(parts[1].Trim(), out var totalBytes);
-            summary.FileCount = fileCount;
-            summary.TotalBytes = totalBytes;
-            summary.HasWowExe = parts[2].Trim() == "1";
-            summary.HasDataMpq = parts[3].Trim() == "1";
+            return false;
         }
 
-        return summary;
+        int.TryParse(parts[0].Trim(), out var fileCount);
+        long.TryParse(parts[1].Trim(), out var totalBytes);
+        summary.FileCount = fileCount;
+        summary.TotalBytes = totalBytes;
+        summary.HasWowExe = parts[2].Trim() == "1";
+        summary.HasDataMpq = parts[3].Trim() == "1";
+        return true;
     }
 
     private async Task<int> CountVolumeFilesCoreAsync(
@@ -2226,9 +2807,24 @@ public sealed class RemoteEngineService : IRemoteEngineService
         int port,
         CancellationToken cancellationToken)
     {
-        var (inspectExit, _, _) = await RunAsync("docker", $"context inspect {contextName}", cancellationToken, throwOnError: false);
-        // Use the same ubuntu@ec2-host form as manual SSH; IdentityFile comes from the Host block above.
         var endpoint = $"host={BuildDockerSshEndpoint(user, host, port)}";
+        if (_verifiedContextEndpoints.TryGetValue(contextName, out var cachedEndpoint)
+            && string.Equals(cachedEndpoint, endpoint, StringComparison.Ordinal))
+        {
+            var (cachedInspectExit, _, _) = await RunAsync(
+                "docker",
+                $"context inspect {contextName}",
+                cancellationToken,
+                throwOnError: false);
+            if (cachedInspectExit == 0)
+            {
+                return;
+            }
+
+            _verifiedContextEndpoints.TryRemove(contextName, out _);
+        }
+
+        var (inspectExit, _, _) = await RunAsync("docker", $"context inspect {contextName}", cancellationToken, throwOnError: false);
         if (inspectExit == 0)
         {
             var (updateExit, _, updateErr) = await RunAsync(
@@ -2246,6 +2842,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
         {
             await RunAsync("docker", $"context create {contextName} --docker {endpoint}", cancellationToken, throwOnError: true);
         }
+
+        _verifiedContextEndpoints[contextName] = endpoint;
     }
 
     private static string BuildDockerSshEndpoint(string user, string host, int port)
@@ -2259,18 +2857,25 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private Task<(int ExitCode, string StdOut, string StdErr)> RunSshAsync(
         string contextName,
         IReadOnlyList<string> remoteCommand,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds = 30,
+        bool forceTty = false)
     {
         var sshConfigPath = Path.Combine(GetSshDir(), "config");
         var args = new List<string>
         {
             "-F", sshConfigPath,
             "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=30",
+            "-o", $"ConnectTimeout={connectTimeoutSeconds}",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=4",
-            contextName
         };
+        if (forceTty)
+        {
+            args.Add("-tt");
+        }
+
+        args.Add(contextName);
         args.AddRange(remoteCommand);
         return RunProcessAsync("ssh", args, cancellationToken, throwOnError: false);
     }
@@ -2285,8 +2890,50 @@ public sealed class RemoteEngineService : IRemoteEngineService
         {
             message += " Verify the private key matches the remote authorized_keys entry.";
         }
+        else if (IsSshConnectivityFailure(message))
+        {
+            message += " This is usually a network or firewall issue, not bad credentials — confirm the " +
+                       "instance is running, the host/IP is correct (EC2 public IPs change after stop/start " +
+                       "unless you use an Elastic IP), and SSH port " + port +
+                       " is allowed from this manager in your cloud security group.";
+        }
 
         return message;
+    }
+
+    private static bool IsSshConnectivityFailure(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("no route to host", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("network is unreachable", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("could not resolve", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("banner exchange", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("connection reset", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("host is down", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSshSetupFailureSummary(string stderr)
+    {
+        var message = stderr.Trim();
+        if (IsSshConnectivityFailure(message))
+        {
+            return "Cannot reach the VPC over SSH. Check that the instance is running, the host/IP is " +
+                   "correct (EC2 public IPs change after stop/start unless you use an Elastic IP), and SSH " +
+                   "port 22 is open in your cloud security group from this manager's IP.";
+        }
+
+        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return "SSH authentication failed. Verify the SSH user and private key on the VPC overview tab.";
+        }
+
+        return "SSH connection failed. Update the VPC connection on the VPC overview tab.";
     }
 
     /// <summary>
@@ -2543,7 +3190,57 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
     }
 
-    private static string ManagementTunnelKey(string stackId, int remotePort) => $"{stackId}:{remotePort}";
+    private static string ManagementTunnelKey(string stackId, string remoteHost, int remotePort) =>
+        $"{stackId}:{remoteHost}:{remotePort}";
+
+    private static string NormalizeTunnelRemoteHost(string remoteHost)
+    {
+        var trimmed = (remoteHost ?? string.Empty).Trim();
+        if (trimmed.Length == 0 || trimmed == "0.0.0.0" || trimmed == "*" || trimmed == "::")
+        {
+            return "127.0.0.1";
+        }
+
+        if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+        {
+            trimmed = trimmed[1..^1];
+            return trimmed == "::" ? "127.0.0.1" : trimmed;
+        }
+
+        return trimmed;
+    }
+
+    private static bool TryParseDockerPublishedEndpoint(string line, out string host, out int port)
+    {
+        host = "127.0.0.1";
+        port = 0;
+
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        if (line.StartsWith('['))
+        {
+            var close = line.IndexOf(']');
+            if (close <= 1 || close + 1 >= line.Length || line[close + 1] != ':')
+            {
+                return false;
+            }
+
+            host = NormalizeTunnelRemoteHost(line[..(close + 1)]);
+            return int.TryParse(line[(close + 2)..], out port) && port is > 0 and <= 65535;
+        }
+
+        var colon = line.LastIndexOf(':');
+        if (colon <= 0 || colon >= line.Length - 1)
+        {
+            return false;
+        }
+
+        host = NormalizeTunnelRemoteHost(line[..colon]);
+        return int.TryParse(line[(colon + 1)..], out port) && port is > 0 and <= 65535;
+    }
 
     private static bool IsTunnelAlive(ManagementTunnel tunnel) =>
         !tunnel.Process.HasExited;

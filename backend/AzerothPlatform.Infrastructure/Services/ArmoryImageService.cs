@@ -174,6 +174,18 @@ public sealed class ArmoryImageService : IArmoryImageService
                     destinationPath,
                     cancellationToken);
             }
+
+            foreach (var faviconPath in Directory.EnumerateFiles(imgDir, "azp-favicon.*"))
+            {
+                var fileName = Path.GetFileName(faviconPath);
+                var destinationPath = $"{ArmoryContainerStaticRoot}/img/{fileName}";
+                await _remoteEngine.CopyFileToContainerAsync(
+                    stack,
+                    containerName,
+                    faviconPath,
+                    destinationPath,
+                    cancellationToken);
+            }
         }
 
         var partialsDir = Path.Combine(staticPath, "partials");
@@ -216,6 +228,7 @@ public sealed class ArmoryImageService : IArmoryImageService
         ArmoryLayoutTheme.EnsureLayoutStylesheetLinked(staticPath);
         InjectResponsiveStylesheet(staticPath);
         InjectWallpaper(staticPath, stackId);
+        InjectFavicon(staticPath);
     }
 
     private void EnsureLayoutTemplate(string staticPath)
@@ -512,6 +525,67 @@ public sealed class ArmoryImageService : IArmoryImageService
 
         Directory.CreateDirectory(Path.GetDirectoryName(cssPath)!);
         File.WriteAllText(cssPath, css);
+    }
+
+    private static readonly Regex AzpFaviconLinkRegex = new(
+        @"\s*<link rel=""icon""[^>]*azp-favicon[^>]*>\s*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Injects or updates a <c>&lt;link rel="icon"&gt;</c> tag in <c>layout.hbs</c> when the operator
+    /// uploaded a custom favicon at <c>static/img/azp-favicon.*</c>.
+    /// </summary>
+    private static void InjectFavicon(string staticPath)
+    {
+        var layoutPath = Path.Combine(staticPath, "layout.hbs");
+        if (!File.Exists(layoutPath))
+        {
+            return;
+        }
+
+        var faviconRelative = FindFaviconFile(staticPath);
+        var content = File.ReadAllText(layoutPath);
+        var stripped = AzpFaviconLinkRegex.Replace(content, "\n");
+
+        if (faviconRelative is null)
+        {
+            if (stripped != content)
+            {
+                File.WriteAllText(layoutPath, stripped);
+            }
+
+            return;
+        }
+
+        var link = $"    <link rel=\"icon\" href=\"{{{{websiteRoot}}}}/{faviconRelative}\">\n";
+        var updated = stripped.Contains("</head>", StringComparison.OrdinalIgnoreCase)
+            ? stripped.Replace("</head>", link + "</head>", StringComparison.OrdinalIgnoreCase)
+            : link + stripped;
+
+        if (updated != content)
+        {
+            File.WriteAllText(layoutPath, updated);
+        }
+    }
+
+    private static string? FindFaviconFile(string staticPath)
+    {
+        var imgDir = Path.Combine(staticPath, "img");
+        if (!Directory.Exists(imgDir))
+        {
+            return null;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(imgDir, "azp-favicon.*"))
+        {
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            if (extension is ".ico" or ".png" or ".svg" or ".webp" or ".gif")
+            {
+                return "img/" + Path.GetFileName(path);
+            }
+        }
+
+        return null;
     }
 
     private static void InjectThemeStylesheet(string staticPath)

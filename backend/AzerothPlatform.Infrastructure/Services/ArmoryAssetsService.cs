@@ -1,4 +1,6 @@
+using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
@@ -33,15 +35,25 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
     private const string LayoutCssRelativePath = "css/azp-layout.css";
     private const string LayoutRuntimeRelativePath = "data/armory-layout.json";
     private const string WallpaperFilePrefix = "azp-wallpaper";
+    private const string FaviconFilePrefix = "azp-favicon";
     private static readonly HashSet<string> WallpaperExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"
     };
+    private static readonly HashSet<string> FaviconExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".ico", ".png", ".svg", ".webp", ".gif"
+    };
+
+    private static readonly string[] ReleaseDataAssetNames = ["armory.data.zip", "armory.textures.zip"];
+    private const string ReleaseStaticAssetName = "armory.static.zip";
+    private static readonly JsonSerializerOptions GitHubJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ArmoryAssetsOptions _options;
     private readonly IRemoteEngineService _remoteEngine;
     private readonly IArmoryImageService _armoryImageService;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ArmoryAssetsService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -50,12 +62,14 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         IRemoteEngineService remoteEngine,
         IArmoryImageService armoryImageService,
         IServiceScopeFactory scopeFactory,
+        IHttpClientFactory httpClientFactory,
         ILogger<ArmoryAssetsService> logger)
     {
         _options = options.Value;
         _remoteEngine = remoteEngine;
         _armoryImageService = armoryImageService;
         _scopeFactory = scopeFactory;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -207,6 +221,89 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         }
 
         return null;
+    }
+
+    public async Task<ArmoryAssetsInfoDto> UploadFaviconAsync(
+        string stackId, string fileName, Stream content, string? contentType = null, CancellationToken cancellationToken = default)
+    {
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = FaviconExtensionFromContentType(contentType);
+        }
+
+        if (string.IsNullOrWhiteSpace(extension) || !FaviconExtensions.Contains(extension))
+        {
+            throw new InvalidOperationException("Favicon must be an image (ico, png, svg, webp, gif).");
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var imgDir = Path.Combine(_options.StaticPathFor(stackId), "img");
+            Directory.CreateDirectory(imgDir);
+
+            foreach (var existing in Directory.EnumerateFiles(imgDir, $"{FaviconFilePrefix}.*"))
+            {
+                File.Delete(existing);
+            }
+
+            var safeExtension = extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ? ".jpg" : extension.ToLowerInvariant();
+            var faviconName = $"{FaviconFilePrefix}{safeExtension}";
+            var target = Path.Combine(imgDir, faviconName);
+            await using (var file = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true))
+            {
+                await content.CopyToAsync(file, cancellationToken);
+            }
+
+            await TrySyncLiveArmoryShellAsync(stackId, cancellationToken);
+            await MarkStaticRebuildPendingAsync(stackId, cancellationToken);
+
+            return await BuildInfoAsync(stackId, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public (string Path, string ContentType)? TryGetFaviconFile(string stackId)
+    {
+        var imgDir = Path.Combine(_options.StaticPathFor(stackId), "img");
+        if (!Directory.Exists(imgDir))
+        {
+            return null;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(imgDir, $"{FaviconFilePrefix}.*"))
+        {
+            var extension = Path.GetExtension(path);
+            var contentType = FaviconContentTypeForExtension(extension);
+            if (contentType is null)
+            {
+                continue;
+            }
+
+            return (path, contentType);
+        }
+
+        return null;
+    }
+
+    public async Task<ArmoryAssetsInfoDto> DeleteFaviconAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            ClearCustomFavicon(stackId);
+            await TrySyncLiveArmoryShellAsync(stackId, cancellationToken);
+            await MarkStaticRebuildPendingAsync(stackId, cancellationToken);
+            return await BuildInfoAsync(stackId, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<ArmoryAssetsInfoDto> UploadDataAsync(string stackId, Stream archiveStream, CancellationToken cancellationToken = default)
@@ -385,6 +482,194 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         }
 
         return info;
+    }
+
+    public async Task<ArmoryReleaseDownloadResultDto> DownloadLatestReleaseAssetsAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var repository = _options.ReleaseRepository?.Trim();
+        var releaseTag = _options.ReleaseTag?.Trim();
+        if (string.IsNullOrWhiteSpace(repository) || string.IsNullOrWhiteSpace(releaseTag))
+        {
+            throw new InvalidOperationException(
+                "Armory release download is not configured (ArmoryAssets:ReleaseRepository and ReleaseTag).");
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _logger.LogInformation(
+                "Downloading armory release assets from {Repository} tag {Tag} for stack {StackId}",
+                repository,
+                releaseTag,
+                stackId);
+
+            var release = await FetchGitHubReleaseByTagAsync(repository, releaseTag, cancellationToken);
+            var downloaded = new List<string>();
+            var missing = new List<string>();
+
+            foreach (var assetName in ReleaseDataAssetNames)
+            {
+                var asset = release.Assets.FirstOrDefault(a =>
+                    string.Equals(a.Name, assetName, StringComparison.OrdinalIgnoreCase));
+                if (asset is null)
+                {
+                    missing.Add(assetName);
+                    continue;
+                }
+
+                await DownloadAndApplyDataAssetAsync(stackId, asset, cancellationToken);
+                downloaded.Add(assetName);
+            }
+
+            var staticAsset = release.Assets.FirstOrDefault(a =>
+                string.Equals(a.Name, ReleaseStaticAssetName, StringComparison.OrdinalIgnoreCase));
+            if (staticAsset is null)
+            {
+                missing.Add(ReleaseStaticAssetName);
+            }
+            else
+            {
+                await DownloadAndApplyStaticAssetAsync(stackId, staticAsset, cancellationToken);
+                downloaded.Add(ReleaseStaticAssetName);
+            }
+
+            if (downloaded.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"GitHub release '{releaseTag}' on {repository} did not contain any of: " +
+                    $"{string.Join(", ", ReleaseDataAssetNames.Concat([ReleaseStaticAssetName]))}.");
+            }
+
+            var info = await BuildInfoAsync(stackId, cancellationToken);
+            return new ArmoryReleaseDownloadResultDto
+            {
+                Info = info,
+                ReleaseTag = releaseTag,
+                DownloadedAssets = downloaded,
+                MissingAssets = missing,
+            };
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task DownloadAndApplyDataAssetAsync(
+        string stackId,
+        GitHubReleaseAsset asset,
+        CancellationToken cancellationToken)
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"armory-{Guid.NewGuid():N}-{asset.Name}");
+        try
+        {
+            _logger.LogInformation("Downloading {Asset} ({Size} bytes) for stack {StackId}", asset.Name, asset.Size, stackId);
+            await DownloadReleaseAssetToFileAsync(asset.BrowserDownloadUrl, tempFile, cancellationToken);
+            await using var stream = File.OpenRead(tempFile);
+            await UploadDataAsync(stackId, stream, cancellationToken);
+        }
+        finally
+        {
+            TryDeleteFile(tempFile);
+        }
+    }
+
+    private async Task DownloadAndApplyStaticAssetAsync(
+        string stackId,
+        GitHubReleaseAsset asset,
+        CancellationToken cancellationToken)
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"armory-{Guid.NewGuid():N}-{asset.Name}");
+        try
+        {
+            _logger.LogInformation("Downloading {Asset} ({Size} bytes) for stack {StackId}", asset.Name, asset.Size, stackId);
+            await DownloadReleaseAssetToFileAsync(asset.BrowserDownloadUrl, tempFile, cancellationToken);
+            await using var stream = File.OpenRead(tempFile);
+            await UploadStaticAsync(stackId, stream, cancellationToken);
+        }
+        finally
+        {
+            TryDeleteFile(tempFile);
+        }
+    }
+
+    private async Task<GitHubReleaseResponse> FetchGitHubReleaseByTagAsync(
+        string repository,
+        string tag,
+        CancellationToken cancellationToken)
+    {
+        using var api = CreateGitHubApiClient();
+        var url = $"repos/{repository}/releases/tags/{Uri.EscapeDataString(tag)}";
+        using var response = await api.GetAsync(url, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"GitHub release '{tag}' was not found on {repository} (HTTP {(int)response.StatusCode}). {body}");
+        }
+
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        var release = JsonSerializer.Deserialize<GitHubReleaseResponse>(content, GitHubJsonOptions);
+        if (release is null || release.Assets.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"GitHub release '{tag}' on {repository} has no downloadable assets.");
+        }
+
+        return release;
+    }
+
+    private async Task DownloadReleaseAssetToFileAsync(
+        string downloadUrl,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        using var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromHours(3);
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("AzerothPlatform", "1.0"));
+
+        using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var destination = File.Create(destinationPath);
+        await source.CopyToAsync(destination, cancellationToken);
+    }
+
+    private HttpClient CreateGitHubApiClient()
+    {
+        var client = _httpClientFactory.CreateClient("GitHubApi");
+        client.BaseAddress = new Uri("https://api.github.com/");
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        if (!client.DefaultRequestHeaders.UserAgent.Any())
+        {
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("AzerothPlatform", "1.0"));
+        }
+
+        return client;
+    }
+
+    private sealed class GitHubReleaseResponse
+    {
+        [JsonPropertyName("tag_name")]
+        public string TagName { get; set; } = string.Empty;
+
+        [JsonPropertyName("assets")]
+        public List<GitHubReleaseAsset> Assets { get; set; } = [];
+    }
+
+    private sealed class GitHubReleaseAsset
+    {
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
+
+        [JsonPropertyName("browser_download_url")]
+        public string BrowserDownloadUrl { get; set; } = string.Empty;
     }
 
     public async Task<ArmoryAssetsInfoDto> DeleteStaticAsync(string stackId, CancellationToken cancellationToken = default)
@@ -1175,6 +1460,7 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         return new ArmoryAssetsInfoDto
         {
             StaticRebuildPending = File.Exists(_options.RebuildMarkerPath(stackId)),
+            FaviconUploaded = TryGetFaviconFile(stackId) is not null,
         };
     }
 
@@ -1274,7 +1560,9 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             || normalized.Equals(LayoutCssRelativePath, StringComparison.OrdinalIgnoreCase)
             || normalized.Equals(LayoutRuntimeRelativePath, StringComparison.OrdinalIgnoreCase)
             || (normalized.StartsWith("img/", StringComparison.OrdinalIgnoreCase)
-                && Path.GetFileName(normalized).StartsWith(WallpaperFilePrefix + ".", StringComparison.OrdinalIgnoreCase));
+                && Path.GetFileName(normalized).StartsWith(WallpaperFilePrefix + ".", StringComparison.OrdinalIgnoreCase))
+            || (normalized.StartsWith("img/", StringComparison.OrdinalIgnoreCase)
+                && Path.GetFileName(normalized).StartsWith(FaviconFilePrefix + ".", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string NormalizePath(string path) => path.Replace('\\', '/');
@@ -1302,6 +1590,40 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
             File.Delete(existing);
         }
     }
+
+    private void ClearCustomFavicon(string stackId)
+    {
+        var imgDir = Path.Combine(_options.StaticPathFor(stackId), "img");
+        if (!Directory.Exists(imgDir))
+        {
+            return;
+        }
+
+        foreach (var existing in Directory.EnumerateFiles(imgDir, $"{FaviconFilePrefix}.*"))
+        {
+            File.Delete(existing);
+        }
+    }
+
+    private static string? FaviconExtensionFromContentType(string? contentType) => contentType?.Split(';', 2)[0].Trim().ToLowerInvariant() switch
+    {
+        "image/x-icon" or "image/vnd.microsoft.icon" => ".ico",
+        "image/png" => ".png",
+        "image/svg+xml" => ".svg",
+        "image/webp" => ".webp",
+        "image/gif" => ".gif",
+        _ => null,
+    };
+
+    private static string? FaviconContentTypeForExtension(string extension) => extension.ToLowerInvariant() switch
+    {
+        ".ico" => "image/x-icon",
+        ".png" => "image/png",
+        ".svg" => "image/svg+xml",
+        ".webp" => "image/webp",
+        ".gif" => "image/gif",
+        _ => null,
+    };
 
     private ArmoryStylingDto ReadStyling(string stackId)
     {
@@ -1457,6 +1779,21 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to clean up temp path {Path}", path);
+        }
+    }
+
+    private void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to clean up temp file {Path}", path);
         }
     }
 }

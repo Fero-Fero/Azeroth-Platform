@@ -6,7 +6,7 @@ import { stackApi, systemApi } from '@/services/api'
 import { stackKeys } from '@/hooks/useStacks'
 import { apiErrorMessage } from '@/lib/utils'
 import type { DeploymentConfigDto, StackDetailsDto } from '@/types/stack.types'
-import { DeploymentTarget } from '@/types/stack.types'
+import { DeploymentTarget, RemoteConnectionTestPhase } from '@/types/stack.types'
 
 interface ExternalReconnectPanelProps {
   stack: StackDetailsDto
@@ -41,20 +41,25 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
     setTestMessage(null)
     setTesting(true)
     try {
-      const res = await systemApi.testRemoteConnection({
-        target: DeploymentTarget.External,
-        externalHost: host,
-        externalSshPort: sshPort,
-        externalSshUser: sshUser,
-        externalSshPrivateKey: privateKey,
-      })
-      setTestMessage(res.data.success ? `Connected (${res.data.serverVersion ?? 'ok'})` : res.data.message)
+      const res = await systemApi.testRemoteConnection(
+        {
+          target: DeploymentTarget.External,
+          externalHost: host,
+          externalSshPort: sshPort,
+          externalSshUser: sshUser,
+          externalSshPrivateKey: privateKey,
+        },
+        RemoteConnectionTestPhase.SshOnly,
+      )
+      setTestMessage(res.data.success ? 'SSH connected.' : res.data.message)
     } catch (err) {
       setTestMessage(apiErrorMessage(err))
     } finally {
       setTesting(false)
     }
   }
+
+  const canSaveWithoutNewKey = !stack.needsExternalReconnect
 
   const handleReconnect = () => {
     reconnect.mutate({
@@ -84,8 +89,8 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
               </p>
             ) : (
               <p className="mt-1 text-sm text-gray-600">
-                Re-enter SSH credentials if the manager lost <code className="text-xs">secret-protection.key</code> or
-                connection details changed.
+                Update the remote host if the VPC IP changed after reboot. Re-enter the SSH private key only
+                when credentials changed or the manager lost <code className="text-xs">secret-protection.key</code>.
               </p>
             )}
           </div>
@@ -124,7 +129,11 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
                   id={`reconnect-ssh-key-${stack.stackId}`}
                   value={privateKey}
                   onChange={setPrivateKey}
-                  hint="Required to reconnect. Paste or select a key file from this machine."
+                  hint={
+                    canSaveWithoutNewKey
+                      ? 'Optional when only the host/IP changed — leave blank to keep the stored key.'
+                      : 'Required to reconnect. Paste or select a key file from this machine.'
+                  }
                 />
               </div>
             </div>
@@ -154,7 +163,12 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
               <button
                 type="button"
                 onClick={handleReconnect}
-                disabled={reconnect.isPending || !privateKey.trim() || !host.trim() || !sshUser.trim()}
+                disabled={
+                  reconnect.isPending ||
+                  !host.trim() ||
+                  !sshUser.trim() ||
+                  (!canSaveWithoutNewKey && !privateKey.trim())
+                }
                 className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {reconnect.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

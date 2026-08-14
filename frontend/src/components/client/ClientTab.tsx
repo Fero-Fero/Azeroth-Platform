@@ -30,7 +30,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function ClientTab({ stackId }: { stackId: string }) {
-  const { data: info, isLoading, error } = useClientBaseInfo(stackId)
+  const { data: info, isLoading, error, refetch, isFetching } = useClientBaseInfo(stackId)
   const uploadBase = useUploadBaseClient(stackId)
   const rescanBase = useRescanBaseClient(stackId)
 
@@ -110,9 +110,22 @@ export default function ClientTab({ stackId }: { stackId: string }) {
         <p className="text-sm text-gray-600">
           Upload this stack&rsquo;s <strong>base WoW client</strong>. The stack runs a client container
           that serves this base plus its own patch overlay to the launcher. Each stack keeps its own
-          base client, so it must be uploaded per stack.
+          base client in a Docker volume on the stack engine (for VPC stacks, that is the remote host).
+          Stopping the client container does <strong>not</strong> remove the uploaded base client.
         </p>
       </div>
+
+      {info?.inspectionWarning && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          {info.inspectionWarning}
+          {info.volumeExists && !info.exists && (
+            <span className="mt-1 block text-amber-800">
+              If SSH to the VPC was interrupted, open the VPC overview tab and reconnect, then click
+              Refresh below.
+            </span>
+          )}
+        </div>
+      )}
 
       {pageError && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{pageError}</div>}
 
@@ -127,11 +140,23 @@ export default function ClientTab({ stackId }: { stackId: string }) {
 
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="rounded-md border bg-gray-50/50 p-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <HardDrive className="h-4 w-4" /> Current base
+            <div className="flex items-center justify-between gap-2 text-sm font-medium text-gray-700">
+              <span className="inline-flex items-center gap-2">
+                <HardDrive className="h-4 w-4" /> Current base
+              </span>
+              <button
+                type="button"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="inline-flex items-center gap-1 rounded border bg-white px-2 py-1 text-xs font-normal text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {isFetching ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                Refresh
+              </button>
             </div>
             {info?.exists ? (
               <div className="mt-2 space-y-1 text-sm text-gray-600">
+                <div className="font-mono text-xs text-gray-500">{info.gamePath}</div>
                 <div>{info.fileCount.toLocaleString()} files · {formatBytes(info.totalSize)}</div>
                 <div className="flex items-center gap-1">
                   {info.hasWowExe ? (
@@ -151,7 +176,11 @@ export default function ClientTab({ stackId }: { stackId: string }) {
                 </div>
               </div>
             ) : (
-              <p className="mt-2 text-sm text-gray-400">No base client uploaded yet.</p>
+              <p className="mt-2 text-sm text-gray-400">
+                {info?.volumeExists
+                  ? 'No client files detected in the client-base volume.'
+                  : 'No base client uploaded yet.'}
+              </p>
             )}
           </div>
 

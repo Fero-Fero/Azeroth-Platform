@@ -1,26 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2, Upload, CheckCircle2, XCircle, Boxes, Layers, Database, Download, Trash2 } from 'lucide-react'
+import { Loader2, Upload, CheckCircle2, XCircle, Boxes, Layers, Database, Download, Trash2, CloudDownload, ImageIcon } from 'lucide-react'
 import {
   useArmoryAssetsInfo,
   useUploadArmoryData,
   useUploadArmoryStatic,
   useDeleteArmoryStatic,
   useSyncArmoryDbcs,
+  useDownloadArmoryRelease,
+  useUploadArmoryFavicon,
+  useDeleteArmoryFavicon,
   armoryAssetsInfoKey,
 } from '@/hooks/useArmoryAssets'
 import { useArmoryJobContext } from '@/contexts/ArmoryJobContext'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
+import { armoryAssetsApi } from '@/services/api'
 import ArmoryDataBrowser from '@/components/armory/ArmoryDataBrowser'
 
 const ACCEPTED_EXTENSIONS = ['.zip', '.rar', '.7z', '.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2', '.tar.xz', '.gz', '.bz2', '.xz']
 const ACCEPT_ATTR = ACCEPTED_EXTENSIONS.join(',')
+const FAVICON_EXTENSIONS = ['.ico', '.png', '.svg', '.webp', '.gif']
+const FAVICON_ACCEPT = FAVICON_EXTENSIONS.join(',')
 
 const EXPECTED_DATA_FOLDERS = ['bone', 'dbc', 'dbc_transmog', 'meta', 'mo3', 'progression', 'textures']
 
 function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase()
   return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+function hasFaviconExtension(name: string): boolean {
+  const lower = name.toLowerCase()
+  return FAVICON_EXTENSIONS.some((ext) => lower.endsWith(ext))
 }
 
 function formatBytes(bytes: number): string {
@@ -47,10 +58,16 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
   const uploadStatic = useUploadArmoryStatic(stackId)
   const deleteStatic = useDeleteArmoryStatic(stackId)
   const syncDbcs = useSyncArmoryDbcs(stackId)
+  const downloadRelease = useDownloadArmoryRelease(stackId)
+  const uploadFavicon = useUploadArmoryFavicon(stackId)
+  const deleteFavicon = useDeleteArmoryFavicon(stackId)
   const { job, isArmoryBusy, applyStatus } = useArmoryJobContext()
 
   const [message, setMessage] = useState<string | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
+  const [faviconUploadPercent, setFaviconUploadPercent] = useState<number | null>(null)
+  const [faviconPreviewKey, setFaviconPreviewKey] = useState(0)
+  const faviconFileRef = useRef<HTMLInputElement | null>(null)
 
   const flash = (text: string) => {
     setMessage(text)
@@ -92,6 +109,32 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
     }
   }
 
+  const onDownloadRelease = async () => {
+    if (
+      !window.confirm(
+        'Download armory.data.zip, armory.textures.zip, and armory.static.zip from the latest GitHub release and apply them to this stack? Large downloads can take several minutes.',
+      )
+    ) {
+      return
+    }
+
+    setPageError(null)
+    setMessage(null)
+    try {
+      const result = await downloadRelease.mutateAsync()
+      const applied = result.downloadedAssets.join(', ')
+      const missing =
+        result.missingAssets.length > 0 ? ` Missing on release: ${result.missingAssets.join(', ')}.` : ''
+      const rebuild =
+        result.downloadedAssets.includes('armory.static.zip')
+          ? ' Rebuild the armory image to apply static assets.'
+          : ''
+      flash(`Applied release ${result.releaseTag}: ${applied}.${missing}${rebuild}`)
+    } catch (err) {
+      setPageError(errorMessage(err))
+    }
+  }
+
   const onDeleteStatic = async () => {
     if (!window.confirm('Delete uploaded static web assets for this stack? Model-viewer data and generated styling assets are preserved.')) {
       return
@@ -102,6 +145,38 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
     try {
       await deleteStatic.mutateAsync()
       flash('Static web assets deleted. Rebuild the armory image to apply the fallback assets.')
+    } catch (err) {
+      setPageError(errorMessage(err))
+    }
+  }
+
+  const onFaviconFile = async (file?: File | null) => {
+    if (!file) return
+    setPageError(null)
+    if (!hasFaviconExtension(file.name)) {
+      setPageError(`Unsupported favicon type. Accepted: ${FAVICON_EXTENSIONS.join(', ')}.`)
+      return
+    }
+    setFaviconUploadPercent(0)
+    try {
+      await uploadFavicon.mutateAsync({ file, onProgress: setFaviconUploadPercent })
+      setFaviconPreviewKey((k) => k + 1)
+      flash('Favicon uploaded. Rebuild the armory image to apply it in the browser tab.')
+    } catch (err) {
+      setPageError(errorMessage(err))
+    } finally {
+      setFaviconUploadPercent(null)
+      if (faviconFileRef.current) faviconFileRef.current.value = ''
+    }
+  }
+
+  const onDeleteFavicon = async () => {
+    if (!window.confirm('Remove the uploaded armory favicon?')) return
+    setPageError(null)
+    try {
+      await deleteFavicon.mutateAsync()
+      setFaviconPreviewKey((k) => k + 1)
+      flash('Favicon removed. Rebuild the armory image to clear it from the browser tab.')
     } catch (err) {
       setPageError(errorMessage(err))
     }
@@ -134,9 +209,25 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
       {/* Armory assets: the model-viewer dataset and the static web bundle now live together under one
           static/ tree, so they share a single card. */}
       <section className="rounded-lg border bg-white p-6 shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <Boxes className="h-5 w-5 text-blue-600" />
-          <h2 className="text-lg font-semibold text-gray-900">Armory Assets</h2>
+        <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Boxes className="h-5 w-5 text-blue-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Armory Assets</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onDownloadRelease}
+            disabled={downloadRelease.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            title="Download armory.data.zip, armory.textures.zip, and armory.static.zip from GitHub"
+          >
+            {downloadRelease.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CloudDownload className="h-4 w-4" />
+            )}
+            {downloadRelease.isPending ? 'Downloading release…' : 'Download latest release'}
+          </button>
         </div>
         <p className="mb-4 text-sm text-gray-500">
           Upload this stack&rsquo;s armory data bundle (<span className="font-mono">armory.data.zip</span>
@@ -245,6 +336,67 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
               onError={setPageError}
               onDone={() => flash('Static assets uploaded. Rebuild the armory image to apply them.')}
             />
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-md border border-dashed border-gray-300 bg-gray-50/50 p-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <ImageIcon className="h-4 w-4 text-blue-600" /> Armory favicon
+            </div>
+            {info?.faviconUploaded && (
+              <button
+                type="button"
+                onClick={onDeleteFavicon}
+                disabled={deleteFavicon.isPending}
+                className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                {deleteFavicon.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Remove favicon
+              </button>
+            )}
+          </div>
+          <p className="mb-3 text-sm text-gray-500">
+            Upload a small icon (ICO, PNG, SVG, WebP, or GIF) shown in the browser tab for this stack&rsquo;s armory.
+            Like static assets, the favicon is baked into the armory image on rebuild.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            {info?.faviconUploaded && (
+              <img
+                src={`${armoryAssetsApi.faviconPreviewUrl(stackId)}?v=${faviconPreviewKey}`}
+                alt="Current armory favicon"
+                className="h-10 w-10 rounded border bg-white object-contain p-1"
+              />
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => faviconFileRef.current?.click()}
+                disabled={uploadFavicon.isPending || faviconUploadPercent !== null}
+                className="inline-flex items-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {uploadFavicon.isPending || faviconUploadPercent !== null ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {faviconUploadPercent !== null && faviconUploadPercent < 100
+                  ? `Uploading… ${faviconUploadPercent}%`
+                  : info?.faviconUploaded
+                    ? 'Replace favicon'
+                    : 'Upload favicon'}
+              </button>
+              {!info?.faviconUploaded && (
+                <span className="text-sm text-gray-400">No custom favicon uploaded.</span>
+              )}
+              <input
+                ref={faviconFileRef}
+                type="file"
+                accept={FAVICON_ACCEPT}
+                className="hidden"
+                onChange={(e) => void onFaviconFile(e.target.files?.[0])}
+              />
+            </div>
           </div>
         </div>
 

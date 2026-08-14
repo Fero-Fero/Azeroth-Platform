@@ -244,9 +244,8 @@ actually runs.
 - You can mix local and external stacks freely from the same dashboard.
 
 **Remote host requirements:** reachable over SSH from the manager, Docker installed, and the SSH user
-able to run it (e.g. a non-root user in the `docker` group).
-
-See [EXTERNAL-VPC-SETUP.md](./EXTERNAL-VPC-SETUP.md) for the first-time Linux VPC setup and security role plan.
+able to run it (e.g. a non-root user in the `docker` group). Configure VPC security roles in the stack
+wizard (Deployment step) and sync the host firewall from the stack VPC overview tab after deploy.
 
 **Steps:**
 

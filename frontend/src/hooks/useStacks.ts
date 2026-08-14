@@ -1,5 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { stackApi } from '@/services/api'
+import type { StackDetailsDto } from '@/types/stack.types'
 
 export const stackKeys = {
   all: ['stacks'] as const,
@@ -9,26 +11,96 @@ export const stackKeys = {
   detail: (id: string) => [...stackKeys.details(), id] as const,
 }
 
+function stackFromListCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  stackId: string,
+): StackDetailsDto | undefined {
+  const list = queryClient.getQueryData<StackDetailsDto[]>(stackKeys.lists())
+  return list?.find((stack) => stack.stackId === stackId)
+}
+
 export function useStacks() {
-  return useQuery({
+  const queryClient = useQueryClient()
+  const initialProbeStarted = useRef(false)
+
+  const query = useQuery({
     queryKey: stackKeys.lists(),
     queryFn: async () => {
       const response = await stackApi.list()
       return response.data
     },
-    // Poll while any stack is mid-transition (e.g. a background start/restart job) so the overview
-    // reflects progress and the completed state without a manual refresh.
-    refetchInterval: (query) => {
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+    refetchInterval: (queryState: Query<StackDetailsDto[], Error>) => {
       const transitional = new Set(['Starting', 'Building', 'Initializing', 'Degraded'])
-      const anyTransitioning = query.state.data?.some((s) => transitional.has(s.status))
+      const anyTransitioning = queryState.state.data?.some((s) => transitional.has(s.status))
       return anyTransitioning ? 5000 : false
     },
   })
+
+  const probeAll = useMutation({
+    mutationFn: () => stackApi.probeAllStatus().then((res) => res.data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(stackKeys.lists(), data)
+    },
+  })
+
+  const { mutate: runProbeAll, isPending: isProbing } = probeAll
+
+  useEffect(() => {
+    if (!query.isSuccess || initialProbeStarted.current || !query.data?.length) {
+      return
+    }
+
+    initialProbeStarted.current = true
+    runProbeAll()
+  }, [query.isSuccess, query.data?.length, runProbeAll])
+
+  return {
+    ...query,
+    probeAll,
+    isProbing,
+  }
+}
+
+export function useStackDetail(
+  stackId: string,
+  options?: {
+    refetchInterval?: number | false | ((query: Query<StackDetailsDto, Error>) => number | false)
+    enabled?: boolean
+  },
+) {
+  const queryClient = useQueryClient()
+
+  const detailQuery = useQuery({
+    queryKey: stackKeys.detail(stackId),
+    queryFn: () => stackApi.get(stackId).then((res) => res.data),
+    enabled: (options?.enabled ?? true) && !!stackId,
+    staleTime: 15_000,
+    gcTime: 10 * 60_000,
+    placeholderData: (previousData) =>
+      previousData ?? stackFromListCache(queryClient, stackId),
+    refetchInterval: options?.refetchInterval,
+  })
+
+  useEffect(() => {
+    if (!detailQuery.data) return
+    queryClient.setQueryData<StackDetailsDto[]>(stackKeys.lists(), (current) => {
+      if (!current) return current
+      return current.map((stack) =>
+        stack.stackId === stackId ? detailQuery.data! : stack,
+      )
+    })
+  }, [detailQuery.data, queryClient, stackId])
+
+  return detailQuery
 }
 
 export function useCreateStack() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: stackApi.create,
     onSuccess: () => {

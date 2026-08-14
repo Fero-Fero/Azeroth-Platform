@@ -126,8 +126,7 @@ export function VpcSecurityRolesCard({ compact = false }: { compact?: boolean })
         ))}
       </ul>
       <p className="mt-2 text-[11px] text-gray-500">
-        See <code className="text-[10px]">{catalog.documentationPath}</code> for the full plan. Worldserver
-        environment variables do not control host or Docker networking.
+        Worldserver environment variables do not control host or Docker networking.
       </p>
     </div>
   )

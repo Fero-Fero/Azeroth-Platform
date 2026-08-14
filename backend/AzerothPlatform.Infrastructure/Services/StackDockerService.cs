@@ -263,18 +263,24 @@ public sealed class StackDockerService : IStackDockerService
         var contextArg = ContextArg(dockerContext);
         var isRemoteEngine = !string.IsNullOrWhiteSpace(contextArg);
         var project = DockerComposeOverrideGenerator.GetComposeProjectName(stackId);
-        var containers = await _dockerService.ListContainersAsync(project, dockerContext, cancellationToken);
+        var containers = await _dockerService.ListContainersAsync(
+            project,
+            dockerContext,
+            cancellationToken: cancellationToken);
         var hasContainers = containers.Count > 0;
         var buildInProgress = await IsBuildInProgressAsync(stackId, cancellationToken);
         var stackBusy = IsStackRuntimeBusy(stack.Status) || buildInProgress;
 
         var managedStackIds = await GetManagedStackIdsAsync(cancellationToken);
         var anyClientEnabled = await AnyManagedStackClientEnabledAsync(cancellationToken);
-        var allContainerImageRefs = await GetAllContainerImageRefsAsync(contextArg, cancellationToken);
         var activeImageRefs = await GetActiveImageReferencesAsync(contextArg, project, cancellationToken);
-        foreach (var reference in allContainerImageRefs)
+        if (!isRemoteEngine)
         {
-            activeImageRefs.Add(reference);
+            var allContainerImageRefs = await GetAllContainerImageRefsAsync(contextArg, cancellationToken);
+            foreach (var reference in allContainerImageRefs)
+            {
+                activeImageRefs.Add(reference);
+            }
         }
 
         // Remote engines: `system df -v` and per-image inspects are very slow over SSH — skip or defer them.
@@ -286,13 +292,21 @@ public sealed class StackDockerService : IStackDockerService
             : await GetDiskUsageAsync(cancellationToken);
 
         var buildFiles = DescribeBuildFiles(stackId, stackBusy, hasContainers, buildInProgress);
-        var images = await ListStackImagesAsync(
-            stackId,
-            contextArg,
-            activeImageRefs,
-            managedStackIds,
-            anyClientEnabled,
-            cancellationToken);
+        var images = isRemoteEngine
+            ? await ListStackImagesRemoteAsync(
+                stackId,
+                contextArg,
+                activeImageRefs,
+                managedStackIds,
+                anyClientEnabled,
+                cancellationToken)
+            : await ListStackImagesAsync(
+                stackId,
+                contextArg,
+                activeImageRefs,
+                managedStackIds,
+                anyClientEnabled,
+                cancellationToken);
         List<StackDockerImageDto> allPlatformImages;
         List<StackDockerImageDto> unusedImages;
         List<DockerObsoleteBuildDirDto> obsoleteBuildDirs;
@@ -320,7 +334,9 @@ public sealed class StackDockerService : IStackDockerService
             obsoleteBuildDirs = await ListObsoleteBuildDirsAsync(managedStackIds, cancellationToken);
         }
 
-        var danglingImages = await ListDanglingImagesAsync(contextArg, cancellationToken);
+        var danglingImages = isRemoteEngine
+            ? []
+            : await ListDanglingImagesAsync(contextArg, cancellationToken);
         var reclaimableBreakdown = BuildReclaimableBreakdown(
             diskUsage,
             danglingImages,
@@ -352,6 +368,8 @@ public sealed class StackDockerService : IStackDockerService
 
         return new StackDockerOverviewDto
         {
+            IsRemoteEngine = isRemoteEngine,
+            RemoteStatsLimited = isRemoteEngine,
             DiskUsage = diskUsage,
             DiskUsageBreakdown = BuildDiskUsageBreakdown(
                 diskUsage,
@@ -1951,6 +1969,90 @@ public sealed class StackDockerService : IStackDockerService
             .ToList();
     }
 
+    /// <summary>
+    /// Lists stack images on a remote engine with a single <c>docker images</c> invocation instead of
+    /// one SSH round trip per tag pattern.
+    /// </summary>
+    private async Task<List<StackDockerImageDto>> ListStackImagesRemoteAsync(
+        string stackId,
+        string contextArg,
+        HashSet<string> activeImageRefs,
+        HashSet<string> managedStackIds,
+        bool anyClientEnabled,
+        CancellationToken cancellationToken)
+    {
+        var patterns = GetImagePatternsWithArmory(stackId).ToList();
+        if (patterns.Count == 0)
+        {
+            return [];
+        }
+
+        var patternArgs = string.Join(" ", patterns);
+        var (exitCode, output, _) = await RunDockerAsync(
+            $"{contextArg}images --no-trunc --format \"{{{{json .}}}}\" {patternArgs}",
+            cancellationToken);
+        if (exitCode != 0)
+        {
+            return [];
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var images = new List<StackDockerImageDto>();
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            DockerImageRow? row;
+            try
+            {
+                row = JsonSerializer.Deserialize<DockerImageRow>(line);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (row is null || string.IsNullOrWhiteSpace(row.ID) || !seen.Add(row.ID))
+            {
+                continue;
+            }
+
+            var reference = BuildReference(row.Repository, row.Tag);
+            var imageOwnerStackId = ResolveOwnerStackId(row.Repository, row.Tag);
+            if (!string.Equals(imageOwnerStackId, stackId, StringComparison.OrdinalIgnoreCase)
+                && !IsCurrentStackArmoryImage(row.Repository, row.Tag, stackId))
+            {
+                continue;
+            }
+
+            var sizeBytes = await ResolveImageSizeBytesAsync(contextArg, row, cancellationToken);
+            var (isActive, reason) = ClassifyImage(
+                reference,
+                row.ID,
+                row.Tag,
+                imageOwnerStackId,
+                activeImageRefs,
+                managedStackIds,
+                anyClientEnabled);
+            images.Add(new StackDockerImageDto
+            {
+                Id = row.ID,
+                Repository = string.IsNullOrWhiteSpace(row.Repository) ? "<none>" : row.Repository,
+                Tag = string.IsNullOrWhiteSpace(row.Tag) ? "<none>" : row.Tag,
+                Reference = reference,
+                OwnerStackId = imageOwnerStackId,
+                SizeBytes = sizeBytes,
+                CreatedAt = ParseDockerCreatedAt(row.CreatedAt),
+                IsActive = isActive,
+                ActiveReason = reason,
+            });
+        }
+
+        return images
+            .OrderByDescending(i => i.IsActive)
+            .ThenBy(i => i.Repository, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(i => i.Tag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private async Task<List<StackDockerImageDto>> ListAllPlatformImagesAsync(
         string contextArg,
         HashSet<string> activeImageRefs,
@@ -2909,18 +3011,13 @@ public sealed class StackDockerService : IStackDockerService
         CancellationToken cancellationToken)
     {
         var usage = new DockerDiskUsageDto();
+        // Host disk via a throwaway container — skip `docker system df` on remote engines (another slow SSH call).
         var (dfExit, dfOutput, _) = await RunDockerAsync(
             $"{contextArg}run --rm alpine:3.20 df -B1 --output=size,used,avail,pcent /",
             cancellationToken);
         if (dfExit == 0)
         {
             ParseHostDisk(dfOutput, usage);
-        }
-
-        var (sysExit, sysOutput, _) = await RunDockerAsync($"{contextArg}system df", cancellationToken);
-        if (sysExit == 0)
-        {
-            ParseDockerSystemDf(sysOutput, usage);
         }
 
         usage.IsWarning = usage.UsedPercent >= DiskWarningThresholdPercent;

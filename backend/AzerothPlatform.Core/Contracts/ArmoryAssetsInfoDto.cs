@@ -44,4 +44,7 @@ public sealed class ArmoryAssetsInfoDto
     /// client-data-init has run. Zero means the stack has not downloaded server data yet.
     /// </summary>
     public int ServerDbcFileCount { get; set; }
+
+    /// <summary>True when the operator uploaded a custom favicon for the armory site.</summary>
+    public bool FaviconUploaded { get; set; }
 }

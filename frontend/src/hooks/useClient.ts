@@ -5,11 +5,12 @@ const baseInfoKey = (stackId: string) => ['client', stackId, 'base-info']
 const browseKey = (stackId: string) => ['client', stackId, 'browse']
 
 /** Current base client summary for a stack (existence, size, sanity checks). */
-export function useClientBaseInfo(stackId: string) {
+export function useClientBaseInfo(stackId: string, enabled = true) {
   return useQuery({
     queryKey: baseInfoKey(stackId),
     queryFn: async () => (await clientApi.getBaseInfo(stackId)).data,
-    enabled: !!stackId,
+    enabled: enabled && !!stackId,
+    refetchOnMount: 'always',
   })
 }
 

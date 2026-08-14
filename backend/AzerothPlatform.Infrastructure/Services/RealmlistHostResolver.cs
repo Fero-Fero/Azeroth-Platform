@@ -16,7 +16,7 @@ public static class RealmlistHostResolver
     /// </summary>
     public static string ResolveForRealmAddress(string host, CancellationToken cancellationToken = default)
     {
-        var trimmed = (host ?? string.Empty).Trim();
+        var trimmed = NormalizeHost(host);
         if (trimmed.Length == 0)
         {
             return trimmed;
@@ -55,6 +55,51 @@ public static class RealmlistHostResolver
         return trimmed;
     }
 
+    /// <summary>
+    /// Strips an accidental URL scheme, path, or trailing port so values like
+    /// <c>http://ec2.example.com:3724</c> become <c>ec2.example.com</c> for host-only fields.
+    /// </summary>
+    public static string NormalizeHost(string raw)
+    {
+        var trimmed = (raw ?? string.Empty).Trim().TrimEnd('/');
+        if (trimmed.Length == 0)
+        {
+            return trimmed;
+        }
+
+        if (trimmed.Contains("://", StringComparison.Ordinal))
+        {
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+            {
+                return uri.Host;
+            }
+        }
+
+        if (trimmed.StartsWith('['))
+        {
+            var close = trimmed.IndexOf(']');
+            if (close > 0)
+            {
+                var suffix = trimmed[(close + 1)..];
+                if (suffix.StartsWith(':') && int.TryParse(suffix[1..], out _))
+                {
+                    return trimmed[..(close + 1)];
+                }
+            }
+
+            return trimmed;
+        }
+
+        var lastColon = trimmed.LastIndexOf(':');
+        if (lastColon > 0 && lastColon < trimmed.Length - 1
+            && int.TryParse(trimmed[(lastColon + 1)..], out _))
+        {
+            return trimmed[..lastColon];
+        }
+
+        return trimmed;
+    }
+
     private static bool IsPrivateOrNonRoutableIpv4(IPAddress ip)
     {
         if (ip.AddressFamily != AddressFamily.InterNetwork)
@@ -85,4 +130,11 @@ public static class RealmlistHostResolver
 
         return false;
     }
+
+    /// <summary>
+    /// True for loopback, RFC1918, or link-local IPv4 literals. These are typically assignable on a host
+    /// NIC (unlike elastic/public cloud addresses that are NAT-mapped and cannot be bound by Docker).
+    /// </summary>
+    public static bool IsPrivateOrNonRoutableIpv4Literal(string host) =>
+        IPAddress.TryParse(NormalizeHost(host), out var ip) && IsPrivateOrNonRoutableIpv4(ip);
 }

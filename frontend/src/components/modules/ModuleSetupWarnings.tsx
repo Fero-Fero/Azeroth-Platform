@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BotMessageSquare, CheckCircle2, Loader2, Copy, ShieldAlert, Eye, EyeOff } from 'lucide-react'
 import { charactersApi, stackApi } from '@/services/api'
 import { stackKeys } from '@/hooks/useStacks'
-import { StackStatus } from '@/types/stack.types'
 import type { StackDetailsDto } from '@/types/stack.types'
 import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
 import IndividualProgressionPlayerbotsSetupHint from '@/components/modules/IndividualProgressionPlayerbotsSetupHint'
@@ -49,11 +48,12 @@ export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps)
   const [soapRevealedPassword, setSoapRevealedPassword] = useState<string | null>(null)
   const [soapPasswordVisible, setSoapPasswordVisible] = useState(false)
   const [copiedField, setCopiedField] = useState<'username' | 'password' | null>(null)
-  // In DB maintenance mode only the database runs (world/auth are down), so the SOAP admin
-  // account can't be initialized and the warning is just noise — suppress it.
-  const isDbMaintenance = stack.status === StackStatus.Degraded
-  const soapNeedsSetup = !stack.isAdminAccountInitialized && !isDbMaintenance
-  const canInitializeSoap = stack.status === StackStatus.Running
+  const isDatabaseRunning = stack.services.some(
+    (svc) =>
+      (svc.service === 'ac-database' || svc.service.includes('database')) && svc.state === 'running',
+  )
+  const soapNeedsSetup = !stack.isAdminAccountInitialized
+  const canInitializeSoap = isDatabaseRunning
 
   const initSoapMutation = useMutation({
     mutationFn: () => stackApi.initializeAdmin(stack.stackId),
@@ -171,13 +171,13 @@ export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps)
                   <p className="mt-0.5 text-sm text-red-800">
                     The manager needs a SOAP admin account to send commands to your server (account creation, bans, GM levels, etc.).
                     The account will be created with a unique, auto-generated password. 
-                    The stack must be <strong>running</strong> to initialize.
+                    The database container must be <strong>running</strong> to initialize.
                   </p>
                 </div>
               </div>
               <div className="shrink-0">
                 {!canInitializeSoap ? (
-                  <span className="text-sm text-red-500 italic">Start the stack first</span>
+                  <span className="text-sm text-red-500 italic">Start the database first</span>
                 ) : (
                   <button
                     onClick={() => initSoapMutation.mutate()}

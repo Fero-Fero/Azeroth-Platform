@@ -211,7 +211,12 @@ export interface VpcSecurityRoleDto {
 
 export interface VpcSecurityCatalogDto {
   roles: VpcSecurityRoleDto[]
-  documentationPath: string
+}
+
+export interface VpcLaunchUserDataDto {
+  sshUser: string
+  script: string
+  instructions: string
 }
 
 export interface VpcSecurityRuleDto {
@@ -229,6 +234,43 @@ export interface VpcSecurityProfileDto {
   cloudSecurityGroupRules: VpcSecurityRuleDto[]
   deniedPorts: VpcSecurityRuleDto[]
   notes: string
+}
+
+export type VpcSecurityCheckStatus = 'ok' | 'warning' | 'error' | 'unknown' | 'not-applicable'
+
+export interface VpcSecurityCheckDto {
+  category: string
+  name: string
+  roleId: string
+  port?: number
+  status: VpcSecurityCheckStatus
+  message: string
+}
+
+export interface VpcFirewallStatusDto {
+  overallHealthy: boolean
+  message: string
+  ufwInstalled: boolean
+  ufwActive: boolean
+  ufwStatusSummary?: string
+  checks: VpcSecurityCheckDto[]
+}
+
+export type VpcSshLogEventType = 'accepted' | 'failed' | 'invalid-user' | 'closed'
+
+export interface VpcSshLogEntryDto {
+  timestamp?: string
+  eventType: VpcSshLogEventType
+  username?: string
+  sourceIp?: string
+  rawLine: string
+}
+
+export interface VpcSshLogsDto {
+  success: boolean
+  message: string
+  logSource?: string
+  entries: VpcSshLogEntryDto[]
 }
 
 // Build DTOs
@@ -359,6 +401,9 @@ export interface StackDetailsDto {
   modulesPendingRebuild?: string[]
   needsExternalReconnect?: boolean
   externalReconnectReason?: string | null
+  /** Null when runtime was not probed; false when the stack's Docker engine is down or unreachable. */
+  dockerEngineAvailable?: boolean | null
+  dockerEngineUnavailableReason?: string | null
   /** False until the first worldserver build completes successfully. */
   hasCompletedBuild?: boolean
 }
@@ -400,14 +445,47 @@ export interface ArmoryJobStatus {
   isRunning: boolean
 }
 
-export type StackJobAction = 'Start' | 'StartDatabase' | 'Stop' | 'Restart'
+export type ClientJobAction = 'Start' | 'Stop' | 'Restart' | 'Recreate'
+export type ClientJobPhase =
+  | 'Starting'
+  | 'Stopping'
+  | 'Restarting'
+  | 'Recreating'
+  | 'Completed'
+  | 'Failed'
+
+/** Status of the detached client file-server background job for a stack (survives page refreshes). */
+export interface ClientJobStatus {
+  stackId: string
+  jobId: string
+  action: ClientJobAction
+  phase: ClientJobPhase
+  message: string
+  error?: string | null
+  success?: boolean | null
+  startedAt: string
+  finishedAt?: string | null
+  isRunning: boolean
+}
+
+export type StackJobAction = 'Start' | 'StartDatabase' | 'Stop' | 'Restart' | 'ApplyPublicHost'
 export type StackJobPhase =
   | 'Starting'
   | 'StartingDatabase'
   | 'Stopping'
   | 'Restarting'
+  | 'ApplyingPublicHost'
   | 'Completed'
   | 'Failed'
+
+export type PublicHostApplyStepStatus = 'Pending' | 'Running' | 'Completed' | 'Skipped' | 'Failed'
+
+export interface PublicHostApplyStep {
+  id: string
+  label: string
+  status: PublicHostApplyStepStatus
+  detail?: string | null
+}
 
 /** Status of the detached stack lifecycle background job (survives navigating away / refreshes). */
 export interface StackJobStatus {
@@ -421,6 +499,7 @@ export interface StackJobStatus {
   startedAt: string
   finishedAt?: string | null
   isRunning: boolean
+  steps?: PublicHostApplyStep[]
 }
 
 export interface InitializeAdminResponseDto {

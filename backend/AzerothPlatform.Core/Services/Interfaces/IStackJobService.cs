@@ -13,11 +13,18 @@ public interface IStackJobService
     /// <summary>Current lifecycle job for the stack, or null when none has ever run.</summary>
     StackJobStatusDto? GetStatus(string stackId);
 
-    /// <summary>
-    /// Starts a detached lifecycle job for the stack. If one is already running, returns it unchanged
-    /// (so a second click can't launch a duplicate docker operation).
+    /// <summary>Starts a detached lifecycle job for the stack. If one is already running, returns it unchanged
+    /// (so a second click can't launch a duplicate docker operation) unless <paramref name="supersedeRunning"/>
+    /// is true (used by force-stop to interrupt a stuck start).
     /// </summary>
-    StackJobStatusDto Enqueue(string stackId, StackJobAction action);
+    StackJobStatusDto Enqueue(
+        string stackId,
+        StackJobAction action,
+        PublicHostApplyPlanDto? publicHostPlan = null,
+        bool supersedeRunning = false);
+
+    /// <summary>Updates the message on an in-flight lifecycle job (best-effort).</summary>
+    void ReportProgress(string stackId, string message);
 }
 
 /// <summary>Publishes stack lifecycle job status to connected clients (SignalR).</summary>

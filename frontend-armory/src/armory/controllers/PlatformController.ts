@@ -1,4 +1,7 @@
 import * as express from "express";
+import { createReadStream } from "fs";
+import { access, readFile } from "fs/promises";
+import * as path from "path";
 import { Readable } from "stream";
 import { decode } from "html-entities";
 
@@ -28,28 +31,85 @@ export interface NewsItem {
 	url: string;
 }
 
+interface LauncherBuildManifest {
+	version?: string;
+	fileName?: string;
+	downloadAvailable?: boolean;
+}
+
 export class PlatformController {
 	private armory: Armory;
 	private readonly apiUrl: string;
 	private readonly stackId: string;
 	private readonly clientUrl: string;
+	private readonly launcherDistDir: string;
 
 	public constructor(armory: Armory) {
 		this.armory = armory;
 		this.apiUrl = (process.env.PLATFORM_API_URL ?? "").replace(/\/+$/, "");
 		this.stackId = process.env.PLATFORM_STACK_ID ?? "";
-		// This stack's own client-server container (same compose network). The launcher exe is served
-		// from here so the armory never has to reach the central manager for a download.
+		// Optional HTTP fallback to the stack client container (same compose network).
 		this.clientUrl = (process.env.CLIENT_PORTAL_URL ?? "").replace(/\/+$/, "");
+		// Preferred path: read the launcher exe directly from the shared launcher-dist volume.
+		this.launcherDistDir = (process.env.CLIENT_LAUNCHER_DIST_DIR ?? "").replace(/\/+$/, "");
 	}
 
 	public get isConfigured(): boolean {
 		return this.apiUrl !== "" && this.stackId !== "";
 	}
 
-	/** Whether this stack's own client container URL is known (for the self-contained launcher download). */
+	/** Whether this stack mounts the launcher-dist volume or can reach the client container. */
 	public get hasClientContainer(): boolean {
-		return this.clientUrl !== "";
+		return this.launcherDistDir !== "" || this.clientUrl !== "";
+	}
+
+	private async readLocalLauncherManifest(): Promise<{ version: string; fileName: string } | null> {
+		if (!this.launcherDistDir) {
+			return null;
+		}
+
+		try {
+			const manifestPath = path.join(this.launcherDistDir, "build.json");
+			const raw = await readFile(manifestPath, "utf8");
+			const manifest = JSON.parse(raw) as LauncherBuildManifest;
+			const version = manifest.version?.trim();
+			const fileName = manifest.fileName?.trim();
+			if (!version || !fileName) {
+				return null;
+			}
+
+			await access(path.join(this.launcherDistDir, fileName));
+			return { version, fileName };
+		} catch (err) {
+			this.armory.logger.warn(`Could not read local launcher manifest: ${err}`);
+			return null;
+		}
+	}
+
+	private async isLauncherDownloadAvailable(): Promise<boolean> {
+		const local = await this.readLocalLauncherManifest();
+		if (local) {
+			return true;
+		}
+
+		if (!this.clientUrl) {
+			return false;
+		}
+
+		try {
+			const res = await fetch(`${this.clientUrl}/launcher/latest`, {
+				signal: AbortSignal.timeout(5000),
+			});
+			if (!res.ok) {
+				return false;
+			}
+
+			const info = (await res.json()) as LauncherBuildManifest;
+			return info.downloadAvailable === true;
+		} catch (err) {
+			this.armory.logger.warn(`Could not probe launcher availability: ${err}`);
+			return false;
+		}
 	}
 
 	/** Fetches every published article for this stack (cover images + links pointed at the armory). */
@@ -158,19 +218,47 @@ export class PlatformController {
 		Readable.fromWeb(upstream.body as import("stream/web").ReadableStream).pipe(res);
 	}
 
-	/** Proxies the built launcher executable download from this stack's own client container. */
-	public async downloadLauncher(req: express.Request, res: express.Response): Promise<void> {
-		if (!this.hasClientContainer) {
-			res.status(404).send("Launcher download unavailable.");
-			return;
+	private sendLauncherUnavailable(res: express.Response, status: number): void {
+		res.status(status)
+			.type("txt")
+			.send("Launcher not available yet. Ask an administrator to build and deploy it to this stack.");
+	}
+
+	private async downloadLauncherFromVolume(res: express.Response): Promise<boolean> {
+		const manifest = await this.readLocalLauncherManifest();
+		if (!manifest) {
+			return false;
+		}
+
+		const exePath = path.join(this.launcherDistDir, manifest.fileName);
+		res.setHeader("Content-Type", "application/octet-stream");
+		res.setHeader("Content-Disposition", `attachment; filename="${manifest.fileName}"`);
+
+		await new Promise<void>((resolve, reject) => {
+			const stream = createReadStream(exePath);
+			stream.on("error", reject);
+			res.on("close", () => {
+				if (!res.writableEnded) {
+					stream.destroy();
+				}
+			});
+			stream.on("end", resolve);
+			stream.pipe(res);
+		});
+
+		return true;
+	}
+
+	private async downloadLauncherFromClient(res: express.Response): Promise<boolean> {
+		if (!this.clientUrl) {
+			return false;
 		}
 
 		const upstream = await fetch(`${this.clientUrl}/launcher/download`, {
-			signal: AbortSignal.timeout(30000),
+			signal: AbortSignal.timeout(120_000),
 		});
 		if (!upstream.ok || upstream.body === null) {
-			res.status(404).send("The launcher has not been built yet. Ask an administrator to build it.");
-			return;
+			return false;
 		}
 
 		res.setHeader("Content-Type", upstream.headers.get("content-type") ?? "application/octet-stream");
@@ -178,19 +266,58 @@ export class PlatformController {
 		if (disposition) {
 			res.setHeader("Content-Disposition", disposition);
 		} else {
-			res.setHeader("Content-Disposition", "attachment; filename=\"AzerothPlatformLauncher.exe\"");
+			res.setHeader("Content-Disposition", 'attachment; filename="AzerothPlatformLauncher.exe"');
 		}
-		Readable.fromWeb(upstream.body as import("stream/web").ReadableStream).pipe(res);
+
+		await new Promise<void>((resolve, reject) => {
+			const body = Readable.fromWeb(upstream.body as import("stream/web").ReadableStream);
+			body.on("error", reject);
+			res.on("close", () => body.destroy());
+			body.on("end", resolve);
+			body.pipe(res);
+		});
+
+		return true;
+	}
+
+	/** Serves the built launcher executable from the shared launcher-dist volume (preferred) or client HTTP. */
+	public async downloadLauncher(req: express.Request, res: express.Response): Promise<void> {
+		if (!this.hasClientContainer) {
+			this.sendLauncherUnavailable(res, 404);
+			return;
+		}
+
+		try {
+			if (await this.downloadLauncherFromVolume(res)) {
+				return;
+			}
+
+			if (await this.downloadLauncherFromClient(res)) {
+				return;
+			}
+
+			this.sendLauncherUnavailable(res, 404);
+		} catch (err) {
+			this.armory.logger.warn(`Launcher download failed: ${err}`);
+			if (!res.headersSent) {
+				res.status(503)
+					.type("txt")
+					.send(
+						"Launcher is not available right now. The launcher may not be deployed yet, or the armory needs to be recreated to mount the launcher volume.",
+					);
+			}
+		}
 	}
 
 	/** Renders the Connect page (launcher download + how-to-connect info). */
 	public async connect(req: express.Request, res: express.Response): Promise<void> {
 		const root = this.armory.config.websiteRoot ?? "";
 		const layoutRender = buildLayoutRenderModel("connect");
+		const downloadAvailable = await this.isLauncherDownloadAvailable();
 		res.render("connect.hbs", {
 			title: `Connect - ${this.armory.config.websiteName ?? "Armory"}`,
 			realmName: this.armory.config.realms[0]?.name ?? "AzerothCore",
-			downloadAvailable: this.hasClientContainer,
+			downloadAvailable,
 			downloadUrl: `${root}/download-launcher`,
 			...layoutRender,
 		});

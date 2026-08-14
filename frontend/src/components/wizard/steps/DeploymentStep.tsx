@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, Cloud, Loader2, Server, Sparkles, XCircle } from 'lucide-react'
+import { CheckCircle2, Cloud, Copy, Loader2, Server, Sparkles, XCircle } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
 import { SshPrivateKeyField } from '@/components/wizard/common/SshPrivateKeyField'
 import type { WizardForm } from '@/components/wizard/types'
@@ -17,6 +17,7 @@ import {
   type RemotePrerequisiteCheckDto,
   type RemoteProvisionRequestDto,
   type RemoteSetupResultDto,
+  type VpcLaunchUserDataDto,
 } from '@/types/stack.types'
 
 interface DeploymentStepProps {
@@ -144,6 +145,189 @@ function getSetupSectionDetail(
   return matching[matching.length - 1]?.message
 }
 
+function setupNeedsManualDockerInstall(steps: RemotePrerequisiteCheckDto[] | undefined): boolean {
+  if (!steps?.length) {
+    return false
+  }
+
+  return steps.some(
+    (step) =>
+      !step.passed &&
+      /sudo|passwordless|password is required|apt-get/i.test(`${step.name} ${step.message}`),
+  )
+}
+
+function ManualVpcDockerSetupPanel({ sshUser }: { sshUser: string }) {
+  const user = sshUser.trim() || 'YOUR_SSH_USER'
+  const lines = [
+    'sudo apt-get update',
+    'sudo apt-get install -y docker.io docker-compose-v2',
+    'sudo systemctl enable --now docker',
+    `sudo usermod -aG docker ${user}`,
+    'docker info',
+  ]
+
+  return (
+    <div className="rounded-md border border-amber-300 bg-white p-3 text-xs text-amber-950">
+      <p className="font-medium">Install Docker manually over SSH (Ubuntu/Debian)</p>
+      <p className="mt-1 text-amber-900">
+        SSH into the VPS as a user that can run <code className="text-[11px]">sudo</code> (often{' '}
+        <code className="text-[11px]">ubuntu</code> on AWS). Paste these commands, then log out and back in
+        (or run <code className="text-[11px]">newgrp docker</code>) so group membership applies. Click{' '}
+        <strong>Test connection</strong> again — Setup Now will skip install if Docker is already running.
+      </p>
+      <pre className="mt-2 overflow-x-auto rounded border border-amber-200 bg-amber-50/80 p-2 font-mono text-[11px] leading-relaxed">
+        {lines.join('\n')}
+      </pre>
+      <p className="mt-2 text-[11px] text-amber-900">
+        Optional — allow the platform to run future setup without a sudo password (replace the username if
+        needed):
+      </p>
+      <pre className="mt-1 overflow-x-auto rounded border border-amber-200 bg-amber-50/80 p-2 font-mono text-[11px] leading-relaxed">{`echo '${user} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-platform-setup
+sudo chmod 440 /etc/sudoers.d/90-platform-setup`}</pre>
+    </div>
+  )
+}
+
+function VpcLaunchGuidePanel({
+  sshUser,
+  launchData,
+  embedded = false,
+}: {
+  sshUser: string
+  launchData: VpcLaunchUserDataDto | undefined
+  embedded?: boolean
+}) {
+  const [copied, setCopied] = useState(false)
+  const [provider, setProvider] = useState<'aws' | 'gcp' | 'digitalocean' | 'other'>('aws')
+  const user = sshUser.trim() || launchData?.sshUser || 'ubuntu'
+
+  const providerSteps: Record<typeof provider, { title: string; steps: string[] }> = {
+    aws: {
+      title: 'Amazon Web Services (EC2)',
+      steps: [
+        'EC2 → Launch instance → pick Ubuntu 22.04 or 24.04.',
+        'Expand Advanced details at the bottom of the launch form (easy to miss — scroll down past storage and tags).',
+        'Paste the script into User data, allow SSH (port 22) from your IP, create/download the .pem key pair, then Launch.',
+      ],
+    },
+    gcp: {
+      title: 'Google Cloud (Compute Engine)',
+      steps: [
+        'Compute Engine → Create instance → pick Ubuntu 22.04 or 24.04.',
+        'Open Management → Automation → Startup script (not SSH keys).',
+        'Paste the script, allow TCP:22 in the firewall, add your SSH key under Security → SSH keys, then Create.',
+      ],
+    },
+    digitalocean: {
+      title: 'DigitalOcean (Droplet)',
+      steps: [
+        'Create → Droplets → pick Ubuntu 22.04 or 24.04.',
+        'Expand Advanced Options → check User data.',
+        'Paste the script, add your SSH key, then Create Droplet.',
+      ],
+    },
+    other: {
+      title: 'Other provider (Azure, Hetzner, etc.)',
+      steps: [
+        'Create a new Ubuntu 22.04/24.04 VM (not an existing one).',
+        'Look for User data, Custom data, Cloud-init, or Startup script in the create wizard.',
+        'Paste the script there — it runs once on first boot. Allow SSH (port 22) from your IP.',
+      ],
+    },
+  }
+
+  const handleCopy = async () => {
+    if (!launchData?.script) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(launchData.script)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  const Wrapper = embedded ? 'div' : 'section'
+  const wrapperClass = embedded
+    ? 'space-y-2'
+    : 'rounded-lg border border-blue-200 bg-blue-50 p-4'
+
+  return (
+    <Wrapper className={wrapperClass}>
+      {!embedded ? (
+        <h3 className="text-sm font-semibold text-blue-950">Launch a new cloud server (optional)</h3>
+      ) : (
+        <p className="text-xs font-medium text-gray-800">Bootstrap script (Linux)</p>
+      )}
+      <p className="mt-1 text-xs text-blue-900">
+        The script below works on <span className="font-medium">any</span> cloud that supports Ubuntu and a
+        startup/user-data field (AWS, GCP, DigitalOcean, Azure, etc.). It only runs when you{' '}
+        <span className="font-medium">create</span> a new VM — not on a server you already started.
+      </p>
+      <p className="mt-2 rounded-md border border-blue-300 bg-white/80 px-2.5 py-2 text-xs text-blue-950">
+        Paste the script into your SSH session after opening the terminal in step 2, or into your cloud
+        provider&apos;s startup/user-data field when <span className="font-medium">creating</span> a new VM.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(
+          [
+            ['aws', 'AWS'],
+            ['gcp', 'GCP'],
+            ['digitalocean', 'DigitalOcean'],
+            ['other', 'Other'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setProvider(id)}
+            className={cn(
+              'rounded-md border px-2.5 py-1 text-[11px] font-medium',
+              provider === id
+                ? 'border-blue-500 bg-white text-blue-900'
+                : 'border-blue-200 bg-blue-100/50 text-blue-800 hover:bg-blue-100'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs font-medium text-blue-950">{providerSteps[provider].title}</p>
+      <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs text-blue-900">
+        {providerSteps[provider].steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+        <li>When the terminal is connected, paste the script below and press Enter.</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          disabled={!launchData?.script}
+          className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-60"
+        >
+          <Copy className="h-3 w-3" aria-hidden="true" />
+          {copied ? 'Copied!' : 'Copy launch script'}
+        </button>
+        <span className="text-[11px] text-blue-800">
+          SSH user: <span className="font-mono">{user}</span>
+        </span>
+      </div>
+      {launchData?.script ? (
+        <pre className="mt-2 max-h-40 overflow-auto rounded border border-blue-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-blue-950">
+          {launchData.script}
+        </pre>
+      ) : (
+        <p className="mt-2 text-xs text-blue-800">Loading launch script…</p>
+      )}
+    </Wrapper>
+  )
+}
+
 function SetupSectionStatusIcon({ status }: { status: SetupSectionStatus }) {
   switch (status) {
     case 'running':
@@ -193,6 +377,7 @@ function buildProvisionRequest(
   externalSshPrivateKey: string,
   remoteOs: RemoteHostOs,
   enableHostFirewall: boolean,
+  enableUnattendedUpgrades: boolean,
   authServerPort: number,
   worldServerPort: number,
   sshPort: number
@@ -208,7 +393,7 @@ function buildProvisionRequest(
     options: {
       remoteOs,
       enableHostFirewall,
-      enableUnattendedUpgrades: true,
+      enableUnattendedUpgrades,
       authServerPort,
       worldServerPort,
       armoryPort: DEFAULT_ARMORY_PORT,
@@ -216,6 +401,35 @@ function buildProvisionRequest(
       sshPort: Number(externalSshPort) || sshPort,
     },
   }
+}
+
+function DeploymentSubstep({
+  step,
+  title,
+  description,
+  children,
+}: {
+  step: number
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-900 text-xs font-semibold text-white">
+          {step}
+        </span>
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+            {description ? <p className="mt-1 text-xs text-gray-600">{description}</p> : null}
+          </div>
+          {children}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function sshCheckPassed(result: RemoteConnectionTestResultDto | null): boolean {
@@ -234,8 +448,8 @@ interface ConnectionTestProgress {
 }
 
 const CONNECTION_TEST_STEPS = [
-  { id: 'connection', label: 'Connection successful' },
-  { id: 'prerequisites', label: 'Prerequisites met' },
+  { id: 'connection', label: 'SSH connection' },
+  { id: 'prerequisites', label: 'Server ready (Docker)' },
 ] as const
 
 function ConnectionTestProgressBar({
@@ -320,7 +534,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const connectionVerified = watch('deployment.connectionVerified')
   const firstTimeSetupCompleted = watch('deployment.firstTimeSetupCompleted')
   const remoteOs = watch('deployment.remoteOs') ?? RemoteHostOs.Linux
-  const enableHostFirewall = watch('deployment.enableHostFirewall') ?? true
+  const enableHostFirewall = watch('deployment.enableHostFirewall') ?? false
   const cloudSecurityGroupAcknowledged = watch('deployment.cloudSecurityGroupAcknowledged')
   const authServerPort = watch('ports.authServer') ?? 3724
   const worldServerPort = watch('ports.worldServer') ?? 8085
@@ -375,6 +589,29 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     enabled: deploymentTarget === DeploymentTarget.External && externalHost.trim().length > 0,
   })
 
+  const { data: launchData } = useQuery({
+    queryKey: ['vpc-launch-user-data', externalSshUser],
+    queryFn: async () => (await systemApi.vpcLaunchUserData(externalSshUser.trim() || 'ubuntu')).data,
+    enabled: deploymentTarget === DeploymentTarget.External,
+  })
+
+  const runPrerequisiteCheck = useCallback(
+    async (sshData: RemoteConnectionTestResultDto): Promise<RemoteConnectionTestResultDto> => {
+      const prereqRes = await systemApi.testRemoteConnection(
+        deploymentPayload,
+        RemoteConnectionTestPhase.PrerequisitesOnly
+      )
+      return {
+        ...prereqRes.data,
+        prerequisites: [
+          ...(sshData.prerequisites ?? []),
+          ...(prereqRes.data.prerequisites ?? []).filter((check) => check.name !== 'SSH'),
+        ],
+      }
+    },
+    [deploymentPayload]
+  )
+
   const runConnectionTest = useCallback(async (): Promise<RemoteConnectionTestResultDto | null> => {
     setTestProgress({ connection: 'active', prerequisites: 'pending' })
 
@@ -391,17 +628,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
 
     setTestProgress({ connection: 'complete', prerequisites: 'active' })
 
-    const prereqRes = await systemApi.testRemoteConnection(
-      deploymentPayload,
-      RemoteConnectionTestPhase.PrerequisitesOnly
-    )
-    const merged: RemoteConnectionTestResultDto = {
-      ...prereqRes.data,
-      prerequisites: [
-        ...(sshData.prerequisites ?? []),
-        ...(prereqRes.data.prerequisites ?? []).filter((check) => check.name !== 'SSH'),
-      ],
-    }
+    const merged = await runPrerequisiteCheck(sshData)
 
     setTestResult(merged)
     setTestProgress({
@@ -420,7 +647,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     }
 
     return merged
-  }, [deploymentPayload, externalHost, form, setValue])
+  }, [deploymentPayload, externalHost, form, runPrerequisiteCheck, setValue])
 
   const handleTestConnection = useCallback(async () => {
     setTesting(true)
@@ -461,6 +688,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
           externalSshPrivateKey,
           remoteOs,
           enableHostFirewall,
+          true,
           authServerPort,
           worldServerPort,
           Number(externalSshPort) || 22
@@ -595,49 +823,88 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
       {deploymentTarget === DeploymentTarget.External && (
         <div className="space-y-4 rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-600">
-            External stacks are built on this platform and deployed to your remote Docker host. Provide the
-            SSH credentials you configured when setting up the instance (for example, the key pair from AWS
-            EC2 or a GCP service account key).
+            Follow the steps below to connect a cloud VM. Cloud account linking and an in-browser terminal are
+            planned — see <span className="font-medium">CLOUD-INTEGRATION-PLAN.md</span>.
           </p>
 
-          <fieldset>
-            <legend className="text-sm font-medium text-gray-800">Remote host operating system</legend>
-            <div className="mt-2 flex flex-wrap gap-3">
-              {[
-                { value: RemoteHostOs.Linux, label: 'Linux (Ubuntu / Debian)', supported: true },
-                { value: RemoteHostOs.Windows, label: 'Windows', supported: false },
-              ].map((option) => (
-                <label
-                  key={option.value}
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm',
-                    remoteOs === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300',
-                    !option.supported && 'opacity-70'
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="remote-os"
-                    disabled={!option.supported}
-                    checked={remoteOs === option.value}
-                    onChange={() =>
-                      setValue('deployment.remoteOs', option.value, { shouldDirty: true, shouldValidate: true })
-                    }
-                  />
-                  <span>
-                    {option.label}
-                    {!option.supported && (
-                      <span className="ml-1.5 text-[10px] font-semibold uppercase text-gray-500">Coming soon</span>
+          <DeploymentSubstep
+            step={1}
+            title="Operating system"
+            description="Choose the OS running on your remote host."
+          >
+            <fieldset>
+              <legend className="sr-only">Remote host operating system</legend>
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { value: RemoteHostOs.Linux, label: 'Linux (Ubuntu / Debian)', supported: true },
+                  { value: RemoteHostOs.Windows, label: 'Windows', supported: false },
+                ].map((option) => (
+                  <label
+                    key={option.value}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm',
+                      remoteOs === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300',
+                      !option.supported && 'opacity-70'
                     )}
-                  </span>
-                </label>
-              ))}
+                  >
+                    <input
+                      type="radio"
+                      name="remote-os"
+                      disabled={!option.supported}
+                      checked={remoteOs === option.value}
+                      onChange={() =>
+                        setValue('deployment.remoteOs', option.value, { shouldDirty: true, shouldValidate: true })
+                      }
+                    />
+                    <span>
+                      {option.label}
+                      {!option.supported && (
+                        <span className="ml-1.5 text-[10px] font-semibold uppercase text-gray-500">Coming soon</span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </DeploymentSubstep>
+
+          <DeploymentSubstep
+            step={2}
+            title="Bootstrap the server"
+            description="Open a terminal to your VM and paste the bootstrap script. Use your own SSH client for now, or wait for the in-browser terminal from cloud integration."
+          >
+            <div className="space-y-3">
+              <button
+                type="button"
+                disabled
+                title="In-browser terminal ships with cloud integration (Phase 2)"
+                className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500"
+              >
+                Open terminal (coming soon)
+              </button>
+              <p className="text-xs text-gray-600">
+                Until the integrated terminal is available, SSH from your machine:{' '}
+                <code className="text-[11px]">
+                  ssh -i your-key.pem {externalSshUser.trim() || 'ubuntu'}@{externalHost.trim() || 'YOUR_HOST'}
+                </code>
+              </p>
+              {remoteOs === RemoteHostOs.Linux ? (
+                <VpcLaunchGuidePanel sshUser={externalSshUser} launchData={launchData} embedded />
+              ) : (
+                <p className="text-xs text-gray-600">Windows bootstrap scripts will be added when Windows VPC support ships.</p>
+              )}
             </div>
-          </fieldset>
+          </DeploymentSubstep>
 
-          <VpcSecurityRolesCard compact />
+          <DeploymentSubstep
+            step={3}
+            title="Connection"
+            description="Enter SSH credentials and verify the platform can reach Docker on the host."
+          >
+            <div className="space-y-4">
+              <VpcSecurityRolesCard compact />
 
-          <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-3">
             <div className="sm:col-span-2">
               <FormField
                 label="Remote Host"
@@ -761,14 +1028,20 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
               </div>
             )}
           </div>
+            </div>
+          </DeploymentSubstep>
 
+          <DeploymentSubstep
+            step={4}
+            title="First Time Setup"
+            description="Optional — install Docker (if you did not bootstrap manually), apply security baselines, configure host firewall, and acknowledge cloud security group rules."
+          >
           <section className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
             <div className="flex items-start gap-3">
               <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
               <div className="flex-1 space-y-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-amber-950">First Time Setup</h3>
-                  <p className="mt-1 text-xs text-amber-900">
+                  <p className="text-xs text-amber-900">
                     New cloud instances usually need a one-time bootstrap before stacks can deploy. After SSH
                     is working, run setup here — the platform will configure the remote host for you.
                   </p>
@@ -880,6 +1153,10 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                   </div>
                 )}
 
+                {setupResult && !setupResult.success && setupNeedsManualDockerInstall(setupResult.steps) && (
+                  <ManualVpcDockerSetupPanel sshUser={externalSshUser} />
+                )}
+
                 {securityProfile && (
                   <p className="text-xs text-amber-900">
                     Ports for this stack: auth <span className="font-mono">{authServerPort}</span>, world{' '}
@@ -955,10 +1232,11 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
               </div>
             </div>
           </section>
+          </DeploymentSubstep>
 
           {deploymentTarget === DeploymentTarget.External && !connectionVerified && (
             <p className="text-xs text-amber-700">
-              Complete first-time setup and verify prerequisites before continuing.
+              Complete connection verification (and first-time setup if Docker is not installed) before continuing.
             </p>
           )}
         </div>

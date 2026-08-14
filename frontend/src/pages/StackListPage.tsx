@@ -1,15 +1,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive } from 'lucide-react'
+import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import DeleteStackDialog from '@/components/DeleteStackDialog'
 import { ImportStacksDialog } from '@/components/ImportStacksDialog'
 import { DiskUsageBar, formatBytes } from '@/components/docker/DockerDiskUsage'
+import StackListSkeleton from '@/components/stacks/StackListSkeleton'
+import StackRefreshBar from '@/components/stacks/StackRefreshBar'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
-import { useStacks } from '@/hooks/useStacks'
+import { useStackLifecycleJobs } from '@/hooks/useStackLifecycleJobs'
+import { useStacks, stackKeys } from '@/hooks/useStacks'
+import { isStackJobRunning } from '@/lib/stackJob'
 import { stackApi, buildApi } from '@/services/api'
 import type { StackDetailsDto } from '@/types/stack.types'
-import { StackStatus } from '@/types/stack.types'
+import { DeploymentTarget, StackStatus } from '@/types/stack.types'
 
 // Calculate stack uptime from containers
 function calculateStackUptime(stack: StackDetailsDto): string | null {
@@ -60,44 +64,87 @@ function getStatusBadgeColor(status: StackStatus): string {
 
 export default function StackListPage() {
   const navigate = useNavigate()
-  const { data: stacks = [], isLoading } = useStacks()
+  const { data: stacks = [], isPending, isFetching, isPlaceholderData, probeAll, isProbing } = useStacks()
   const { data: diskUsage } = useDockerDiskUsage()
   const queryClient = useQueryClient()
-  const [deletingStack, setDeletingStack] = useState<{ id: string; name: string } | null>(null)
+  const [deletingStack, setDeletingStack] = useState<{
+    id: string
+    name: string
+    isExternal: boolean
+  } | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const { trackJob, isStackBusy, jobs: lifecycleJobs } = useStackLifecycleJobs()
+  const lastHandledLifecycleJobRef = useRef<Record<string, string>>({})
+
+  useEffect(() => {
+    for (const [stackId, job] of Object.entries(lifecycleJobs)) {
+      if (!job || isStackJobRunning(job)) continue
+      if (lastHandledLifecycleJobRef.current[stackId] === job.jobId) continue
+      lastHandledLifecycleJobRef.current[stackId] = job.jobId
+      void probeAll.mutate()
+    }
+  }, [lifecycleJobs, probeAll])
+
+  useEffect(() => {
+    if (stacks.length === 0) return
+
+    let cancelled = false
+    void (async () => {
+      for (const stack of stacks) {
+        try {
+          const res = await stackApi.jobStatus(stack.stackId)
+          if (!cancelled && res.data && isStackJobRunning(res.data)) {
+            trackJob(stack.stackId, res.data)
+          }
+        } catch {
+          // Ignore — list view still works without reattached jobs.
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [stacks, trackJob])
 
   const startStack = useMutation({
     mutationFn: (stackId: string) => stackApi.start(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stacks'] })
+    onSuccess: (res, stackId) => {
+      trackJob(stackId, res.data)
     },
   })
 
   const startDatabase = useMutation({
     mutationFn: (stackId: string) => stackApi.startDatabase(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stacks'] })
+    onSuccess: (res, stackId) => {
+      trackJob(stackId, res.data)
     },
   })
 
   const stopStack = useMutation({
     mutationFn: (stackId: string) => stackApi.stop(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stacks'] })
+    onSuccess: (res, stackId) => {
+      trackJob(stackId, res.data)
     },
   })
 
   const restartStack = useMutation({
     mutationFn: (stackId: string) => stackApi.restart(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stacks'] })
+    onSuccess: (res, stackId) => {
+      trackJob(stackId, res.data)
     },
   })
 
   const deleteStack = useMutation({
     mutationFn: (stackId: string) => stackApi.delete(stackId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stacks'] })
+    onSuccess: (_data, deletedStackId) => {
+      setDeletingStack(null)
+      queryClient.setQueryData<StackDetailsDto[]>(stackKeys.lists(), (current) =>
+        current?.filter((stack) => stack.stackId !== deletedStackId),
+      )
+      void probeAll.mutate()
+    },
+    onError: () => {
       setDeletingStack(null)
     },
   })
@@ -111,22 +158,40 @@ export default function StackListPage() {
     },
   })
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-      </div>
-    )
-  }
+  const showInitialSkeleton = isPending && stacks.length === 0
 
   return (
     <div>
+      <StackRefreshBar
+        active={(isFetching || isProbing) && !showInitialSkeleton}
+        className="mb-4"
+        label={
+          isProbing
+            ? 'Checking live status for all stacks…'
+            : isPlaceholderData
+              ? 'Loading cached stack list…'
+              : 'Refreshing stacks…'
+        }
+      />
+
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Your Stacks</h1>
-          <p className="mt-1 text-gray-500">Manage your AzerothCore server instances</p>
+          <p className="mt-1 text-gray-500">
+            Manage your AzerothCore server instances. Status is probed once when you open this page and
+            cached until you refresh or open a stack for a live update.
+          </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => probeAll.mutate()}
+            disabled={isProbing || stacks.length === 0}
+            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {isProbing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Refresh all
+          </button>
           <button
             onClick={() => setImportDialogOpen(true)}
             className="flex items-center gap-2 rounded-md bg-white border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -164,7 +229,9 @@ export default function StackListPage() {
         </div>
       )}
 
-      {stacks.length === 0 ? (
+      {showInitialSkeleton ? (
+        <StackListSkeleton count={Math.max(stacks.length, 3)} />
+      ) : stacks.length === 0 ? (
         <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
           <h3 className="text-lg font-medium text-gray-900">No stacks yet</h3>
           <p className="mt-2 text-gray-500">Get started by creating your first AzerothCore server stack or import an existing one.</p>
@@ -186,12 +253,22 @@ export default function StackListPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className={`space-y-4 ${isProbing ? 'opacity-90' : ''}`}>
           {stacks.map((stack) => {
-            const isRunning = stack.status === 'Running'
-            const isStopped = stack.status === 'Stopped'
-            const isDegraded = stack.status === 'Degraded'
+            const displayStatus =
+              stack.status === StackStatus.Failed ? StackStatus.Stopped : stack.status
+            const isRunning = displayStatus === StackStatus.Running
+            const isStopped = displayStatus === StackStatus.Stopped
+            const isDegraded = displayStatus === StackStatus.Degraded
             const uptime = calculateStackUptime(stack)
+            const isExternal = stack.configuration.deployment?.target === DeploymentTarget.External
+
+            const lifecycleJob = lifecycleJobs[stack.stackId]
+            const lifecycleBusy = isStackBusy(stack.stackId)
+            const startActionBusy = lifecycleBusy && lifecycleJob?.action === 'Start'
+            const startDbActionBusy = lifecycleBusy && lifecycleJob?.action === 'StartDatabase'
+            const stopActionBusy = lifecycleBusy && lifecycleJob?.action === 'Stop'
+            const restartActionBusy = lifecycleBusy && lifecycleJob?.action === 'Restart'
 
             return (
               <div
@@ -208,9 +285,18 @@ export default function StackListPage() {
                         {stack.stackName}
                       </Link>
                       <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusBadgeColor(stack.status)}`}
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusBadgeColor(displayStatus)}`}
                       >
-                        {stack.status}
+                        {displayStatus}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          isExternal ? 'bg-violet-100 text-violet-800' : 'bg-slate-100 text-slate-700'
+                        }`}
+                        title={isExternal ? 'External VPC stack' : 'Local Docker stack'}
+                      >
+                        {isExternal ? <Cloud className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
+                        {isExternal ? 'VPC' : 'Local'}
                       </span>
                       {stack.updateStatus?.hasUpdates && (
                         <span className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
@@ -247,58 +333,58 @@ export default function StackListPage() {
                     {(isStopped || isDegraded) && (
                       <button
                         onClick={() => startStack.mutate(stack.stackId)}
-                        disabled={startStack.isPending}
+                        disabled={lifecycleBusy}
                         className="flex items-center gap-2 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
                       >
-                        {startStack.isPending ? (
+                        {startActionBusy ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <Play className="h-4 w-4" />
                         )}
-                        Start
+                        {startActionBusy ? 'Starting…' : 'Start'}
                       </button>
                     )}
                     {isStopped && (
                       <button
                         onClick={() => startDatabase.mutate(stack.stackId)}
-                        disabled={startDatabase.isPending}
+                        disabled={lifecycleBusy}
                         title="Start only the database container (for patches/maintenance)"
                         className="flex items-center gap-2 rounded-md border border-green-600 bg-white px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
                       >
-                        {startDatabase.isPending ? (
+                        {startDbActionBusy ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <Database className="h-4 w-4" />
                         )}
-                        Start DB
+                        {startDbActionBusy ? 'Starting DB…' : 'Start DB'}
                       </button>
                     )}
                     {isRunning && (
                       <button
                         onClick={() => restartStack.mutate(stack.stackId)}
-                        disabled={restartStack.isPending}
+                        disabled={lifecycleBusy}
                         className="flex items-center gap-2 rounded-md bg-yellow-600 px-3 py-2 text-sm font-medium text-white hover:bg-yellow-700 disabled:opacity-50"
                       >
-                        {restartStack.isPending ? (
+                        {restartActionBusy ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
-                        Restart
+                        {restartActionBusy ? 'Restarting…' : 'Restart'}
                       </button>
                     )}
                     {(isRunning || isDegraded) && (
                       <button
                         onClick={() => stopStack.mutate(stack.stackId)}
-                        disabled={stopStack.isPending}
+                        disabled={lifecycleBusy}
                         className="flex items-center gap-2 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                       >
-                        {stopStack.isPending ? (
+                        {stopActionBusy ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
                           <Square className="h-4 w-4" />
                         )}
-                        Stop
+                        {stopActionBusy ? 'Stopping…' : 'Stop'}
                       </button>
                     )}
                     {stack.status === 'Building' && (
@@ -327,7 +413,13 @@ export default function StackListPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => setDeletingStack({ id: stack.stackId, name: stack.stackName })}
+                      onClick={() =>
+                        setDeletingStack({
+                          id: stack.stackId,
+                          name: stack.stackName,
+                          isExternal,
+                        })
+                      }
                       className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                       title="Delete stack"
                     >
@@ -345,6 +437,7 @@ export default function StackListPage() {
       {deletingStack && (
         <DeleteStackDialog
           stackName={deletingStack.name}
+          isExternal={deletingStack.isExternal}
           onConfirm={() => deleteStack.mutate(deletingStack.id)}
           onCancel={() => setDeletingStack(null)}
           isDeleting={deleteStack.isPending}
@@ -356,7 +449,7 @@ export default function StackListPage() {
         isOpen={importDialogOpen}
         onClose={() => setImportDialogOpen(false)}
         onImportSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['stacks'] })
+          probeAll.mutate()
         }}
       />
     </div>

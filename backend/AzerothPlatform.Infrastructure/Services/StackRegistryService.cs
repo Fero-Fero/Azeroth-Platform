@@ -62,7 +62,7 @@ public sealed class StackRegistryService : IStackRegistryService
                 continue;
             }
 
-            var host = (profile.RealmlistHost ?? string.Empty).Trim();
+            var host = RealmlistHostResolver.NormalizeHost(profile.RealmlistHost ?? string.Empty);
             var hasHost = !string.IsNullOrWhiteSpace(host);
 
             var portalUrl = stack.ClientEnabled && stack.ClientPort > 0 && hasHost

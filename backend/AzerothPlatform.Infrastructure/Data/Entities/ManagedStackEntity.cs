@@ -60,6 +60,12 @@ public class ManagedStackEntity
     /// </summary>
     public string ArmorySessionSecret { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Encrypted password for the stack-scoped <c>acore_armory</c> MySQL user (least-privilege armory DB access).
+    /// Generated on first armory deploy; blank until then.
+    /// </summary>
+    public string ArmoryDatabasePasswordProtected { get; set; } = string.Empty;
+
     public int MaxPlayers { get; set; }
 
     public string RealmName { get; set; } = string.Empty;

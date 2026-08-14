@@ -88,6 +88,15 @@ public class StackDetailsDto
     public string? ExternalReconnectReason { get; set; }
 
     /// <summary>
+    /// Whether the stack's Docker engine responded to a probe. Null when runtime was not probed
+    /// (e.g. stack list). False when the daemon is stopped or unreachable.
+    /// </summary>
+    public bool? DockerEngineAvailable { get; set; }
+
+    /// <summary>Explanation shown when <see cref="DockerEngineAvailable"/> is false.</summary>
+    public string? DockerEngineUnavailableReason { get; set; }
+
+    /// <summary>
     /// True after at least one worldserver build has completed successfully. When false, the stack
     /// detail UI stays on a setup/retry screen until the initial build succeeds. Failed later
     /// rebuilds do not clear this flag.

@@ -805,11 +805,11 @@ public partial class MainWindowViewModel : ObservableObject
 
         RealmlistInfo = string.IsNullOrWhiteSpace(profile.RealmlistHost)
             ? string.Empty
-            : $"Realm: {profile.RealmlistHost}:{profile.RealmlistPort}";
+            : $"Realm: {NormalizeRealmlistHost(profile.RealmlistHost)}:{profile.RealmlistPort}";
 
         // Reflect the selected server's realmlist immediately; ApplyConfigToUi refines it once the
         // server config is fetched (which also carries the exact realmlist.wtf address).
-        RealmlistOverride = profile.RealmlistHost ?? string.Empty;
+        RealmlistOverride = NormalizeRealmlistHost(profile.RealmlistHost);
 
         await LoadBrandingAsync(profile);
         LoadAddons(profile);
@@ -2054,7 +2054,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
         ClientVersion = config.ClientVersion;
         if (SelectedProfile is not null && string.IsNullOrWhiteSpace(RealmlistInfo) && !string.IsNullOrWhiteSpace(config.RealmlistHost))
         {
-            RealmlistInfo = $"Realm: {config.RealmlistHost}:{config.RealmlistPort}";
+            RealmlistInfo = $"Realm: {NormalizeRealmlistHost(config.RealmlistHost)}:{config.RealmlistPort}";
         }
 
         // Auto-fill the editable realmlist with the server's value on every profile switch, so the box
@@ -2094,13 +2094,56 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
     /// </summary>
     private static string EnsureRealmlistPort(string? address, int port)
     {
-        var value = address?.Trim() ?? string.Empty;
+        var value = NormalizeRealmlistHost(address);
         if (string.IsNullOrEmpty(value))
         {
             return string.Empty;
         }
 
         return !value.Contains(':') && port > 0 ? $"{value}:{port}" : value;
+    }
+
+    /// <summary>Strips an accidental URL scheme or trailing port from a realmlist host/address.</summary>
+    private static string NormalizeRealmlistHost(string? raw)
+    {
+        var value = raw?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        value = value.TrimEnd('/');
+
+        if (value.Contains("://", StringComparison.Ordinal)
+            && Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && !string.IsNullOrEmpty(uri.Host))
+        {
+            value = uri.Host;
+        }
+
+        if (value.StartsWith('['))
+        {
+            var close = value.IndexOf(']');
+            if (close > 0)
+            {
+                var suffix = value[(close + 1)..];
+                if (suffix.StartsWith(':') && int.TryParse(suffix[1..], out _))
+                {
+                    return value[..(close + 1)];
+                }
+            }
+
+            return value;
+        }
+
+        var lastColon = value.LastIndexOf(':');
+        if (lastColon > 0 && lastColon < value.Length - 1
+            && int.TryParse(value[(lastColon + 1)..], out _))
+        {
+            return value[..lastColon];
+        }
+
+        return value;
     }
 
     /// <summary>The realmlist address (host:port) to write, honoring the player's override.</summary>

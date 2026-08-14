@@ -29,6 +29,12 @@ public sealed class ArmoryAssetsOptions
     /// <summary>Subdirectory holding the uploaded static web assets.</summary>
     public string StaticDirName { get; set; } = "static";
 
+    /// <summary>GitHub repository containing armory release assets (<c>owner/repo</c>).</summary>
+    public string ReleaseRepository { get; set; } = "Fero-Fero/AzerothPlatform";
+
+    /// <summary>GitHub release tag for armory bundles (<c>armory.data.zip</c>, etc.).</summary>
+    public string ReleaseTag { get; set; } = "Armory";
+
     /// <summary>
     /// Marker file written when a static bundle is uploaded and cleared once the assets are baked into
     /// the stack's armory image. Cleared at the single point where the bake happens

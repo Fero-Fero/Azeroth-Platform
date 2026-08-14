@@ -15,6 +15,15 @@ export interface ArmoryAssetsInfoDto {
   staticOnStackVolume: boolean
   /** .dbc binaries in the stack client-data volume (server DBC source). */
   serverDbcFileCount: number
+  /** Custom favicon uploaded for the armory site. */
+  faviconUploaded: boolean
+}
+
+export interface ArmoryReleaseDownloadResultDto {
+  info: ArmoryAssetsInfoDto
+  releaseTag: string
+  downloadedAssets: string[]
+  missingAssets: string[]
 }
 
 export type ArmoryStyleTemplate = 'Classic' | 'Tbc' | 'Wotlk' | 'Custom'

@@ -6,7 +6,7 @@ const RELOAD_KEY = 'vite-chunk-reload'
  * Lazy-load a route chunk; on failure (stale deploy / cached index.html referencing old hashes),
  * reload once so the browser picks up the current bundle manifest.
  */
-export function lazyWithRetry<T extends ComponentType<unknown>>(
+export function lazyWithRetry<T extends ComponentType<any>>(
   factory: () => Promise<{ default: T }>,
 ): LazyExoticComponent<T> {
   return lazy(async () => {

@@ -88,6 +88,9 @@ public sealed class LauncherStackVersionDto
     /// <summary>True when the stack's <c>/launcher/latest</c> responded (regardless of version).</summary>
     public bool Reachable { get; set; }
 
+    /// <summary>Human-readable propagation status for the admin UI.</summary>
+    public string StatusDetail { get; set; } = string.Empty;
+
     /// <summary>True when the stack serves the same version the manager most recently built.</summary>
     public bool UpToDate { get; set; }
 

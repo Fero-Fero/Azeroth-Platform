@@ -6,8 +6,16 @@ namespace AzerothPlatform.Core.Contracts;
 /// </summary>
 public sealed class ClientBaseInfoDto
 {
-    /// <summary>True when a base client has been uploaded (the base <c>game/</c> directory exists and is non-empty).</summary>
+    /// <summary>True when a base client has been uploaded (Wow.exe, Data MPQs, or other client files present).</summary>
     public bool Exists { get; set; }
+
+    /// <summary>True when the stack's <c>client-base</c> Docker volume exists on the engine (even if unreadable).</summary>
+    public bool VolumeExists { get; set; }
+
+    /// <summary>
+    /// Set when the volume exists but the manager could not inspect it (e.g. remote Docker unreachable).
+    /// </summary>
+    public string? InspectionWarning { get; set; }
 
     /// <summary>Number of files in the base client.</summary>
     public int FileCount { get; set; }

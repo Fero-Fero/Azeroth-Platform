@@ -32,6 +32,16 @@ public interface IArmoryAssetsService
     /// <summary>Returns the on-disk path and MIME type of the stack's uploaded custom wallpaper, if any.</summary>
     (string Path, string ContentType)? TryGetWallpaperFile(string stackId);
 
+    /// <summary>Stores a favicon for the stack's armory site and marks the armory image for rebuild.</summary>
+    Task<ArmoryAssetsInfoDto> UploadFaviconAsync(
+        string stackId, string fileName, Stream content, string? contentType = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns the on-disk path and MIME type of the stack's uploaded favicon, if any.</summary>
+    (string Path, string ContentType)? TryGetFaviconFile(string stackId);
+
+    /// <summary>Removes the stack's uploaded favicon and marks the armory image for rebuild.</summary>
+    Task<ArmoryAssetsInfoDto> DeleteFaviconAsync(string stackId, CancellationToken cancellationToken = default);
+
     /// <summary>Returns the stack's armory homepage layout settings.</summary>
     Task<ArmoryLayoutDto> GetLayoutAsync(string stackId, CancellationToken cancellationToken = default);
 
@@ -82,4 +92,11 @@ public interface IArmoryAssetsService
     /// </summary>
     Task<ArmoryAssetsInfoDto> UploadDataFileAsync(
         string stackId, string relativeDir, string fileName, Stream content, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads <c>armory.data.zip</c>, <c>armory.textures.zip</c>, and <c>armory.static.zip</c> from the
+    /// configured GitHub release and applies them to the stack (same outcome as manual uploads).
+    /// </summary>
+    Task<ArmoryReleaseDownloadResultDto> DownloadLatestReleaseAssetsAsync(
+        string stackId, CancellationToken cancellationToken = default);
 }

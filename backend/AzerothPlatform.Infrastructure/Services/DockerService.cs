@@ -42,11 +42,13 @@ public sealed class DockerService : IDockerService
         });
     }
 
-    public async Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> IsDockerAvailableAsync(string? dockerContext = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            var (exitCode, _) = await RunDockerCommandAsync("version --format '{{.Server.Version}}'", cancellationToken);
+            var (exitCode, _, _) = await RunDockerCommandWithStderrAsync(
+                $"{ContextArg(dockerContext)}info",
+                cancellationToken);
             return exitCode == 0;
         }
         catch
@@ -55,27 +57,56 @@ public sealed class DockerService : IDockerService
         }
     }
 
-    public async Task<IReadOnlyList<ContainerStatusDto>> ListContainersAsync(
+    public async Task<DockerListContainersResult> ListContainersWithEngineStatusAsync(
         string? composeProjectName = null,
         string? dockerContext = null,
+        string? nameContains = null,
         CancellationToken cancellationToken = default)
     {
         var args = $"{ContextArg(dockerContext)}ps -a --format json";
-        
+
         if (!string.IsNullOrWhiteSpace(composeProjectName))
         {
             args += $" --filter \"label=com.docker.compose.project={composeProjectName}\"";
         }
 
-        var (exitCode, output) = await RunDockerCommandAsync(args, cancellationToken);
-        
-        if (exitCode != 0)
+        if (!string.IsNullOrWhiteSpace(nameContains))
         {
-            _logger.LogWarning("docker ps command failed with exit code {ExitCode}", exitCode);
-            return Array.Empty<ContainerStatusDto>();
+            args += $" --filter \"name={nameContains}\"";
         }
 
-        return ParseContainerList(output);
+        var (exitCode, output, stderr) = await RunDockerCommandWithStderrAsync(args, cancellationToken);
+
+        if (exitCode != 0)
+        {
+            _logger.LogWarning("docker ps command failed with exit code {ExitCode}: {Stderr}", exitCode, stderr);
+            return new DockerListContainersResult
+            {
+                EngineReachable = false,
+                EngineError = SummarizeDockerEngineError(stderr),
+                Containers = Array.Empty<ContainerStatusDto>()
+            };
+        }
+
+        return new DockerListContainersResult
+        {
+            EngineReachable = true,
+            Containers = ParseContainerList(output)
+        };
+    }
+
+    public async Task<IReadOnlyList<ContainerStatusDto>> ListContainersAsync(
+        string? composeProjectName = null,
+        string? dockerContext = null,
+        string? nameContains = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await ListContainersWithEngineStatusAsync(
+            composeProjectName,
+            dockerContext,
+            nameContains,
+            cancellationToken);
+        return result.Containers;
     }
 
     /// <summary>
@@ -86,6 +117,14 @@ public sealed class DockerService : IDockerService
         string.IsNullOrWhiteSpace(dockerContext) ? string.Empty : $"--context {dockerContext} ";
 
     private async Task<(int ExitCode, string Output)> RunDockerCommandAsync(
+        string arguments,
+        CancellationToken cancellationToken)
+    {
+        var (exitCode, output, _) = await RunDockerCommandWithStderrAsync(arguments, cancellationToken);
+        return (exitCode, output);
+    }
+
+    private static async Task<(int ExitCode, string Output, string Stderr)> RunDockerCommandWithStderrAsync(
         string arguments,
         CancellationToken cancellationToken)
     {
@@ -125,9 +164,64 @@ public sealed class DockerService : IDockerService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Best effort — the caller is already bailing out.
+            }
 
-        return (process.ExitCode, string.Join('\n', outputLines));
+            throw;
+        }
+
+        return (process.ExitCode, string.Join('\n', outputLines), string.Join('\n', errorLines));
+    }
+
+    private static string SummarizeDockerEngineError(string stderr)
+    {
+        var message = stderr.Trim();
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "The Docker engine is not reachable.";
+        }
+
+        const string stderrPrefix = "stderr=";
+        var stderrIdx = message.LastIndexOf(stderrPrefix, StringComparison.OrdinalIgnoreCase);
+        if (stderrIdx >= 0)
+        {
+            var nested = message[(stderrIdx + stderrPrefix.Length)..].Trim();
+            if (!string.IsNullOrWhiteSpace(nested))
+            {
+                message = nested;
+            }
+        }
+
+        if (message.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("docker.sock", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Docker is running but the SSH user cannot access the Docker socket. "
+                   + "On the VPC host run: sudo usermod -aG docker <ssh-user> (then log out and back in).";
+        }
+
+        if (message.Contains("docker daemon", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("cannot connect", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The Docker daemon is not running or not reachable. "
+                   + "On the VPC host run: sudo systemctl start docker && sudo systemctl enable docker.";
+        }
+
+        return message;
     }
 
     private List<ContainerStatusDto> ParseContainerList(string jsonOutput)

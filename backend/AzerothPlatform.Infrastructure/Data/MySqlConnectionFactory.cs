@@ -1,10 +1,10 @@
 using System.Data.Common;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
-using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MySql.Data.MySqlClient;
 
 namespace AzerothPlatform.Infrastructure.Data;
@@ -14,17 +14,22 @@ namespace AzerothPlatform.Infrastructure.Data;
 /// </summary>
 public class MySqlConnectionFactory : IMySqlConnectionFactory
 {
+    private const int MysqlContainerPort = 3306;
+
     private readonly AzerothCoreDbContext _dbContext;
     private readonly IRemoteEngineService _remoteEngine;
+    private readonly ILogger<MySqlConnectionFactory> _logger;
     private readonly string _mysqlHost;
 
     public MySqlConnectionFactory(
         AzerothCoreDbContext dbContext,
         IRemoteEngineService remoteEngine,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<MySqlConnectionFactory> logger)
     {
         _dbContext = dbContext;
         _remoteEngine = remoteEngine;
+        _logger = logger;
         _mysqlHost = configuration["MySQL:Host"] ?? "localhost";
     }
 
@@ -51,8 +56,36 @@ public class MySqlConnectionFactory : IMySqlConnectionFactory
         uint port;
         if (stack.DeploymentTarget == DeploymentTarget.External)
         {
-            // External stacks: reach MySQL over an SSH tunnel so the DB port stays closed on the cloud SG.
-            var endpoint = await _remoteEngine.GetManagementTunnelEndpointAsync(stack, stack.DatabasePort, cancellationToken);
+            var remotePort = stack.DatabasePort;
+            var containerName = DockerComposeOverrideGenerator.GetContainerNameForService(
+                stack.Id,
+                stack.StackName,
+                "ac-database");
+            if (containerName is not null)
+            {
+                var publishedPort = await _remoteEngine.TryResolveRemotePublishedPortAsync(
+                    stack,
+                    containerName,
+                    MysqlContainerPort,
+                    cancellationToken);
+                if (publishedPort is > 0 && publishedPort != remotePort)
+                {
+                    _logger.LogWarning(
+                        "Stack {StackId} database is published on host port {PublishedPort} but configured as {ConfiguredPort}; using the live published port.",
+                        stack.Id,
+                        publishedPort,
+                        remotePort);
+                    remotePort = publishedPort.Value;
+                }
+            }
+
+            // External stacks: reach MySQL over an SSH tunnel to loopback on the remote host. Data-plane
+            // ports must publish on 127.0.0.1 there — tunneling to a VPC/public bind IP breaks the stream.
+            var endpoint = await _remoteEngine.GetManagementTunnelEndpointAsync(
+                stack,
+                remotePort,
+                "127.0.0.1",
+                cancellationToken);
             host = endpoint.Host;
             port = (uint)endpoint.Port;
         }
@@ -70,6 +103,7 @@ public class MySqlConnectionFactory : IMySqlConnectionFactory
             UserID = "root",
             Password = stack.DatabaseRootPassword,
             AllowPublicKeyRetrieval = true,
+            SslMode = MySqlSslMode.Disabled,
             ConnectionTimeout = 15,
         };
 

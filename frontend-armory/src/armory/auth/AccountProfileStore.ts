@@ -51,17 +51,9 @@ export class AccountProfileStore {
 	) {}
 
 	public async ensureTable(): Promise<void> {
+		// Tables are created by the platform manager (root) during stack provisioning.
 		await this.db.query({
-			sql: `
-				CREATE TABLE IF NOT EXISTS \`${PROFILE_TABLE}\` (
-					\`account_id\` INT UNSIGNED NOT NULL,
-					\`display_name\` VARCHAR(32) NOT NULL,
-					\`hide_username\` TINYINT(1) NOT NULL DEFAULT 1,
-					\`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-					PRIMARY KEY (\`account_id\`),
-					UNIQUE KEY \`ux_armory_display_name\` (\`display_name\`)
-				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-			`,
+			sql: `SELECT 1 FROM \`${PROFILE_TABLE}\` LIMIT 0`,
 			timeout: this.queryTimeout,
 		});
 	}
@@ -122,6 +114,7 @@ export class AccountProfileStore {
 
 	public async updateDisplayName(accountId: number, displayName: string): Promise<void> {
 		const normalized = normalizeDisplayName(displayName);
+		// Only UPDATE on armory_account_profile (never acore_auth.account). Caller must verify JWT first.
 		await this.db.query({
 			sql: `
 				UPDATE \`${PROFILE_TABLE}\`

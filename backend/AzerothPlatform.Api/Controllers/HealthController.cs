@@ -70,7 +70,7 @@ public class HealthController : ControllerBase
     {
         try
         {
-            return await _dockerService.IsDockerAvailableAsync(cancellationToken);
+            return await _dockerService.IsDockerAvailableAsync(cancellationToken: cancellationToken);
         }
         catch (Exception)
         {

@@ -292,6 +292,14 @@ public class SystemController : ControllerBase
     public ActionResult<VpcSecurityCatalogDto> GetVpcSecurityRoles()
         => Ok(VpcSecurityCatalog.CreateCatalog());
 
+    /// <summary>
+    /// Cloud launch script for fresh Ubuntu EC2 instances. Paste into AWS "User data" at launch so
+    /// Docker and platform sudo access are ready before the operator connects.
+    /// </summary>
+    [HttpGet("vpc-launch-user-data")]
+    public ActionResult<VpcLaunchUserDataDto> GetVpcLaunchUserData([FromQuery] string? sshUser = "ubuntu")
+        => Ok(VpcBootstrapUserData.CreateDto(sshUser ?? "ubuntu"));
+
     /// <summary>Suggested firewall rules before stack ports are fully known.</summary>
     [HttpGet("vpc-security-profile")]
     public ActionResult<VpcSecurityProfileDto> GetVpcSecurityProfile(

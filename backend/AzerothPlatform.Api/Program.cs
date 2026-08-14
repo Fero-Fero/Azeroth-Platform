@@ -117,6 +117,7 @@ try
     // Register SignalR event publisher
     builder.Services.AddSingleton<AzerothPlatform.Core.Services.Interfaces.IBuildEventPublisher, AzerothPlatform.Api.Services.SignalRBuildEventPublisher>();
     builder.Services.AddSingleton<AzerothPlatform.Core.Services.Interfaces.IArmoryEventPublisher, AzerothPlatform.Api.Services.SignalRArmoryEventPublisher>();
+    builder.Services.AddSingleton<AzerothPlatform.Core.Services.Interfaces.IClientEventPublisher, AzerothPlatform.Api.Services.SignalRClientEventPublisher>();
     builder.Services.AddSingleton<AzerothPlatform.Core.Services.Interfaces.IStackEventPublisher, AzerothPlatform.Api.Services.SignalRStackEventPublisher>();
     builder.Services.AddSingleton<AzerothPlatform.Core.Services.Interfaces.IDockerCleanupEventPublisher, AzerothPlatform.Api.Services.SignalRDockerCleanupEventPublisher>();
 

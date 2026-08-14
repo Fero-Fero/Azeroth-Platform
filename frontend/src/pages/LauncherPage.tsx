@@ -491,16 +491,17 @@ export default function LauncherPage() {
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {!s.reachable
-                        ? 'Unreachable — the stack is offline or has no launcher yet.'
-                        : `Serving v${s.deployedVersion}`}
+                      {s.statusDetail
+                        ?? (s.reachable
+                          ? `Serving v${s.deployedVersion}`
+                          : 'Client container offline or launcher not deployed yet.')}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
                     {!s.reachable ? (
-                      <span className="inline-flex items-center gap-1 text-sm text-red-600">
-                        <XCircle className="h-4 w-4" /> Unreachable
+                      <span className="inline-flex items-center gap-1 text-sm text-amber-700">
+                        <AlertTriangle className="h-4 w-4" /> Not available
                       </span>
                     ) : s.upToDate ? (
                       <span className="inline-flex items-center gap-1 text-sm text-green-600">

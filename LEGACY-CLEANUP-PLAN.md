@@ -4,8 +4,6 @@ This document inventories **legacy, older-stack, and deprecated compatibility** 
 
 **Context:** Platform is at **v1.0.0**. Pre-1.0 stacks and manager-era workflows are no longer a supported target. New stacks should always get current defaults (ports, env-var shape, per-stack Docker volumes, stack-hosted client-server portal). Existing **1.0.x deployments** must keep working through any cleanup.
 
-**Related docs:** [EXTERNAL-VPC-SETUP.md](./EXTERNAL-VPC-SETUP.md) (current external VPC model).
-
 ---
 
 ## Methodology

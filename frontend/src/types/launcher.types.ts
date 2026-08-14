@@ -78,6 +78,7 @@ export interface LauncherStackVersionDto {
   portalUrl?: string | null
   deployedVersion?: string | null
   reachable: boolean
+  statusDetail?: string
   upToDate: boolean
   launcherVisible: boolean
 }

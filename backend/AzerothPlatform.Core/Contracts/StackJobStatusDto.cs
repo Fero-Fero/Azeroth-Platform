@@ -8,7 +8,8 @@ public enum StackJobAction
     Start,
     StartDatabase,
     Stop,
-    Restart
+    Restart,
+    ApplyPublicHost
 }
 
 /// <summary>Coarse-grained phase of a stack lifecycle background job.</summary>
@@ -18,6 +19,7 @@ public enum StackJobPhase
     StartingDatabase,
     Stopping,
     Restarting,
+    ApplyingPublicHost,
     Completed,
     Failed
 }
@@ -52,6 +54,9 @@ public class StackJobStatusDto
     public DateTime StartedAt { get; set; }
 
     public DateTime? FinishedAt { get; set; }
+
+    /// <summary>Per-step progress for <see cref="StackJobAction.ApplyPublicHost"/> jobs.</summary>
+    public List<PublicHostApplyStepDto> Steps { get; set; } = [];
 
     /// <summary>True while the job is still executing (not Completed/Failed).</summary>
     [JsonInclude]

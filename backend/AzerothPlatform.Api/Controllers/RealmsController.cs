@@ -81,21 +81,15 @@ public class RealmsController : ControllerBase
     /// services that consume the public host.
     /// </summary>
     [HttpPut("address")]
-    public async Task<ActionResult<List<RealmDto>>> SetRealmAddress(
+    public async Task<ActionResult<SetRealmAddressResponseDto>> SetRealmAddress(
         string stackId,
         [FromBody] SetRealmAddressRequest request,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var applied = await _stackService.ApplyStackPublicHostAsync(stackId, request.Host, cancellationToken);
-            if (!applied)
-            {
-                return NotFound(new { error = $"Stack '{stackId}' was not found." });
-            }
-
-            var realms = await _realmService.GetRealmsAsync(stackId, cancellationToken);
-            return Ok(realms);
+            var result = await _stackService.BeginApplyStackPublicHostAsync(stackId, request.Host, cancellationToken);
+            return Ok(result);
         }
         catch (ArgumentException ex)
         {

@@ -41,24 +41,9 @@ export class PendingRegistrationStore {
 	) {}
 
 	public async ensureTable(): Promise<void> {
+		// Tables are created by the platform manager (root) during stack provisioning.
 		await this.db.query({
-			sql: `
-				CREATE TABLE IF NOT EXISTS \`${PENDING_TABLE}\` (
-					\`id\` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-					\`email\` VARCHAR(255) NOT NULL,
-					\`salt\` BINARY(32) NOT NULL,
-					\`verifier\` BINARY(32) NOT NULL,
-					\`verification_token_hash\` VARCHAR(64) NOT NULL,
-					\`expires_at\` DATETIME NOT NULL,
-					\`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-					\`verified_at\` DATETIME NULL DEFAULT NULL,
-					\`account_id\` INT UNSIGNED NULL DEFAULT NULL,
-					\`resend_count\` TINYINT UNSIGNED NOT NULL DEFAULT 0,
-					\`resend_window_started_at\` DATETIME NULL DEFAULT NULL,
-					PRIMARY KEY (\`id\`),
-					UNIQUE KEY \`ux_armory_pending_email\` (\`email\`)
-				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-			`,
+			sql: `SELECT 1 FROM \`${PENDING_TABLE}\` LIMIT 0`,
 			timeout: this.queryTimeout,
 		});
 	}

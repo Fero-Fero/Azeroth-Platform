@@ -104,6 +104,10 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ArmoryDatabasePasswordProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("ArmoryUseEmailConfirmation")
                         .HasColumnType("INTEGER");
 

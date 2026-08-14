@@ -10,7 +10,20 @@ public interface IDockerService
     /// <summary>
     /// Checks whether the Docker daemon is reachable.
     /// </summary>
-    Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken = default);
+    /// <param name="dockerContext">
+    /// Optional docker context name to target a specific engine (e.g. an external stack's SSH context).
+    /// Null uses the manager's default local engine.
+    /// </param>
+    Task<bool> IsDockerAvailableAsync(string? dockerContext = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists containers and reports whether the engine responded to <c>docker ps</c>.
+    /// </summary>
+    Task<DockerListContainersResult> ListContainersWithEngineStatusAsync(
+        string? composeProjectName = null,
+        string? dockerContext = null,
+        string? nameContains = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lists containers managed by Docker, optionally filtered to a specific compose stack.
@@ -23,6 +36,7 @@ public interface IDockerService
     Task<IReadOnlyList<ContainerStatusDto>> ListContainersAsync(
         string? composeProjectName = null,
         string? dockerContext = null,
+        string? nameContains = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

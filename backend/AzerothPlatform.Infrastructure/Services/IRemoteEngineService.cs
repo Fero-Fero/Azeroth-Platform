@@ -85,6 +85,14 @@ public interface IRemoteEngineService
     /// </summary>
     Task<string> EnsureContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Probes the remote Docker daemon over SSH (same path as the wizard connection test). Use when
+    /// docker-context CLI calls fail but SSH credentials are known-good.
+    /// </summary>
+    Task<(bool Available, string? Message)> ProbeRemoteDockerAsync(
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Removes the docker context, ssh alias, and key material for a stack (best-effort).</summary>
     Task RemoveContextAsync(ManagedStackEntity stack, CancellationToken cancellationToken = default);
 
@@ -122,6 +130,12 @@ public interface IRemoteEngineService
 
     /// <summary>Streams a local image (by tag) to the stack's remote engine via <c>docker save | docker load</c>.</summary>
     Task ShipImageAsync(ManagedStackEntity stack, string imageTag, CancellationToken cancellationToken = default);
+
+    /// <summary>True when <paramref name="imageTag"/> is already present on the stack's remote engine.</summary>
+    Task<bool> RemoteImageExistsAsync(
+        ManagedStackEntity stack,
+        string imageTag,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Populates a named volume from an uploaded archive stream. External stacks stream the bytes over
@@ -283,12 +297,47 @@ public interface IRemoteEngineService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads the host port a container's internal TCP port is published on (via <c>docker port</c> over
+    /// SSH). Returns null when the container is missing or the port is not published.
+    /// </summary>
+    Task<int?> TryResolveRemotePublishedPortAsync(
+        ManagedStackEntity stack,
+        string containerName,
+        int containerPort,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads the host IP and port a container's internal TCP port is published on (via <c>docker port</c>).
+    /// </summary>
+    Task<(string Host, int Port)?> TryResolveRemotePublishedEndpointAsync(
+        ManagedStackEntity stack,
+        string containerName,
+        int containerPort,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns a local <c>127.0.0.1:&lt;port&gt;</c> endpoint that forwards to a management port
     /// (MySQL, SOAP) on an external stack's host over SSH. Keeps MySQL/SOAP off the public internet.
     /// </summary>
     Task<(string Host, int Port)> GetManagementTunnelEndpointAsync(
         ManagedStackEntity stack,
         int remotePort,
+        string remoteHost = "127.0.0.1",
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Closes an SSH management tunnel so the next request opens a fresh forward.</summary>
+    void InvalidateManagementTunnel(ManagedStackEntity stack, int remotePort, string remoteHost = "127.0.0.1");
+
+    /// <summary>Reads ufw status on a Linux VPC host and verifies required allow ports.</summary>
+    Task<VpcFirewallStatusDto> ProbeHostFirewallAsync(
+        ManagedStackEntity stack,
+        VpcSecurityProfileDto profile,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reads recent SSH auth events from the remote VPC host (auth.log / journald).</summary>
+    Task<VpcSshLogsDto> FetchSshAuthLogsAsync(
+        ManagedStackEntity stack,
+        int limit = 100,
         CancellationToken cancellationToken = default);
 }
 
@@ -310,6 +359,9 @@ public sealed class VolumeTreeSummary
     public long TotalBytes { get; set; }
     public bool HasWowExe { get; set; }
     public bool HasDataMpq { get; set; }
+    /// <summary>True when the volume exists but a helper container could not read its contents.</summary>
+    public bool InspectionFailed { get; set; }
+    public string? InspectionError { get; set; }
 }
 
 /// <summary>A file inside a Docker named volume (path relative to volume root).</summary>

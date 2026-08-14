@@ -23,6 +23,10 @@ namespace AzerothPlatform.Infrastructure.Services;
 public sealed class LauncherBuildService : ILauncherBuildService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+    };
     private const int MaxLogLines = 400;
 
     // Short-lived probe of each stack's /launcher/latest to learn the version it currently serves.
@@ -31,6 +35,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRemoteEngineService _remoteEngine;
     private readonly LauncherBuildOptions _options;
+    private readonly ClientServerOptions _clientServerOptions;
     private readonly ILogger<LauncherBuildService> _logger;
 
     private readonly object _lock = new();
@@ -45,11 +50,13 @@ public sealed class LauncherBuildService : ILauncherBuildService
         IServiceScopeFactory scopeFactory,
         IRemoteEngineService remoteEngine,
         IOptions<LauncherBuildOptions> options,
+        IOptions<ClientServerOptions> clientServerOptions,
         ILogger<LauncherBuildService> logger)
     {
         _scopeFactory = scopeFactory;
         _remoteEngine = remoteEngine;
         _options = options.Value;
+        _clientServerOptions = clientServerOptions.Value;
         _logger = logger;
 
         _workPath = ResolvePath(_options.WorkPath);
@@ -84,7 +91,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
         foreach (var stack in stacks)
         {
             var portalUrl = PortalUrlFor(stack, migrationOptions);
-            var deployed = portalUrl is null ? null : await TryReadStackVersionAsync(portalUrl, cancellationToken);
+            var deployed = await TryReadStackVersionAsync(stack, migrationOptions, cancellationToken);
             result.Stacks.Add(new LauncherStackVersionDto
             {
                 StackId = stack.Id,
@@ -92,6 +99,8 @@ public sealed class LauncherBuildService : ILauncherBuildService
                 PortalUrl = portalUrl,
                 DeployedVersion = deployed,
                 Reachable = deployed is not null,
+                StatusDetail = await DescribeStackLauncherStatusAsync(
+                    stack, portalUrl, deployed, cancellationToken),
                 // Up to date only when a build exists and the stack serves exactly that version.
                 UpToDate = builtVersion is not null && deployed is not null
                     && CompareVersions(deployed, builtVersion) == 0,
@@ -139,7 +148,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
             stack, finalExe, meta.Version, meta.SizeBytes, meta.Sha256 ?? string.Empty, meta.BuiltAt, cancellationToken);
 
         var portalUrl = PortalUrlFor(stack, migrationOptions);
-        var deployed = portalUrl is null ? null : await TryReadStackVersionAsync(portalUrl, cancellationToken);
+        var deployed = await TryReadStackVersionAsync(stack, migrationOptions, cancellationToken);
         return new LauncherStackVersionDto
         {
             StackId = stack.Id,
@@ -147,6 +156,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
             PortalUrl = portalUrl,
             DeployedVersion = deployed,
             Reachable = deployed is not null,
+            StatusDetail = await DescribeStackLauncherStatusAsync(stack, portalUrl, deployed, cancellationToken),
             UpToDate = deployed is not null && CompareVersions(deployed, meta.Version) == 0,
             LauncherVisible = stack.LauncherVisible,
         };
@@ -242,12 +252,18 @@ public sealed class LauncherBuildService : ILauncherBuildService
             // dropping/re-initializing the local manager can never reset the counter and ship a build that
             // looks older than what players already run (which would block their self-update).
             var baseline = ReadMetadata()?.Version;
-            foreach (var url in stackPortalUrls)
+            using (var scope = _scopeFactory.CreateScope())
             {
-                var deployed = await TryReadStackVersionAsync(url, cancellationToken);
-                if (deployed is null) { continue; }
-                AddLog($"Stack {url} currently serves launcher v{deployed}.");
-                if (CompareVersions(deployed, baseline) > 0) { baseline = deployed; }
+                var migrationOptions = scope.ServiceProvider
+                    .GetRequiredService<IOptions<MigrationOptions>>().Value;
+                foreach (var stack in targetStacks)
+                {
+                    var deployed = await TryReadStackVersionAsync(stack, migrationOptions, cancellationToken);
+                    if (deployed is null) { continue; }
+                    var portalUrl = PortalUrlFor(stack, migrationOptions);
+                    AddLog($"Stack {portalUrl ?? stack.StackName} currently serves launcher v{deployed}.");
+                    if (CompareVersions(deployed, baseline) > 0) { baseline = deployed; }
+                }
             }
 
             var version = BumpVersion(baseline, part);
@@ -331,17 +347,161 @@ public sealed class LauncherBuildService : ILauncherBuildService
     }
 
     /// <summary>
-    /// The stack's own portal/client-container URL (<c>http://{host}:{clientPort}</c>) used to seed a
-    /// fresh launcher, or null when the stack has no reachable client container.
+    /// The stack's player-facing client-container base URL (<c>http://{host}:{clientPort}</c>) used for
+    /// informational links in the admin UI, or null when the stack has no client container / host.
     /// </summary>
     private static string? PortalUrlFor(ManagedStackEntity stack, MigrationOptions migrationOptions)
     {
-        var host = string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
-            ? migrationOptions.RealmlistHost
-            : stack.RealmlistHostOverride;
-        return stack.ClientEnabled && stack.ClientPort > 0 && !string.IsNullOrWhiteSpace(host)
-            ? $"http://{host.Trim()}:{stack.ClientPort}"
-            : null;
+        if (!stack.ClientEnabled || stack.ClientPort <= 0)
+        {
+            return null;
+        }
+
+        var host = !string.IsNullOrWhiteSpace(stack.ExternalHost)
+            ? RealmlistHostResolver.NormalizeHost(stack.ExternalHost)
+            : string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
+                ? RealmlistHostResolver.NormalizeHost(migrationOptions.RealmlistHost)
+                : RealmlistHostResolver.NormalizeHost(stack.RealmlistHostOverride);
+
+        return string.IsNullOrWhiteSpace(host)
+            ? null
+            : $"http://{host.Trim()}:{stack.ClientPort}";
+    }
+
+    private static string DescribeStackLauncherStatus(
+        ManagedStackEntity stack,
+        string? portalUrl,
+        string? deployedVersion)
+    {
+        if (!stack.ClientEnabled)
+        {
+            return "No client container configured.";
+        }
+
+        if (deployedVersion is not null)
+        {
+            return $"Launcher v{deployedVersion} deployed on stack.";
+        }
+
+        if (portalUrl is null)
+        {
+            return "Client port or public host is not configured.";
+        }
+
+        return stack.DeploymentTarget == DeploymentTarget.External
+            ? "Launcher not found on stack volume — build the launcher, then Re-send to this stack."
+            : "Launcher not found — build the launcher, then Re-send to this stack.";
+    }
+
+    private async Task<string> DescribeStackLauncherStatusAsync(
+        ManagedStackEntity stack,
+        string? portalUrl,
+        string? deployedVersion,
+        CancellationToken cancellationToken)
+    {
+        if (deployedVersion is not null)
+        {
+            return $"Launcher v{deployedVersion} deployed on stack.";
+        }
+
+        if (!stack.ClientEnabled)
+        {
+            return "No client container configured.";
+        }
+
+        try
+        {
+            var volume = DockerComposeOverrideGenerator.ClientLauncherDistVolumeName(stack.Id);
+            var files = await _remoteEngine.ListVolumeFilesAsync(stack, volume, cancellationToken);
+            if (files.Count > 0)
+            {
+                return "Launcher volume has files but no valid build.json — use Re-send on the Launcher page.";
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Could not inspect launcher volume for stack {stack.StackName}: {ex.Message}");
+        }
+
+        return DescribeStackLauncherStatus(stack, portalUrl, deployedVersion);
+    }
+
+    /// <summary>
+    /// Reads the launcher version on a stack. The launcher-dist volume is checked first (works even when
+    /// the client container is stopped); live HTTP against the client container is used as a fallback.
+    /// </summary>
+    private async Task<string?> TryReadStackVersionAsync(
+        ManagedStackEntity stack,
+        MigrationOptions migrationOptions,
+        CancellationToken cancellationToken)
+    {
+        if (!stack.ClientEnabled)
+        {
+            return null;
+        }
+
+        var fromVolume = await TryReadStackVersionFromVolumeAsync(stack, cancellationToken);
+        if (fromVolume is not null)
+        {
+            return fromVolume;
+        }
+
+        if (stack.DeploymentTarget == DeploymentTarget.External)
+        {
+            return await TryReadStackVersionViaContainerAsync(stack, cancellationToken);
+        }
+
+        var portalUrl = PortalUrlFor(stack, migrationOptions);
+        return portalUrl is null
+            ? null
+            : await TryReadStackVersionFromUrlAsync(portalUrl, cancellationToken);
+    }
+
+    private async Task<string?> TryReadStackVersionFromVolumeAsync(
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var volume = DockerComposeOverrideGenerator.ClientLauncherDistVolumeName(stack.Id);
+            var files = await _remoteEngine.ListVolumeFilesAsync(stack, volume, cancellationToken);
+            if (files.Count == 0)
+            {
+                return null;
+            }
+
+            var (exitCode, stdout, _) = await _remoteEngine.RunToolInVolumeSubdirAsync(
+                stack,
+                volume,
+                string.Empty,
+                "alpine:3.20",
+                "cat build.json",
+                cancellationToken);
+            if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            {
+                return null;
+            }
+
+            var manifest = JsonSerializer.Deserialize<LauncherBuildManifest>(stdout, ManifestJsonOptions);
+            if (manifest is null || string.IsNullOrWhiteSpace(manifest.Version))
+            {
+                return null;
+            }
+
+            var exeName = string.IsNullOrWhiteSpace(manifest.FileName)
+                ? _options.ExecutableName
+                : manifest.FileName;
+            var hasExe = files.Any(f =>
+                string.Equals(f.RelativePath, exeName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetFileName(f.RelativePath), exeName, StringComparison.OrdinalIgnoreCase));
+
+            return hasExe ? manifest.Version : null;
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Could not read launcher manifest from stack {stack.StackName} volume: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -349,7 +509,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
     /// Returns null when the stack is unreachable or has no build yet, so an offline stack simply doesn't
     /// raise the version baseline.
     /// </summary>
-    private async Task<string?> TryReadStackVersionAsync(string portalUrl, CancellationToken cancellationToken)
+    private async Task<string?> TryReadStackVersionFromUrlAsync(string portalUrl, CancellationToken cancellationToken)
     {
         try
         {
@@ -358,13 +518,79 @@ public sealed class LauncherBuildService : ILauncherBuildService
             if (!response.IsSuccessStatusCode) { return null; }
 
             var info = await response.Content.ReadFromJsonAsync<StackLatestInfo>(cancellationToken);
-            return string.IsNullOrWhiteSpace(info?.Version) ? null : info!.Version;
+            return string.IsNullOrWhiteSpace(info?.Version) || info?.DownloadAvailable != true
+                ? null
+                : info!.Version;
         }
         catch (Exception ex)
         {
             AddLog($"Could not read current launcher version from {portalUrl}: {ex.Message}");
             return null;
         }
+    }
+
+    private async Task<string?> TryReadStackVersionViaContainerAsync(
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var container = $"{DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName)}-client";
+            var args = new List<string>();
+            if (stack.DeploymentTarget == DeploymentTarget.External)
+            {
+                var context = await _remoteEngine.EnsureContextAsync(stack, cancellationToken);
+                args.Add("--context");
+                args.Add(context);
+            }
+
+            args.Add("exec");
+            args.Add(container);
+            args.Add("curl");
+            args.Add("-fsS");
+            args.Add($"http://localhost:{_clientServerOptions.ContainerPort}/launcher/latest");
+
+            var (exitCode, stdout, _) = await RunDockerAsync(args, cancellationToken);
+            if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            {
+                return null;
+            }
+
+            var info = JsonSerializer.Deserialize<StackLatestInfo>(stdout, ManifestJsonOptions);
+            return string.IsNullOrWhiteSpace(info?.Version) || info?.DownloadAvailable != true
+                ? null
+                : info!.Version;
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Could not read launcher version from stack {stack.StackName} client container: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static async Task<(int ExitCode, string StdOut, string StdErr)> RunDockerAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "docker",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return (process.ExitCode, stdout, stderr);
     }
 
     /// <summary>
@@ -396,7 +622,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
             };
             await File.WriteAllTextAsync(
                 Path.Combine(stageDir, "build.json"),
-                JsonSerializer.Serialize(manifest, JsonOptions),
+                JsonSerializer.Serialize(manifest, ManifestJsonOptions),
                 cancellationToken);
 
             var volume = DockerComposeOverrideGenerator.ClientLauncherDistVolumeName(stack.Id);

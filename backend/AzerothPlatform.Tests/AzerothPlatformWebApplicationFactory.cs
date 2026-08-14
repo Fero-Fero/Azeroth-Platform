@@ -59,13 +59,21 @@ public sealed class AzerothPlatformWebApplicationFactory : WebApplicationFactory
 
             var mockDocker = new Mock<IDockerService>();
             mockDocker
-                .Setup(d => d.IsDockerAvailableAsync(It.IsAny<CancellationToken>()))
+                .Setup(d => d.IsDockerAvailableAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
             mockDocker
                 .Setup(d => d.ListContainersAsync(
                     It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(
                     Array.Empty<AzerothPlatform.Core.Contracts.ContainerStatusDto>());
+            mockDocker
+                .Setup(d => d.ListContainersWithEngineStatusAsync(
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AzerothPlatform.Core.Contracts.DockerListContainersResult
+                {
+                    EngineReachable = false,
+                    Containers = Array.Empty<AzerothPlatform.Core.Contracts.ContainerStatusDto>()
+                });
             services.AddScoped<IDockerService>(_ => mockDocker.Object);
 
             // ---- Replace IGitService — always reports Git as present ----

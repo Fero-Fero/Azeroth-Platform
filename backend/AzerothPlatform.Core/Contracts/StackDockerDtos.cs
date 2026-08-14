@@ -70,6 +70,14 @@ public sealed class DockerReclaimableBreakdownDto
 /// <summary>Per-stack Docker disk usage overview for the admin Docker tab.</summary>
 public sealed class StackDockerOverviewDto
 {
+    /// <summary>True when this overview was loaded from a remote Docker engine (VPC) over SSH.</summary>
+    public bool IsRemoteEngine { get; set; }
+
+    /// <summary>
+    /// True when expensive daemon-wide stats were omitted for speed (dangling layers, unused images, system df).
+    /// </summary>
+    public bool RemoteStatsLimited { get; set; }
+
     public DockerDiskUsageDto? DiskUsage { get; set; }
     public DockerDiskUsageBreakdownDto? DiskUsageBreakdown { get; set; }
     public DockerReclaimableBreakdownDto? ReclaimableBreakdown { get; set; }
@@ -191,6 +199,14 @@ public sealed class DockerVolumeCleanupResultDto
     public long FreedBytes { get; set; }
     public int DeletedVolumes { get; set; }
     public int DeletedFiles { get; set; }
+}
+
+/// <summary>Result of listing containers, including whether the Docker engine responded.</summary>
+public sealed class DockerListContainersResult
+{
+    public IReadOnlyList<ContainerStatusDto> Containers { get; init; } = [];
+    public bool EngineReachable { get; init; }
+    public string? EngineError { get; init; }
 }
 
 /// <summary>Global Docker engine overview for the manager admin UI.</summary>

@@ -265,6 +265,10 @@ public sealed class LauncherPortalService : ILauncherPortalService
         stack.LauncherDescription = (profile.Description ?? string.Empty).Trim();
         stack.LauncherSortOrder = profile.SortOrder;
         stack.RealmlistHostOverride = (profile.RealmlistHostOverride ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(stack.RealmlistHostOverride))
+        {
+            stack.RealmlistHostOverride = RealmlistHostResolver.NormalizeHost(stack.RealmlistHostOverride);
+        }
         stack.LauncherClientVersion = (profile.ClientVersion ?? string.Empty).Trim();
         stack.LauncherTemplate = NormalizeTemplateId(profile.Template);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -779,7 +783,9 @@ public sealed class LauncherPortalService : ILauncherPortalService
         : stack.StackName;
 
     private string ResolveRealmlistHost(ManagedStackEntity stack) =>
-        string.IsNullOrWhiteSpace(stack.RealmlistHostOverride) ? _migrationOptions.RealmlistHost : stack.RealmlistHostOverride;
+        RealmlistHostResolver.NormalizeHost(string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
+            ? _migrationOptions.RealmlistHost
+            : stack.RealmlistHostOverride);
 
     private static string AssetBaseName(LauncherAssetKind kind) => kind switch
     {

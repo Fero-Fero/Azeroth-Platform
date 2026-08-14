@@ -9,6 +9,12 @@ public interface IStackService
 {
     Task<IReadOnlyList<StackDetailsDto>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Probes live Docker status for every stack (once per list refresh) and caches the result for
+    /// <see cref="ListAsync"/> until the next probe or a stack detail refresh.
+    /// </summary>
+    Task<IReadOnlyList<StackDetailsDto>> ProbeAllStacksForListAsync(CancellationToken cancellationToken = default);
+
     Task<StackDetailsDto?> GetAsync(string stackId, CancellationToken cancellationToken = default);
 
     Task<StackDetailsDto> CreateAsync(StackConfigurationDto configuration, CancellationToken cancellationToken = default);
@@ -25,11 +31,20 @@ public interface IStackService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Applies the player-facing host/IP for the whole stack: persisted realmlist override, live
-    /// acore_auth.realmlist rows, regenerated runtime artifacts, launcher registry/client data, and
-    /// running player-facing services that need recreated to pick up new environment/bind settings.
+    /// Persists the player-facing host and enqueues a background job to apply it across live services.
+    /// When the stack is stopped the job temporarily starts the database (and client if enabled),
+    /// updates the realmlist, refreshes the launcher registry, then restores the previous state.
     /// </summary>
-    Task<bool> ApplyStackPublicHostAsync(string stackId, string host, CancellationToken cancellationToken = default);
+    Task<SetRealmAddressResponseDto> BeginApplyStackPublicHostAsync(
+        string stackId,
+        string host,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Live apply steps for a host already persisted on the stack entity.</summary>
+    Task ApplyStackPublicHostLiveAsync(
+        string stackId,
+        Action<PublicHostApplyStepDto>? reportStep,
+        CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAsync(string stackId, CancellationToken cancellationToken = default);
 
@@ -56,6 +71,12 @@ public interface IStackService
 
     Task<bool> StopAsync(string stackId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Aggressively tears down all stack containers, including crash-looping services. Used when a
+    /// normal stop is blocked by an in-flight lifecycle job or <c>restart: unless-stopped</c> loops.
+    /// </summary>
+    Task<bool> ForceStopAsync(string stackId, CancellationToken cancellationToken = default);
+
     Task<bool> RestartAsync(string stackId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -68,6 +89,22 @@ public interface IStackService
     /// Stops and removes the per-stack armory container, leaving the rest of the stack running.
     /// </summary>
     Task<bool> StopArmoryAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds (if needed) and starts the per-stack client file-server container. The rest of the stack
+    /// is untouched.
+    /// </summary>
+    Task<bool> StartClientAsync(string stackId, bool forceRecreate = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops and removes the per-stack client file-server container, leaving the rest of the stack running.
+    /// </summary>
+    Task<bool> StopClientAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restarts the per-stack client file-server container after ensuring it is present in the compose override.
+    /// </summary>
+    Task<bool> RestartClientAsync(string stackId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Applies a lifecycle action (start/stop/restart/recreate) to a single compose service of the
@@ -102,8 +139,17 @@ public interface IStackService
     /// <summary>Syncs Linux host firewall (ufw) rules for an external stack's player/web ports.</summary>
     Task<RemoteSetupResultDto?> SyncVpcFirewallAsync(string stackId, CancellationToken cancellationToken = default);
 
+    /// <summary>Starts or installs Docker on an external stack's VPC over SSH.</summary>
+    Task<RemoteSetupResultDto?> ProvisionVpcDockerAsync(string stackId, CancellationToken cancellationToken = default);
+
     /// <summary>Suggested host/cloud firewall rules for an external stack.</summary>
     Task<VpcSecurityProfileDto?> GetVpcSecurityProfileAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Live host firewall and Docker bind verification for an external stack.</summary>
+    Task<VpcFirewallStatusDto?> GetVpcFirewallStatusAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Recent SSH login and failed-attempt events from the remote VPC host.</summary>
+    Task<VpcSshLogsDto?> GetVpcSshLogsAsync(string stackId, int limit = 100, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Import a discovered stack into the manager database

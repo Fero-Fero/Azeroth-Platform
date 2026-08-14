@@ -71,10 +71,10 @@ public sealed class StackLauncherService : IStackLauncherService
         }
 
         var host = string.IsNullOrWhiteSpace(stack.ExternalHost)
-            ? (string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
+            ? RealmlistHostResolver.NormalizeHost(string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
                 ? _migrationOptions.RealmlistHost
                 : stack.RealmlistHostOverride)
-            : stack.ExternalHost;
+            : RealmlistHostResolver.NormalizeHost(stack.ExternalHost);
 
         if (string.IsNullOrWhiteSpace(host))
         {
@@ -263,9 +263,9 @@ public sealed class StackLauncherService : IStackLauncherService
 
         var clientRoot = Path.Combine(baseDir, stackId, MigrationLayout.ClientDirName);
 
-        var realmlistHost = string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
+        var realmlistHost = RealmlistHostResolver.NormalizeHost(string.IsNullOrWhiteSpace(stack.RealmlistHostOverride)
             ? _migrationOptions.RealmlistHost
-            : stack.RealmlistHostOverride;
+            : stack.RealmlistHostOverride);
 
         return new ClientDistributionContext
         {

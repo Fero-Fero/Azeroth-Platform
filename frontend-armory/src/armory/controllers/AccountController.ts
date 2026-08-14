@@ -18,6 +18,7 @@ import {
 	PendingRegistrationStore,
 	VERIFICATION_EXPIRY_HOURS,
 } from "../auth/PendingRegistrationStore";
+import { assertAuthenticatedAccountWrite } from "../auth/AuthenticatedAccount";
 import { generateCredentials, verifyPassword } from "../auth/Srp6";
 import {
 	setSession,
@@ -774,6 +775,7 @@ export class AccountController {
 
 		const store = this.getProfileStore();
 		await this.ensureProfile(session.id);
+		assertAuthenticatedAccountWrite(session, session.id);
 
 		if (await store.isDisplayNameTaken(displayName, session.id)) {
 			renderWithError("That display name is already taken. Try another.");

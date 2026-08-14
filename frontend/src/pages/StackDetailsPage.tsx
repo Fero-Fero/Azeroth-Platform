@@ -3,76 +3,66 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { stackApi, buildApi } from '@/services/api'
 import { DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type { StackServiceDto, StackServiceAction } from '@/types/stack.types'
-import { useState, useMemo, useEffect, useRef } from 'react'
-import { stackKeys } from '@/hooks/useStacks'
+import { Suspense, useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
+import { stackKeys, useStackDetail } from '@/hooks/useStacks'
+import { useDelayedTrue } from '@/hooks/useDelayedTrue'
 import { accountKeys } from '@/hooks/useAccounts'
 import { characterKeys } from '@/hooks/useCharacters'
 import { useArmoryJobContext, ArmoryJobProvider } from '@/contexts/ArmoryJobContext'
+import { useClientJobContext, ClientJobProvider } from '@/contexts/ClientJobContext'
 import { useStackJob } from '@/hooks/useStackJob'
-import EditStackConfigModal from '@/components/EditStackConfigModal'
-import UpdateStackDialog from '@/components/UpdateStackDialog'
-import RebuildStackDialog from '@/components/RebuildStackDialog'
+import { isStackJobRunning } from '@/lib/stackJob'
+import { lazyWithRetry } from '@/lib/lazyWithRetry'
+import PageLoader from '@/components/PageLoader'
 import type { ConfigMigrationMode } from '@/components/config/ConfigMigrationModeChoice'
-import AccountsTab from '@/components/accounts/AccountsTab'
-import CharactersTab from '@/components/characters/CharactersTab'
-import RealmsTab from '@/components/realms/RealmsTab'
-import PatchesTab from '@/components/patches/PatchesTab'
-import AddonsManager from '@/components/addons/AddonsManager'
-import LuaScriptsTab from '@/components/lua/LuaScriptsTab'
-import ServerConfigTab from '@/components/config/ServerConfigTab'
-import EnvironmentVariablesTab from '@/components/env/EnvironmentVariablesTab'
-import ArmoryDataManager from '@/components/armory/ArmoryDataManager'
-import ArmoryStylingTab from '@/components/armory/ArmoryStylingTab'
-import ArmoryLayoutTab from '@/components/armory/ArmoryLayoutTab'
-import ArmoryEmailTab from '@/components/armory/ArmoryEmailTab'
-import ArmoryRebuildBanner from '@/components/armory/ArmoryRebuildBanner'
-import ClientTab from '@/components/client/ClientTab'
-import StackModulesTab from '@/components/modules/StackModulesTab'
 import { useClientBaseInfo } from '@/hooks/useClient'
 import { useArmoryAssetsInfo } from '@/hooks/useArmoryAssets'
-import { useRealms } from '@/hooks/useRealms'
-import RevisionsTab from '@/components/revisions/RevisionsTab'
-import LauncherProfileTab from '@/components/launcher/LauncherProfileTab'
-import RealmlistOverrideField from '@/components/launcher/RealmlistOverrideField'
-import ArmoryNetworkField from '@/components/launcher/ArmoryNetworkField'
-import StackNewsTab from '@/components/launcher/StackNewsTab'
-import DockerTab from '@/components/docker/DockerTab'
-import ExternalReconnectPanel from '@/components/stacks/ExternalReconnectPanel'
-import ExternalVpcSecurityPanel from '@/components/stacks/ExternalVpcSecurityPanel'
-import InitialBuildRequiredPanel from '@/components/stacks/InitialBuildRequiredPanel'
-import { formatBytes } from '@/components/docker/DockerDiskUsage'
+import { useRealms, realmKeys } from '@/hooks/useRealms'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
-import ModuleSetupWarnings from '@/components/modules/ModuleSetupWarnings'
+import StackDetailLoadingShell from '@/components/stacks/StackDetailLoadingShell'
 import { resolveArmoryBrowseUrl } from '@/lib/armory-network'
-import { CiBuildStatusBadge } from '@/components/CiBuildStatusBadge'
 import { useLauncherProfile } from '@/hooks/useLauncher'
 import { Eye, EyeOff, Copy, Play, Square, RotateCw, Hammer, Loader2 } from 'lucide-react'
 
-// Helper to format commit SHAs safely
-const formatSha = (sha?: string | null): string => {
-  if (!sha) return 'Not yet built'
-  return sha.substring(0, 7)
-}
+const EditStackConfigModal = lazyWithRetry(() => import('@/components/EditStackConfigModal'))
+const UpdateStackDialog = lazyWithRetry(() => import('@/components/UpdateStackDialog'))
+const RebuildStackDialog = lazyWithRetry(() => import('@/components/RebuildStackDialog'))
+const AccountsTab = lazyWithRetry(() => import('@/components/accounts/AccountsTab'))
+const CharactersTab = lazyWithRetry(() => import('@/components/characters/CharactersTab'))
+const RealmsTab = lazyWithRetry(() => import('@/components/realms/RealmsTab'))
+const PatchesTab = lazyWithRetry(() => import('@/components/patches/PatchesTab'))
+const AddonsManager = lazyWithRetry(() => import('@/components/addons/AddonsManager'))
+const LuaScriptsTab = lazyWithRetry(() => import('@/components/lua/LuaScriptsTab'))
+const ServerConfigTab = lazyWithRetry(() => import('@/components/config/ServerConfigTab'))
+const EnvironmentVariablesTab = lazyWithRetry(() => import('@/components/env/EnvironmentVariablesTab'))
+const ArmoryDataManager = lazyWithRetry(() => import('@/components/armory/ArmoryDataManager'))
+const ArmoryStylingTab = lazyWithRetry(() => import('@/components/armory/ArmoryStylingTab'))
+const ArmoryLayoutTab = lazyWithRetry(() => import('@/components/armory/ArmoryLayoutTab'))
+const ArmoryEmailTab = lazyWithRetry(() => import('@/components/armory/ArmoryEmailTab'))
+const ArmoryRebuildBanner = lazyWithRetry(() => import('@/components/armory/ArmoryRebuildBanner'))
+const ClientTab = lazyWithRetry(() => import('@/components/client/ClientTab'))
+const StackModulesTab = lazyWithRetry(() => import('@/components/modules/StackModulesTab'))
+const RevisionsTab = lazyWithRetry(() => import('@/components/revisions/RevisionsTab'))
+const LauncherProfileTab = lazyWithRetry(() => import('@/components/launcher/LauncherProfileTab'))
+const RealmlistOverrideField = lazyWithRetry(() => import('@/components/launcher/RealmlistOverrideField'))
+const ArmoryNetworkField = lazyWithRetry(() => import('@/components/launcher/ArmoryNetworkField'))
+const StackNewsTab = lazyWithRetry(() => import('@/components/launcher/StackNewsTab'))
+const DockerTab = lazyWithRetry(() => import('@/components/docker/DockerTab'))
+const ExternalReconnectPanel = lazyWithRetry(() => import('@/components/stacks/ExternalReconnectPanel'))
+const ExternalVpcSecurityPanel = lazyWithRetry(() => import('@/components/stacks/ExternalVpcSecurityPanel'))
+const ExternalVpcLogsPanel = lazyWithRetry(() => import('@/components/stacks/ExternalVpcLogsPanel'))
+const InitialBuildRequiredPanel = lazyWithRetry(() => import('@/components/stacks/InitialBuildRequiredPanel'))
+const StackOverviewStatusPanel = lazyWithRetry(() => import('@/components/stacks/StackOverviewStatusPanel'))
 
-// Helper to format relative time
-const formatRelativeTime = (date: string | Date): string => {
-  const now = new Date()
-  const time = new Date(date)
-  const diffMs = now.getTime() - time.getTime()
-  const diffMinutes = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMinutes < 1) return 'just now'
-  if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`
-  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
-  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
-  return time.toLocaleDateString()
+function TabSuspense({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>
 }
 
 type StackTabId =
   | 'overview'
-  | 'vpc-overview'
+  | 'vpc-ssh'
+  | 'vpc-security'
+  | 'vpc-logs'
   | 'accounts'
   | 'characters'
   | 'realms'
@@ -100,7 +90,11 @@ const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: st
   {
     id: 'vpc-overview',
     label: 'VPC overview',
-    tabs: [{ id: 'vpc-overview', label: 'VPC overview' }],
+    tabs: [
+      { id: 'vpc-ssh', label: 'SSH' },
+      { id: 'vpc-security', label: 'Security' },
+      { id: 'vpc-logs', label: 'Logs' },
+    ],
   },
   {
     id: 'client',
@@ -149,7 +143,13 @@ const TAB_GROUPS: { id: string; label: string; tabs: { id: StackTabId; label: st
 
 const STACK_TAB_IDS = new Set<StackTabId>(TAB_GROUPS.flatMap((group) => group.tabs.map((tab) => tab.id)))
 
+const VPC_TAB_IDS = new Set<StackTabId>(['vpc-ssh', 'vpc-security', 'vpc-logs'])
+
 function resolveStackTab(value: string | null): StackTabId {
+  if (value === 'vpc-overview') {
+    return 'vpc-ssh'
+  }
+
   return value && STACK_TAB_IDS.has(value as StackTabId) ? (value as StackTabId) : 'overview'
 }
 
@@ -160,7 +160,9 @@ export default function StackDetailsPage() {
   }
   return (
     <ArmoryJobProvider stackId={stackId}>
-      <StackDetailsPageContent />
+      <ClientJobProvider stackId={stackId}>
+        <StackDetailsPageContent />
+      </ClientJobProvider>
     </ArmoryJobProvider>
   )
 }
@@ -189,30 +191,51 @@ function StackDetailsPageContent() {
     setActiveTab((current) => (current === nextTab ? current : nextTab))
   }, [searchParams])
 
-  // Fetch stack details with auto-refresh every 5 seconds
-  // Poll when: Running, Starting, Building, Degraded, Initializing, or within 30 seconds of a lifecycle action
-  const { data: stack, isLoading, error } = useQuery({
-    queryKey: stackKeys.detail(stackId!),
-    queryFn: () => stackApi.get(stackId!).then(res => res.data),
-    enabled: !!stackId,
+  // Tracks the detached stack lifecycle job (start/stop/restart/start-database). Reattaches after a page
+  // refresh or navigating away via GET + SignalR, so the UI reflects an in-flight operation and its
+  // result regardless of which browser tab (or the list page) triggered it.
+  const { job: stackJob, isStackBusy, applyStatus: applyStackStatus } = useStackJob(stackId ?? null)
+
+  const {
+    data: stack,
+    isFetching,
+    error,
+  } = useStackDetail(stackId!, {
     refetchInterval: (query) => {
+      // Avoid overlapping VPC probes — each refresh SSHs to the remote engine and can take 30s+.
+      if (query.state.fetchStatus === 'fetching') {
+        return false
+      }
+
       const status = query.state.data?.status
-      const shouldPollForStatus = 
-        status === StackStatus.Running || 
+      const shouldPollForStatus =
+        status === StackStatus.Running ||
         status === StackStatus.Starting ||
         status === StackStatus.Building ||
         status === StackStatus.Degraded ||
         status === StackStatus.Initializing
-      
-      // Also poll for 30 seconds after any lifecycle action
-      const shouldPollForRecent = recentLifecycleAction && 
-        (Date.now() - recentLifecycleAction < 30000)
-      
-      return shouldPollForStatus || shouldPollForRecent ? 5000 : false
+
+      const shouldPollForRecent =
+        recentLifecycleAction && Date.now() - recentLifecycleAction < 120_000
+
+      const shouldPollForJob = isStackBusy
+
+      if (!(shouldPollForStatus || shouldPollForRecent || shouldPollForJob)) {
+        return false
+      }
+
+      return query.state.data?.configuration.deployment?.target === DeploymentTarget.External
+        ? status === StackStatus.Degraded
+          ? 90_000
+          : 60_000
+        : 5000
     },
   })
 
   const isExternalStack = stack?.configuration.deployment?.target === DeploymentTarget.External
+  const isBackgroundRefetch = isFetching && !!stack && !isStackBusy
+  // VPC SSH probes are slow; only surface a banner when a refresh is genuinely stuck, not on every poll.
+  const isLiveStatusRefreshing = useDelayedTrue(isBackgroundRefetch, 8000)
 
   const visibleTabGroups = useMemo(
     () => TAB_GROUPS.filter((group) => group.id !== 'vpc-overview' || isExternalStack),
@@ -220,7 +243,7 @@ function StackDetailsPageContent() {
   )
 
   useEffect(() => {
-    if (activeTab === 'vpc-overview' && stack && !isExternalStack) {
+    if (VPC_TAB_IDS.has(activeTab) && stack && !isExternalStack) {
       const next = new URLSearchParams(searchParams)
       next.delete('tab')
       setSearchParams(next, { replace: true })
@@ -260,11 +283,6 @@ function StackDetailsPageContent() {
     return `${minutes}m`
   }, [stack])
 
-  // Tracks the detached stack lifecycle job (start/stop/restart/start-database). Reattaches after a page
-  // refresh or navigating away via GET + SignalR, so the UI reflects an in-flight operation and its
-  // result regardless of which browser tab (or the list page) triggered it.
-  const { job: stackJob, isStackBusy, applyStatus: applyStackStatus } = useStackJob(stackId ?? null)
-
   // Lifecycle mutations enqueue detached background jobs; seed the returned status into the job hook so
   // the UI reflects the operation instantly (and the polling/SignalR reattach engages).
   const startMutation = useMutation({
@@ -272,8 +290,6 @@ function StackDetailsPageContent() {
     onSuccess: (res) => {
       applyStackStatus(res.data)
       setRecentLifecycleAction(Date.now())
-      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
-      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
     },
   })
 
@@ -282,8 +298,6 @@ function StackDetailsPageContent() {
     onSuccess: (res) => {
       applyStackStatus(res.data)
       setRecentLifecycleAction(Date.now())
-      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
-      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
     },
   })
 
@@ -292,8 +306,6 @@ function StackDetailsPageContent() {
     onSuccess: (res) => {
       applyStackStatus(res.data)
       setRecentLifecycleAction(Date.now())
-      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
-      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
     },
   })
 
@@ -303,15 +315,13 @@ function StackDetailsPageContent() {
     onSuccess: (res) => {
       applyStackStatus(res.data)
       setRecentLifecycleAction(Date.now())
-      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
-      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
     },
   })
 
   // When a lifecycle job finishes, refresh the stack so container/status reflect the result.
   const lastHandledStackJobRef = useRef<string | null>(null)
   useEffect(() => {
-    if (stackJob && !stackJob.isRunning && stackJob.jobId !== lastHandledStackJobRef.current) {
+    if (stackJob && !isStackJobRunning(stackJob) && stackJob.jobId !== lastHandledStackJobRef.current) {
       lastHandledStackJobRef.current = stackJob.jobId
       setRecentLifecycleAction(Date.now())
       queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
@@ -327,6 +337,11 @@ function StackDetailsPageContent() {
         queryClient.invalidateQueries({ queryKey: accountKeys.list(stackId!) })
         queryClient.invalidateQueries({ queryKey: characterKeys.list(stackId!) })
       }
+
+      if (stackJob.action === 'ApplyPublicHost') {
+        queryClient.invalidateQueries({ queryKey: realmKeys.list(stackId!) })
+        queryClient.invalidateQueries({ queryKey: ['launcher-profile', stackId!] })
+      }
     }
   }, [stackJob, queryClient, stackId])
 
@@ -334,6 +349,7 @@ function StackDetailsPageContent() {
   // refresh via GET + SignalR, so the UI reflects an in-flight operation and its result regardless of
   // whether this browser tab triggered it.
   const { job: armoryJob, isArmoryBusy, applyStatus: applyArmoryStatus } = useArmoryJobContext()
+  const { job: clientJob, isClientBusy, applyStatus: applyClientStatus } = useClientJobContext()
 
   // When an armory job finishes, refresh the stack so armoryRunning / container state reflect the result.
   const lastHandledArmoryJobRef = useRef<string | null>(null)
@@ -345,6 +361,16 @@ function StackDetailsPageContent() {
       queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
     }
   }, [armoryJob, queryClient, stackId])
+
+  const lastHandledClientJobRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (clientJob && !clientJob.isRunning && clientJob.jobId !== lastHandledClientJobRef.current) {
+      lastHandledClientJobRef.current = clientJob.jobId
+      setRecentLifecycleAction(Date.now())
+      queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
+      queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
+    }
+  }, [clientJob, queryClient, stackId])
 
   // Starts/stops the per-stack armory container independently of the game servers. The backend runs
   // these as detached background jobs and returns the initial status, which we seed into the job hook.
@@ -366,9 +392,11 @@ function StackDetailsPageContent() {
       stackApi.serviceAction(stackId!, service, action),
     onMutate: ({ service }) => setPendingService(service),
     onSuccess: (res, { service }) => {
-      // Armory actions return a background-job status; seed it so the UI reflects the running job.
+      // Armory and client actions return a background-job status; seed it so the UI reflects the running job.
       if (service === 'frontend-armory') {
         applyArmoryStatus(res.data)
+      } else if (service === 'client') {
+        applyClientStatus(res.data)
       }
     },
     onSettled: () => {
@@ -454,24 +482,22 @@ function StackDetailsPageContent() {
     select: (res) => res.data,
   })
 
-  // Per-stack client + armory data presence, used to prompt on the Overview when either is missing
-  // (each stack now keeps its own base client and armory dataset, so both are uploaded per stack).
-  const clientBaseInfoQuery = useClientBaseInfo(stackId!)
-  const armoryAssetsInfoQuery = useArmoryAssetsInfo(stackId!)
+  // Volume probes over SSH are slow on external stacks — only fetch when a tab needs them.
+  const needsClientUploadStatus = activeTab === 'overview' || activeTab === 'client'
+  const needsArmoryUploadStatus =
+    activeTab === 'overview' ||
+    activeTab === 'armory' ||
+    activeTab === 'armory-styling' ||
+    activeTab === 'armory-layout' ||
+    activeTab === 'armory-email'
+  const clientBaseInfoQuery = useClientBaseInfo(stackId!, needsClientUploadStatus)
+  const armoryAssetsInfoQuery = useArmoryAssetsInfo(stackId!, needsArmoryUploadStatus)
   const clientDataMissing = clientBaseInfoQuery.data ? !clientBaseInfoQuery.data.exists : false
   const armoryDataMissing = armoryAssetsInfoQuery.data ? !armoryAssetsInfoQuery.data.dataUploaded : false
   const isArmoryTab =
     activeTab === 'armory' || activeTab === 'armory-styling' || activeTab === 'armory-layout' || activeTab === 'armory-email'
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="text-lg text-gray-600">Loading stack details...</div>
-      </div>
-    )
-  }
-
-  if (error || !stack) {
+  if (error && !stack) {
     return (
       <div className="max-w-2xl mx-auto mt-12">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -490,20 +516,26 @@ function StackDetailsPageContent() {
     )
   }
 
+  if (!stack) {
+    return <StackDetailLoadingShell stackId={stackId!} isRefreshing={isFetching} />
+  }
+
   const hasCompletedBuild =
     stack.hasCompletedBuild === true ||
     (stack.hasCompletedBuild === undefined && !!stack.updateStatus?.currentCoreSha)
 
   if (!hasCompletedBuild) {
     return (
-      <InitialBuildRequiredPanel
-        stack={stack}
-        stackId={stackId!}
-        onRetryBuild={() => retryInitialBuildMutation.mutate()}
-        isRetrying={retryInitialBuildMutation.isPending}
-        onDelete={() => deleteMutation.mutate()}
-        isDeleting={deleteMutation.isPending}
-      />
+      <TabSuspense>
+        <InitialBuildRequiredPanel
+          stack={stack}
+          stackId={stackId!}
+          onRetryBuild={() => retryInitialBuildMutation.mutate()}
+          isRetrying={retryInitialBuildMutation.isPending}
+          onDelete={() => deleteMutation.mutate()}
+          isDeleting={deleteMutation.isPending}
+        />
+      </TabSuspense>
     )
   }
 
@@ -559,6 +591,8 @@ function StackDetailsPageContent() {
 
   // Per-service state presentation + action gating.
   const isServiceRunning = (svc: StackServiceDto) => svc.state === 'running'
+  const isServiceActive = (svc: StackServiceDto) =>
+    svc.state === 'running' || svc.state === 'restarting'
   const serviceStateDot = (state: string) => {
     if (state === 'running') return 'bg-green-500'
     if (state === 'restarting') return 'bg-yellow-400'
@@ -573,7 +607,7 @@ function StackDetailsPageContent() {
 
   // From Degraded (DB maintenance) Start brings the world/auth servers back up.
   const canStart = stack.status === StackStatus.Stopped || stack.status === StackStatus.Failed || stack.status === StackStatus.Degraded
-  const canStop = stack.status === StackStatus.Running || stack.status === StackStatus.Starting || stack.status === StackStatus.Degraded || stack.status === StackStatus.Initializing
+  const canStop = stack.status === StackStatus.Running || stack.status === StackStatus.Starting || stack.status === StackStatus.Degraded || stack.status === StackStatus.Initializing || stack.status === StackStatus.Failed
   const canRestart = stack.status === StackStatus.Running || stack.status === StackStatus.Degraded
   // Already in DB maintenance (Degraded) → button is disabled; use Start/Stop/Restart instead.
   const canDbMaintenance = stack.status === StackStatus.Running || stack.status === StackStatus.Stopped
@@ -758,13 +792,13 @@ function StackDetailsPageContent() {
             Delete
           </button>
         </div>
-        {isStackBusy && stackJob && (
+        {isStackBusy && stackJob && stackJob.action !== 'ApplyPublicHost' && (
           <p className="mt-2 text-sm text-gray-600 inline-flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
             {stackJob.message}
           </p>
         )}
-        {stackJob && !stackJob.isRunning && stackJob.phase === 'Failed' && (
+        {stackJob && !isStackJobRunning(stackJob) && stackJob.phase === 'Failed' && stackJob.action !== 'ApplyPublicHost' && (
           <p className="mt-2 text-sm text-red-600">
             {stackJob.message} {stackJob.error ?? ''}
           </p>
@@ -834,60 +868,80 @@ function StackDetailsPageContent() {
           {armoryRebuildError && (
             <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{armoryRebuildError}</div>
           )}
-          <ArmoryRebuildBanner
-            rebuildPending={armoryAssetsInfoQuery.data?.staticRebuildPending}
-            onRebuildError={setArmoryRebuildError}
-          />
+          <TabSuspense>
+            <ArmoryRebuildBanner
+              rebuildPending={armoryAssetsInfoQuery.data?.staticRebuildPending}
+              onRebuildError={setArmoryRebuildError}
+            />
+          </TabSuspense>
         </div>
       )}
 
       {/* Tab Content */}
       {activeTab === 'accounts' && (
-        <AccountsTab stackId={stackId!} />
+        <TabSuspense>
+          <AccountsTab stackId={stackId!} />
+        </TabSuspense>
       )}
 
       {activeTab === 'characters' && (
-        <CharactersTab stackId={stackId!} />
+        <TabSuspense>
+          <CharactersTab stackId={stackId!} />
+        </TabSuspense>
       )}
 
       {activeTab === 'realms' && (
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4">Realms</h2>
-          <RealmsTab stackId={stackId!} />
+          <TabSuspense>
+            <RealmsTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'patches' && (
-        <PatchesTab stackId={stackId!} />
+        <TabSuspense>
+          <PatchesTab stackId={stackId!} />
+        </TabSuspense>
       )}
 
       {activeTab === 'addons' && (
         <div className="mb-8">
-          <AddonsManager stackId={stackId!} />
+          <TabSuspense>
+            <AddonsManager stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'lua' && (
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4">Lua Scripts</h2>
-          <LuaScriptsTab stackId={stackId!} />
+          <TabSuspense>
+            <LuaScriptsTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'config' && (
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4">Server Configuration</h2>
-          <ServerConfigTab stackId={stackId!} />
+          <TabSuspense>
+            <ServerConfigTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'env' && (
-        <EnvironmentVariablesTab stack={stack} />
+        <TabSuspense>
+          <EnvironmentVariablesTab stack={stack} />
+        </TabSuspense>
       )}
 
       {activeTab === 'client' && (
         <div className="mb-8">
-          <ClientTab stackId={stackId!} />
+          <TabSuspense>
+            <ClientTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
@@ -900,7 +954,9 @@ function StackDetailsPageContent() {
               its own armory data, so it is uploaded per stack.
             </p>
           </div>
-          <ArmoryDataManager stackId={stackId!} />
+          <TabSuspense>
+            <ArmoryDataManager stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
@@ -912,55 +968,71 @@ function StackDetailsPageContent() {
               Choose this stack&rsquo;s armory theme template and optional advanced colors or wallpaper.
             </p>
           </div>
-          <ArmoryStylingTab stackId={stackId!} />
+          <TabSuspense>
+            <ArmoryStylingTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'armory-layout' && (
         <div className="mb-8">
-          <ArmoryLayoutTab
-            stackId={stackId!}
-            siteName={stack.stackName}
-            moduleIds={stack.configuration.moduleIds}
-            realmCount={realms?.length ?? 1}
-          />
+          <TabSuspense>
+            <ArmoryLayoutTab
+              stackId={stackId!}
+              siteName={stack.stackName}
+              moduleIds={stack.configuration.moduleIds}
+              realmCount={realms?.length ?? 1}
+            />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'armory-email' && (
         <div className="mb-8">
-          <ArmoryEmailTab stack={stack} />
+          <TabSuspense>
+            <ArmoryEmailTab stack={stack} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'modules' && (
         <div className="mb-8">
-          <StackModulesTab stack={stack} />
+          <TabSuspense>
+            <StackModulesTab stack={stack} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'revisions' && (
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4">Revisions</h2>
-          <RevisionsTab stackId={stackId!} />
+          <TabSuspense>
+            <RevisionsTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'launcher' && (
         <div className="mb-8">
-          <LauncherProfileTab stackId={stackId!} />
+          <TabSuspense>
+            <LauncherProfileTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'news' && (
         <div className="mb-8">
-          <StackNewsTab stackId={stackId!} />
+          <TabSuspense>
+            <StackNewsTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
       {activeTab === 'docker' && (
         <div className="mb-8">
-          <DockerTab stackId={stackId!} />
+          <TabSuspense>
+            <DockerTab stackId={stackId!} />
+          </TabSuspense>
         </div>
       )}
 
@@ -1013,180 +1085,21 @@ function StackDetailsPageContent() {
 
       {activeTab === 'overview' && (
         <>
-      {diskUsage?.isWarning && (
-        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <h2 className="font-semibold text-amber-950">Docker disk space is running low</h2>
-          <p className="mt-1 text-sm text-amber-900">
-            The Docker engine is {diskUsage.usedPercent.toFixed(1)}% full ({formatBytes(diskUsage.usedBytes)} of{' '}
-            {formatBytes(diskUsage.totalBytes)} used). Use the <button type="button" onClick={() => selectTab('docker')} className="font-medium underline">Docker tab</button> to review unused images and reclaim disk space.
-          </p>
-        </div>
-      )}
-
-      {isExternalStack && stack.needsExternalReconnect && (
-        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <p className="text-sm text-amber-950">
-            This external stack needs SSH credentials to reach the remote Docker engine.{' '}
-            <button
-              type="button"
-              onClick={() => selectTab('vpc-overview')}
-              className="font-medium underline hover:text-amber-900"
-            >
-              Open VPC overview
-            </button>{' '}
-            to reconnect.
-          </p>
-        </div>
-      )}
-
-      {/* Module setup warnings */}
-      <ModuleSetupWarnings stack={stack} />
-
-      {stack.configuration.armoryAccounts?.useEmailConfirmation &&
-        !stack.configuration.armoryAccounts.emailConfigured && (
-        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="font-semibold text-amber-950">Complete email setup</h2>
-              <p className="mt-1 text-sm text-amber-900">
-                Email confirmation is enabled for this stack, but SMTP is not configured yet. Armory
-                registration stays disabled until email delivery is set up.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => selectTab('armory-email')}
-              className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
-            >
-              Configure email
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Missing per-stack data prompt (base client / armory dataset) */}
-      {(clientDataMissing || armoryDataMissing) && (
-        <div className="mb-8">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-amber-900 mb-2">Data needs uploading</h2>
-            <p className="text-sm text-amber-800 mb-4">
-              This stack is missing data that must be uploaded per stack. Upload it so the launcher and
-              armory work correctly.
-            </p>
-            <div className="space-y-3 text-sm">
-              {clientDataMissing && (
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-2">
-                    <span className="text-amber-600 mt-0.5">●</span>
-                    <div>
-                      <div className="font-medium text-amber-900">Base client not uploaded</div>
-                      <div className="text-amber-700 text-xs mt-1">
-                        The client container has no base WoW client to serve to the launcher.
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => selectTab('client')}
-                    className="shrink-0 px-3 py-1.5 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 transition"
-                  >
-                    Upload client
-                  </button>
-                </div>
-              )}
-              {armoryDataMissing && (
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-2">
-                    <span className="text-amber-600 mt-0.5">●</span>
-                    <div>
-                      <div className="font-medium text-amber-900">Armory data not uploaded</div>
-                      <div className="text-amber-700 text-xs mt-1">
-                        The 3D model-viewer dataset is missing, so the armory viewer is disabled.
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => selectTab('armory')}
-                    className="shrink-0 px-3 py-1.5 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 transition"
-                  >
-                    Upload armory data
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Updates Available Section */}
-      {stack.updateStatus?.hasUpdates && (
-        <div className="mb-8">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
-                <h2 className="text-xl font-semibold text-amber-900 mb-2">Updates Available</h2>
-                <p className="text-sm text-amber-800 mb-3">
-                  New versions are available for this stack. Update to get the latest features and bug fixes.
-                </p>
-                {/* CI Build Status Badge */}
-                {stack.updateStatus.latestCoreBuildStatus && (
-                  <div className="mb-3">
-                    <CiBuildStatusBadge 
-                      status={stack.updateStatus.latestCoreBuildStatus} 
-                      showDetails={false}
-                    />
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => setShowUpdateDialog(true)}
-                disabled={stack.status === StackStatus.Building}
-                className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 transition ml-4"
-                title={stack.status === StackStatus.Building ? 'Wait for build to finish' : 'Update stack'}
-              >
-                Update Stack
-              </button>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              {stack.updateStatus.isCoreOutdated && (
-                <div className="flex items-start gap-2">
-                  <span className="text-amber-600 mt-0.5">●</span>
-                  <div className="flex-1">
-                    <div className="font-medium text-amber-900">AzerothCore Server</div>
-                    <div className="text-amber-700 text-xs font-mono mt-1">
-                      {formatSha(stack.updateStatus.currentCoreSha)} → {formatSha(stack.updateStatus.latestCoreSha)}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {stack.updateStatus.outdatedModules.map((module) => (
-                <div key={module.moduleId} className="flex items-start gap-2">
-                  <span className="text-amber-600 mt-0.5">●</span>
-                  <div className="flex-1">
-                    <div className="font-medium text-amber-900">{module.moduleName}</div>
-                    <div className="text-amber-700 text-xs font-mono mt-1">
-                      {formatSha(module.currentCommitSha)} → {formatSha(module.latestCommitSha)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {stack.updateStatus.lastCheckedAt && (
-                <div className="text-xs text-amber-700 pt-2 border-t border-amber-200 flex items-center justify-between">
-                  <span>Last checked: {formatRelativeTime(stack.updateStatus.lastCheckedAt)}</span>
-                  {checkUpdatesMutation.isPending && (
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                      Checking...
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <TabSuspense>
+        <StackOverviewStatusPanel
+          stack={stack}
+          isExternalStack={isExternalStack}
+          isLiveStatusRefreshing={isLiveStatusRefreshing}
+          diskUsage={diskUsage}
+          clientDataMissing={clientDataMissing}
+          armoryDataMissing={armoryDataMissing}
+          armoryRebuildPending={armoryAssetsInfoQuery.data?.staticRebuildPending}
+          checkUpdatesPending={checkUpdatesMutation.isPending}
+          onSelectTab={selectTab}
+          onOpenUpdateDialog={() => setShowUpdateDialog(true)}
+          onArmoryRebuildError={setArmoryRebuildError}
+        />
+      </TabSuspense>
 
       {/* Containers / Services Section */}
       <div className="mb-8">
@@ -1195,15 +1108,18 @@ function StackDetailsPageContent() {
           {stack.services.map((svc) => {
             const running = isServiceRunning(svc)
             const isArmoryService = svc.service === 'frontend-armory'
-            // The armory runs as a detached background job, so its busy state comes from the job hook
-            // (not just this request's mutation) and survives page refreshes.
+            const isClientService = svc.service === 'client'
+            // Armory and client run as detached background jobs, so their busy state comes from the job
+            // hooks (not just this request's mutation) and survives page refreshes.
             const busy =
               (serviceActionMutation.isPending && pendingService === svc.service) ||
-              (isArmoryService && isArmoryBusy)
+              (isArmoryService && isArmoryBusy) ||
+              (isClientService && isClientBusy)
             const actionsDisabled =
               pendingService !== null ||
               stack.status === StackStatus.Building ||
-              (isArmoryService && isArmoryBusy)
+              (isArmoryService && isArmoryBusy) ||
+              (isClientService && isClientBusy)
             const runAction = (action: StackServiceAction) =>
               serviceActionMutation.mutate({ service: svc.service, action })
             const actionBtn =
@@ -1234,30 +1150,45 @@ function StackDetailsPageContent() {
                   {busy && (
                     <span className="inline-flex items-center gap-1 text-xs text-gray-500">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />{' '}
-                      {isArmoryService && armoryJob?.isRunning ? armoryJob.message : 'Working…'}
+                      {isArmoryService && armoryJob?.isRunning
+                        ? armoryJob.message
+                        : isClientService && clientJob?.isRunning
+                          ? clientJob.message
+                          : 'Working…'}
                     </span>
                   )}
-                  {!busy && running && (
+                  {!busy && isServiceActive(svc) && (
                     <>
                       <button
                         onClick={() => runAction('stop')}
                         disabled={actionsDisabled}
-                        className={`${actionBtn} bg-red-50 text-red-700 hover:bg-red-100`}
-                        title="Stop this container"
+                        className={
+                          svc.state === 'restarting'
+                            ? `${actionBtn} bg-red-800 text-white hover:bg-red-900`
+                            : `${actionBtn} bg-red-50 text-red-700 hover:bg-red-100`
+                        }
+                        title={
+                          svc.state === 'restarting'
+                            ? 'Force stop this crash-looping container (removes it so restart policies cannot respawn it)'
+                            : 'Stop this container'
+                        }
                       >
-                        <Square className="h-3.5 w-3.5" /> Stop
+                        <Square className="h-3.5 w-3.5" />{' '}
+                        {svc.state === 'restarting' ? 'Force stop' : 'Stop'}
                       </button>
-                      <button
-                        onClick={() => runAction('restart')}
-                        disabled={actionsDisabled}
-                        className={`${actionBtn} bg-blue-50 text-blue-700 hover:bg-blue-100`}
-                        title="Restart this container"
-                      >
-                        <RotateCw className="h-3.5 w-3.5" /> Restart
-                      </button>
+                      {svc.state === 'running' && (
+                        <button
+                          onClick={() => runAction('restart')}
+                          disabled={actionsDisabled}
+                          className={`${actionBtn} bg-blue-50 text-blue-700 hover:bg-blue-100`}
+                          title="Restart this container"
+                        >
+                          <RotateCw className="h-3.5 w-3.5" /> Restart
+                        </button>
+                      )}
                     </>
                   )}
-                  {!busy && !running && (
+                  {!busy && !isServiceActive(svc) && (
                     <button
                       onClick={() => runAction('start')}
                       disabled={actionsDisabled}
@@ -1303,10 +1234,18 @@ function StackDetailsPageContent() {
         <h2 className="text-xl font-semibold mb-4">Configuration</h2>
         <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-6">
           {/* Realmlist host override (propagates to the launcher client on save) */}
-          {stackId && <RealmlistOverrideField stackId={stackId} />}
+          {stackId && (
+            <TabSuspense>
+              <RealmlistOverrideField stackId={stackId} />
+            </TabSuspense>
+          )}
 
           {/* Armory + client web access (host ports + publish bind interface) */}
-          {stackId && <ArmoryNetworkField stackId={stackId} />}
+          {stackId && (
+            <TabSuspense>
+              <ArmoryNetworkField stackId={stackId} />
+            </TabSuspense>
+          )}
 
           {/* Ports */}
           <div>
@@ -1511,10 +1450,27 @@ function StackDetailsPageContent() {
         </>
       )}
 
-      {activeTab === 'vpc-overview' && isExternalStack && (
-        <div className="mb-8 space-y-4">
-          <ExternalReconnectPanel stack={stack} />
-          <ExternalVpcSecurityPanel stack={stack} />
+      {activeTab === 'vpc-ssh' && isExternalStack && (
+        <div className="mb-8">
+          <TabSuspense>
+            <ExternalReconnectPanel stack={stack} />
+          </TabSuspense>
+        </div>
+      )}
+
+      {activeTab === 'vpc-security' && isExternalStack && (
+        <div className="mb-8">
+          <TabSuspense>
+            <ExternalVpcSecurityPanel stack={stack} />
+          </TabSuspense>
+        </div>
+      )}
+
+      {activeTab === 'vpc-logs' && isExternalStack && (
+        <div className="mb-8">
+          <TabSuspense>
+            <ExternalVpcLogsPanel stack={stack} />
+          </TabSuspense>
         </div>
       )}
 
@@ -1522,10 +1478,21 @@ function StackDetailsPageContent() {
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md mx-4">
-            <h3 className="text-xl font-semibold mb-4">Delete Stack?</h3>
+            <h3 className="text-xl font-semibold mb-4">
+              {isExternalStack ? 'Remove VPC stack from manager?' : 'Delete Stack?'}
+            </h3>
             <p className="text-gray-600 mb-6">
-              Are you sure you want to delete <strong>{stack.stackName}</strong>? 
-              This will remove all containers, images, and build files. This action cannot be undone.
+              {isExternalStack ? (
+                <>
+                  Remove <strong>{stack.stackName}</strong> from this manager? Remote containers on the VPC
+                  will keep running — only the manager record, SSH connection, and local build files are removed.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to delete <strong>{stack.stackName}</strong>? This will remove all
+                  containers, images, and build files. This action cannot be undone.
+                </>
+              )}
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -1542,7 +1509,11 @@ function StackDetailsPageContent() {
                 disabled={deleteMutation.isPending}
                 className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition"
               >
-                {deleteMutation.isPending ? 'Deleting...' : 'Delete Stack'}
+                {deleteMutation.isPending
+                  ? 'Removing…'
+                  : isExternalStack
+                    ? 'Remove from manager'
+                    : 'Delete Stack'}
               </button>
             </div>
           </div>
@@ -1551,31 +1522,37 @@ function StackDetailsPageContent() {
 
       {/* Edit Configuration Modal */}
       {showEditModal && (
-        <EditStackConfigModal
-          stack={stack}
-          onClose={() => setShowEditModal(false)}
-        />
+        <TabSuspense>
+          <EditStackConfigModal
+            stack={stack}
+            onClose={() => setShowEditModal(false)}
+          />
+        </TabSuspense>
       )}
 
       {/* Update Stack Dialog */}
       {showUpdateDialog && stack.updateStatus && (
-        <UpdateStackDialog
-          stackName={stack.stackName}
-          updateStatus={stack.updateStatus}
-          onConfirm={(mode) => updateStackMutation.mutate(mode)}
-          onCancel={() => setShowUpdateDialog(false)}
-          isUpdating={updateStackMutation.isPending}
-        />
+        <TabSuspense>
+          <UpdateStackDialog
+            stackName={stack.stackName}
+            updateStatus={stack.updateStatus}
+            onConfirm={(mode) => updateStackMutation.mutate(mode)}
+            onCancel={() => setShowUpdateDialog(false)}
+            isUpdating={updateStackMutation.isPending}
+          />
+        </TabSuspense>
       )}
 
       {/* Rebuild Stack Dialog */}
       {showRebuildDialog && (
-        <RebuildStackDialog
-          stackName={stack.stackName}
-          onConfirm={(mode) => rebuildMutation.mutate(mode)}
-          onCancel={() => setShowRebuildDialog(false)}
-          isRebuilding={rebuildMutation.isPending}
-        />
+        <TabSuspense>
+          <RebuildStackDialog
+            stackName={stack.stackName}
+            onConfirm={(mode) => rebuildMutation.mutate(mode)}
+            onCancel={() => setShowRebuildDialog(false)}
+            isRebuilding={rebuildMutation.isPending}
+          />
+        </TabSuspense>
       )}
     </div>
   )

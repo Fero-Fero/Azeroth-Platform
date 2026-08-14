@@ -1,51 +1,72 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { isStackJobRunning, mergeStackJobStatus, normalizeStackJobStatus } from '@/lib/stackJob'
 import { useSignalR } from './useSignalR'
 import { stackApi } from '@/services/api'
 import type { StackJobStatus } from '@/types/stack.types'
 
-const POLL_INTERVAL_MS = 3000
+const POLL_INTERVAL_MS = 2000
+const POST_TERMINAL_POLL_MS = 15000
 
 /**
- * Tracks the detached stack lifecycle background job (start/stop/restart/start-database) for a stack.
- * Reattaches after navigating away or a page refresh by fetching the current status on mount and
- * subscribing to the SignalR stream for live updates. Falls back to polling while a job is running in
+ * Tracks the detached stack lifecycle background job (start/stop/restart/start-database/apply-public-host)
+ * for a stack. Reattaches after navigating away or a page refresh by fetching the current status on mount
+ * and subscribing to the SignalR stream for live updates. Falls back to polling while a job is running in
  * case a SignalR event is missed. Mirrors {@link useArmoryJob}.
  */
 export function useStackJob(stackId: string | null) {
   const [job, setJob] = useState<StackJobStatus | null>(null)
   const jobRef = useRef<StackJobStatus | null>(null)
+  const pollUntilRef = useRef<number>(0)
 
-  const setJobBoth = (next: StackJobStatus | null) => {
+  const setJobBoth = useCallback((next: StackJobStatus | null) => {
     jobRef.current = next
     setJob(next)
-  }
+    if (next && isStackJobRunning(next)) {
+      pollUntilRef.current = Date.now() + POST_TERMINAL_POLL_MS
+    }
+  }, [])
 
   const { on, invoke, getState } = useSignalR({
     hubUrl: '/hubs/stack-progress',
     autoConnect: !!stackId,
   })
 
-  // Initial fetch (reattach) + polling fallback while a job is running.
+  const pollNow = useCallback(async () => {
+    if (!stackId) return
+
+    try {
+      const res = await stackApi.jobStatus(stackId)
+      const merged = mergeStackJobStatus(jobRef.current, res.data ?? null)
+      if (merged) {
+        setJobBoth(merged)
+      } else if (
+        jobRef.current?.action === 'ApplyPublicHost'
+        && !isStackJobRunning(jobRef.current)
+      ) {
+        setJobBoth(null)
+      }
+    } catch {
+      // Non-fatal; SignalR may still deliver updates.
+    }
+  }, [stackId, setJobBoth])
+
+  // Initial fetch (reattach) + polling fallback while a job is running or recently finished.
   useEffect(() => {
     if (!stackId) return
 
     let cancelled = false
 
     const poll = async () => {
-      try {
-        const res = await stackApi.jobStatus(stackId)
-        if (!cancelled && res.data) {
-          setJobBoth(res.data)
-        }
-      } catch {
-        // Non-fatal; SignalR may still deliver updates.
-      }
+      if (cancelled) return
+      await pollNow()
     }
 
     poll()
     const intervalId = setInterval(() => {
-      if (jobRef.current?.isRunning) {
-        poll()
+      const shouldPoll =
+        isStackJobRunning(jobRef.current) || Date.now() < pollUntilRef.current
+      if (shouldPoll) {
+        void poll()
       }
     }, POLL_INTERVAL_MS)
 
@@ -53,7 +74,7 @@ export function useStackJob(stackId: string | null) {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [stackId])
+  }, [stackId, pollNow])
 
   // Subscribe to live updates.
   useEffect(() => {
@@ -77,7 +98,10 @@ export function useStackJob(stackId: string | null) {
 
     const cleanup = on('StackJobUpdated', (status: StackJobStatus) => {
       if (status?.stackId === stackId) {
-        setJobBoth(status)
+        const merged = mergeStackJobStatus(jobRef.current, status)
+        if (merged) {
+          setJobBoth(merged)
+        }
       }
     })
 
@@ -87,15 +111,21 @@ export function useStackJob(stackId: string | null) {
       }
       cleanup()
     }
-  }, [stackId, on, invoke, getState])
+  }, [stackId, on, invoke, getState, setJobBoth])
 
-  const isRunning = job?.isRunning ?? false
+  const isRunning = isStackJobRunning(job)
 
-  // Lets callers (the trigger buttons) seed the status returned by the enqueue request so the UI reflects
-  // the job instantly and the polling fallback engages even before SignalR delivers an event.
-  const applyStatus = (status: StackJobStatus | null | undefined) => {
-    if (status) setJobBoth(status)
-  }
+  const applyStatus = useCallback(
+    (status: StackJobStatus | null | undefined) => {
+      if (!status) return
+      const normalized = normalizeStackJobStatus(status)
+      if (!normalized) return
+      setJobBoth(normalized)
+      pollUntilRef.current = Date.now() + POST_TERMINAL_POLL_MS
+      void pollNow()
+    },
+    [pollNow, setJobBoth],
+  )
 
   return { job, isStackBusy: isRunning, applyStatus }
 }

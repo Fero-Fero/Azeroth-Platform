@@ -9,6 +9,18 @@ namespace AzerothPlatform.Infrastructure.Services;
 public static class DockerComposeOverrideGenerator
 {
     /// <summary>
+    /// Compose service name for MySQL. Stack containers on the default project network should reach the
+    /// database here on <see cref="InternalDatabasePort"/> instead of via the host-published port
+    /// (which is often bound to 127.0.0.1 only and unreachable from other containers).
+    /// </summary>
+    public const string InternalDatabaseHost = "ac-database";
+
+    public const int InternalDatabasePort = 3306;
+
+    /// <summary>Custom network declared by the upstream AzerothCore compose file; all stack services must join it.</summary>
+    public const string AcNetworkName = "ac-network";
+
+    /// <summary>
     /// The Docker Compose project name for a stack. This is intentionally id-only and stable: it
     /// drives the compose project label, named volumes, network and all lifecycle commands, so it
     /// must not change when a stack is renamed (that would orphan its data volume).
@@ -215,6 +227,12 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine($"    name: {name}");
     }
 
+    private static void AppendAcNetwork(StringBuilder sb)
+    {
+        sb.AppendLine("    networks:");
+        sb.AppendLine($"      - {AcNetworkName}");
+    }
+
     /// <summary>
     /// Per-stack self-contained client file server (<c>azeroth-platform-client</c>). Mounts a shared
     /// read-only base client layer plus this stack's read-write overlay (published patch MPQs) and a
@@ -240,10 +258,10 @@ public static class DockerComposeOverrideGenerator
         }
         sb.AppendLine($"    container_name: {containerName}");
         sb.AppendLine("    restart: unless-stopped");
-        // The container verifies player logins against the stack's auth DB over the host's published DB
-        // port, so it needs host.docker.internal to resolve (same as the armory).
-        sb.AppendLine("    extra_hosts:");
-        sb.AppendLine("      - \"host.docker.internal:host-gateway\"");
+        sb.AppendLine("    depends_on:");
+        sb.AppendLine($"      {InternalDatabaseHost}:");
+        sb.AppendLine("        condition: service_healthy");
+        AppendAcNetwork(sb);
         sb.AppendLine("    environment:");
         var defaults = new List<(string, string)>
         {
@@ -313,13 +331,14 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine("      timeout: 5s");
         sb.AppendLine("      retries: 3");
         sb.AppendLine("      start_period: 10s");
+        AppendAcNetwork(sb);
     }
 
     /// <summary>
     /// Per-stack armory (frontend-armory) service definition. Not part of the AzerothCore base
-    /// compose, so it is added here as a new service. It reaches the stack's MySQL over the host's
-    /// published DB port (host.docker.internal) using the stack root credentials, and is only
-    /// started/stopped explicitly (never by <c>up -d</c> of the whole stack unless requested).
+    /// compose, so it is added here as a new service. It reaches MySQL over the compose network
+    /// (<see cref="InternalDatabaseHost"/>:<see cref="InternalDatabasePort"/>) using the scoped
+    /// <c>acore_armory</c> user, and is only started/stopped explicitly.
     /// </summary>
     private static void AppendArmoryService(
         StringBuilder sb,
@@ -342,19 +361,41 @@ public static class DockerComposeOverrideGenerator
         }
         sb.AppendLine($"    container_name: {containerName}");
         sb.AppendLine("    restart: unless-stopped");
-        sb.AppendLine("    extra_hosts:");
-        sb.AppendLine("      - \"host.docker.internal:host-gateway\"");
-
-        // Bring up the per-stack asset sidecar with the armory and let the armory resolve it by
-        // service name on the project's default network (see AppendArmoryAssetsService).
-        if (armory.AssetsAvailable)
+        sb.AppendLine("    depends_on:");
+        sb.AppendLine($"      {InternalDatabaseHost}:");
+        sb.AppendLine("        condition: service_healthy");
+        if (!string.IsNullOrWhiteSpace(armory.ClientPortalUrl))
         {
-            sb.AppendLine("    depends_on:");
-            sb.AppendLine("      - armory-assets");
-            sb.AppendLine("    volumes:");
-            sb.AppendLine($"      - {ArmoryAssetsVolumeKey}:/armory-assets:ro");
+            sb.AppendLine($"      {ClientService}:");
+            sb.AppendLine("        condition: service_started");
         }
 
+        // Bring up the per-stack asset sidecar with the armory and let the armory resolve it by
+        // service name on ac-network (see AppendArmoryAssetsService).
+        if (armory.AssetsAvailable)
+        {
+            sb.AppendLine("      armory-assets:");
+            sb.AppendLine("        condition: service_started");
+        }
+
+        var mountLauncherDist = !string.IsNullOrWhiteSpace(armory.ClientPortalUrl);
+        if (armory.AssetsAvailable || mountLauncherDist)
+        {
+            sb.AppendLine("    volumes:");
+            if (armory.AssetsAvailable)
+            {
+                sb.AppendLine($"      - {ArmoryAssetsVolumeKey}:/armory-assets:ro");
+            }
+
+            if (mountLauncherDist)
+            {
+                // Same launcher-dist volume the client container uses — the armory serves downloads
+                // directly from disk so players are not blocked when the client service is stopped.
+                sb.AppendLine("      - client_launcher:/launcher-dist:ro");
+            }
+        }
+
+        AppendAcNetwork(sb);
         sb.AppendLine("    environment:");
         var defaults = new List<(string, string)>
         {
@@ -402,9 +443,10 @@ public static class DockerComposeOverrideGenerator
             ("PLATFORM_API_URL", armory.PlatformApiUrl),
             ("PLATFORM_PUBLIC_URL", publicUrl),
             ("PLATFORM_STACK_ID", armory.StackId),
-            // This stack's own client container: the armory serves the launcher exe from here so the
-            // download never depends on the central manager.
+            // This stack's own client container: kept for backwards-compatible HTTP fallback only.
             ("CLIENT_PORTAL_URL", armory.ClientPortalUrl),
+            // Read-only mount of the stack's launcher-dist volume for direct exe downloads on /connect.
+            ("CLIENT_LAUNCHER_DIST_DIR", mountLauncherDist ? "/launcher-dist" : ""),
         };
 
         if (armory.EmailConfirmationEnabled && armory.EmailConfigured && armory.Email is not null)
@@ -461,6 +503,7 @@ public static class DockerComposeOverrideGenerator
             "PLATFORM_PUBLIC_URL",
             "PLATFORM_STACK_ID",
             "CLIENT_PORTAL_URL",
+            "CLIENT_LAUNCHER_DIST_DIR",
         };
 
         EmitMergedEnv(sb, defaults, overrides, protectedKeys);
@@ -802,9 +845,9 @@ public sealed record ClientComposeOptions
     /// <summary>Whether the container verifies player logins against the stack auth DB (POST /login).</summary>
     public bool LoginEnabled { get; init; }
 
-    /// <summary>Auth DB host reachable from the client container (host.docker.internal + published port).</summary>
-    public string DbHost { get; init; } = "host.docker.internal";
-    public int DbPort { get; init; }
+    /// <summary>Auth DB host reachable from sibling stack containers on the compose network.</summary>
+    public string DbHost { get; init; } = DockerComposeOverrideGenerator.InternalDatabaseHost;
+    public int DbPort { get; init; } = DockerComposeOverrideGenerator.InternalDatabasePort;
     public string DbUser { get; init; } = "root";
     public string DbPassword { get; init; } = string.Empty;
 

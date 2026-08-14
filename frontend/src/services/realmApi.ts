@@ -1,5 +1,5 @@
 import apiClient from './api'
-import type { RealmDto, CreateRealmRequest, UpdateRealmRequest } from '@/types/realm.types'
+import type { RealmDto, CreateRealmRequest, UpdateRealmRequest, SetRealmAddressResponse } from '@/types/realm.types'
 
 export const realmApi = {
   // List all realms for a stack
@@ -16,5 +16,5 @@ export const realmApi = {
 
   // Set the address (host/IP) clients are redirected to for this stack's realms
   setAddress: (stackId: string, host: string) =>
-    apiClient.put<RealmDto[]>(`/stacks/${stackId}/realms/address`, { host }),
+    apiClient.put<SetRealmAddressResponse>(`/stacks/${stackId}/realms/address`, { host }),
 }

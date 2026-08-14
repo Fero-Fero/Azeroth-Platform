@@ -52,7 +52,8 @@ public sealed class ClientService : IClientService
 
     public async Task<ClientBaseInfoDto> GetBaseInfoAsync(string stackId, CancellationToken cancellationToken = default)
     {
-        var stack = await GetStackAsync(stackId, cancellationToken);
+        var stack = await GetStackAsync(stackId, cancellationToken)
+            ?? throw new InvalidOperationException("Stack was not found.");
         var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, ClientBaseVolume(stackId), cancellationToken);
         return BuildInfo(stackId, summary);
     }
@@ -565,10 +566,26 @@ public sealed class ClientService : IClientService
     private static ClientBaseInfoDto BuildInfo(string stackId, VolumeTreeSummary summary)
     {
         var volumeName = ClientBaseVolume(stackId);
+        var exists = summary.HasWowExe || summary.HasDataMpq || summary.FileCount > 0;
+        string? inspectionWarning = null;
+        if (summary.InspectionFailed)
+        {
+            inspectionWarning = string.IsNullOrWhiteSpace(summary.InspectionError)
+                ? "The client-base volume exists but the manager could not read its contents. Check that the stack's Docker engine is reachable."
+                : summary.InspectionError.Trim();
+        }
+        else if (summary.VolumeExists && !exists)
+        {
+            inspectionWarning =
+                "The client-base Docker volume exists on the stack engine but appears empty. Re-upload the client if you removed it intentionally.";
+        }
+
         return new ClientBaseInfoDto
         {
             GamePath = $"docker://{volumeName}",
-            Exists = summary.FileCount > 0,
+            Exists = exists,
+            VolumeExists = summary.VolumeExists,
+            InspectionWarning = inspectionWarning,
             FileCount = summary.FileCount,
             TotalSize = summary.TotalBytes,
             HasWowExe = summary.HasWowExe,

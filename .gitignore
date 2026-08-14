@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+*-PLAN.md
 
 # Runtime data directory (stacks/builds/client), created at the repo root.
 # Leading slash anchors it to the repo root so it never matches source folders such as

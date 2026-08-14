@@ -19,6 +19,7 @@ public class StacksController : ControllerBase
     private readonly IStackConfigurationValidator _stackConfigurationValidator;
     private readonly IStackDiscoveryService _stackDiscoveryService;
     private readonly IArmoryJobService _armoryJobService;
+    private readonly IClientJobService _clientJobService;
     private readonly IStackJobService _stackJobService;
     private readonly IStackDockerService _stackDockerService;
     private readonly IArmoryAccountsService _armoryAccountsService;
@@ -29,6 +30,7 @@ public class StacksController : ControllerBase
         IStackConfigurationValidator stackConfigurationValidator,
         IStackDiscoveryService stackDiscoveryService,
         IArmoryJobService armoryJobService,
+        IClientJobService clientJobService,
         IStackJobService stackJobService,
         IStackDockerService stackDockerService,
         IArmoryAccountsService armoryAccountsService)
@@ -38,6 +40,7 @@ public class StacksController : ControllerBase
         _stackConfigurationValidator = stackConfigurationValidator;
         _stackDiscoveryService = stackDiscoveryService;
         _armoryJobService = armoryJobService;
+        _clientJobService = clientJobService;
         _stackJobService = stackJobService;
         _stackDockerService = stackDockerService;
         _armoryAccountsService = armoryAccountsService;
@@ -47,6 +50,18 @@ public class StacksController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<StackDetailsDto>>> GetAll(CancellationToken cancellationToken = default)
     {
         var stacks = await _stackService.ListAsync(cancellationToken);
+        return Ok(stacks);
+    }
+
+    /// <summary>
+    /// Probes live Docker status for every stack (SSH for VPC stacks). Cached for subsequent list
+    /// requests until the next probe or a stack detail refresh.
+    /// </summary>
+    [HttpPost("probe-status")]
+    public async Task<ActionResult<IReadOnlyList<StackDetailsDto>>> ProbeAllStacks(
+        CancellationToken cancellationToken = default)
+    {
+        var stacks = await _stackService.ProbeAllStacksForListAsync(cancellationToken);
         return Ok(stacks);
     }
 
@@ -135,6 +150,41 @@ public class StacksController : ControllerBase
         try
         {
             var result = await _stackService.SyncVpcFirewallAsync(stackId, cancellationToken);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{stackId}/vpc-firewall-status")]
+    public async Task<ActionResult<VpcFirewallStatusDto>> GetVpcFirewallStatus(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var status = await _stackService.GetVpcFirewallStatusAsync(stackId, cancellationToken);
+        return status is null ? NotFound() : Ok(status);
+    }
+
+    [HttpGet("{stackId}/vpc-ssh-logs")]
+    public async Task<ActionResult<VpcSshLogsDto>> GetVpcSshLogs(
+        string stackId,
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var logs = await _stackService.GetVpcSshLogsAsync(stackId, limit, cancellationToken);
+        return logs is null ? NotFound() : Ok(logs);
+    }
+
+    [HttpPost("{stackId}/provision-vpc-docker")]
+    public async Task<ActionResult<RemoteSetupResultDto>> ProvisionVpcDocker(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _stackService.ProvisionVpcDockerAsync(stackId, cancellationToken);
             return result is null ? NotFound() : Ok(result);
         }
         catch (InvalidOperationException ex)
@@ -303,6 +353,16 @@ public class StacksController : ControllerBase
         return Accepted(job);
     }
 
+    /// <summary>
+    /// Force-stops a stack even when a lifecycle job is already running (e.g. auth crash-looping during start).
+    /// </summary>
+    [HttpPost("{stackId}/force-stop")]
+    public IActionResult ForceStop(string stackId)
+    {
+        var job = _stackJobService.Enqueue(stackId, StackJobAction.Stop, supersedeRunning: true);
+        return Accepted(job);
+    }
+
     [HttpPost("{stackId}/restart")]
     public IActionResult Restart(string stackId)
     {
@@ -337,6 +397,26 @@ public class StacksController : ControllerBase
     public ActionResult<ArmoryJobStatusDto?> GetArmoryStatus(string stackId)
     {
         return Ok(_armoryJobService.GetStatus(stackId));
+    }
+
+    [HttpPost("{stackId}/client/start")]
+    public IActionResult StartClient(string stackId)
+    {
+        var job = _clientJobService.Enqueue(stackId, ClientJobAction.Start);
+        return Accepted(job);
+    }
+
+    [HttpPost("{stackId}/client/stop")]
+    public IActionResult StopClient(string stackId)
+    {
+        var job = _clientJobService.Enqueue(stackId, ClientJobAction.Stop);
+        return Accepted(job);
+    }
+
+    [HttpGet("{stackId}/client/status")]
+    public ActionResult<ClientJobStatusDto?> GetClientStatus(string stackId)
+    {
+        return Ok(_clientJobService.GetStatus(stackId));
     }
 
     [HttpGet("{stackId}/armory/network")]
@@ -410,6 +490,19 @@ public class StacksController : ControllerBase
                 _ => ArmoryJobAction.Start
             };
             var job = _armoryJobService.Enqueue(stackId, armoryAction);
+            return Accepted(job);
+        }
+
+        if (string.Equals(service, "client", StringComparison.OrdinalIgnoreCase))
+        {
+            var clientAction = parsedAction switch
+            {
+                StackServiceAction.Stop => ClientJobAction.Stop,
+                StackServiceAction.Restart => ClientJobAction.Restart,
+                StackServiceAction.Recreate => ClientJobAction.Recreate,
+                _ => ClientJobAction.Start
+            };
+            var job = _clientJobService.Enqueue(stackId, clientAction);
             return Accepted(job);
         }
 

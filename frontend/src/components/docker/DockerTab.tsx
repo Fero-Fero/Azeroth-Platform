@@ -147,9 +147,15 @@ export default function DockerTab({ stackId }: DockerTabProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-gray-600">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading Docker resources…
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading Docker resources…
+        </div>
+        <p className="max-w-2xl text-xs text-gray-500">
+          External stacks query the remote Docker engine over SSH. This usually takes 10–30 seconds on
+          first load.
+        </p>
       </div>
     )
   }
@@ -209,6 +215,13 @@ export default function DockerTab({ stackId }: DockerTabProps) {
         onDismissNotice={() => setNotice(null)}
         onDismissError={() => setActionError(null)}
       />
+
+      {data.remoteStatsLimited && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          This stack runs on a remote VPC engine. Some daemon-wide stats (dangling layers, unused images,
+          Docker layer breakdown) are omitted here to keep the tab responsive over SSH.
+        </div>
+      )}
 
       <StackDockerSectionTabs
         active={section}

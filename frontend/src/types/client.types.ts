@@ -4,6 +4,8 @@
  */
 export interface ClientBaseInfoDto {
   exists: boolean
+  volumeExists?: boolean
+  inspectionWarning?: string | null
   fileCount: number
   totalSize: number
   hasWowExe: boolean

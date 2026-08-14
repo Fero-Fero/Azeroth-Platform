@@ -86,6 +86,15 @@ public sealed class StackImageShippingService : IStackImageShippingService
             try
             {
                 var localTag = await EnsureLocalImageTagAsync(tag, cancellationToken);
+                if (await _remoteEngine.RemoteImageExistsAsync(stack, localTag, cancellationToken))
+                {
+                    _logger.LogInformation(
+                        "Image {Image} already exists on remote engine for stack {StackId}; skipping ship.",
+                        localTag,
+                        stack.Id);
+                    continue;
+                }
+
                 _logger.LogInformation("Shipping image {Image} to remote engine for stack {StackId}.", localTag, stack.Id);
                 await _remoteEngine.ShipImageAsync(stack, localTag, cancellationToken);
                 await EnsureRemoteImageTagAsync(stack, localTag, tag, cancellationToken);

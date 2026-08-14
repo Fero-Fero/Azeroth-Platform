@@ -11,11 +11,11 @@ const infoKey = armoryAssetsInfoKey
 const browseKey = (stackId: string) => ['armory-assets', stackId, 'browse']
 
 /** Current uploaded armory asset bundle summary for a stack (data + static). */
-export function useArmoryAssetsInfo(stackId: string) {
+export function useArmoryAssetsInfo(stackId: string, enabled = true) {
   return useQuery({
     queryKey: infoKey(stackId),
     queryFn: async () => (await armoryAssetsApi.getInfo(stackId)).data,
-    enabled: !!stackId,
+    enabled: enabled && !!stackId,
   })
 }
 
@@ -97,6 +97,25 @@ export function useUploadArmoryWallpaper(stackId: string) {
   })
 }
 
+/** Uploads a favicon for the armory site and marks the armory image for rebuild. */
+export function useUploadArmoryFavicon(stackId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ file, onProgress }: { file: File; onProgress?: (percent: number) => void }) =>
+      (await armoryAssetsApi.uploadFavicon(stackId, file, onProgress)).data,
+    onSuccess: (data) => qc.setQueryData(infoKey(stackId), data),
+  })
+}
+
+/** Removes the stack's uploaded armory favicon and marks the armory image for rebuild. */
+export function useDeleteArmoryFavicon(stackId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => (await armoryAssetsApi.deleteFavicon(stackId)).data,
+    onSuccess: (data) => qc.setQueryData(infoKey(stackId), data),
+  })
+}
+
 /** Uploads a model-viewer bundle (armory.data.zip / armory.textures.zip) for a stack. */
 export function useUploadArmoryData(stackId: string) {
   const qc = useQueryClient()
@@ -155,6 +174,20 @@ export function useRebuildArmoryImage(stackId: string) {
 export function useSyncArmoryDbcs(stackId: string) {
   return useMutation({
     mutationFn: async () => (await armoryAssetsApi.syncDbcs(stackId)).data,
+  })
+}
+
+/**
+ * Downloads the latest armory release bundles from GitHub and applies them to the stack.
+ */
+export function useDownloadArmoryRelease(stackId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => (await armoryAssetsApi.downloadRelease(stackId)).data,
+    onSuccess: (data) => {
+      qc.setQueryData(infoKey(stackId), data.info)
+      qc.invalidateQueries({ queryKey: browseKey(stackId) })
+    },
   })
 }
 

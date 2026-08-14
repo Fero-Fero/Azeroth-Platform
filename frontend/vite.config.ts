@@ -7,10 +7,12 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   build: {
+    // StackDetailsPage pulls many tab modules; individual lazy chunks can exceed the default 500 kB hint.
+    chunkSizeWarningLimit: 600,
     // SignalR ships misplaced /*#__PURE__*/ annotations that Rolldown warns on (aspnetcore#55286).
     rolldownOptions: {
       checks: {

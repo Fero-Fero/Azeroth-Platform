@@ -95,6 +95,44 @@ public class ArmoryAssetsController : ControllerBase
         }
     }
 
+    /// <summary>Returns the stack's uploaded armory favicon, if any.</summary>
+    [HttpGet("favicon")]
+    public ActionResult GetFavicon(string stackId)
+    {
+        var resolved = _assets.TryGetFaviconFile(stackId);
+        return resolved is null
+            ? NotFound()
+            : PhysicalFile(resolved.Value.Path, resolved.Value.ContentType);
+    }
+
+    /// <summary>Uploads a favicon for the stack's armory site and marks the armory image for rebuild.</summary>
+    [HttpPost("favicon")]
+    [RequestSizeLimit(2L * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 2L * 1024 * 1024)]
+    public async Task<ActionResult<ArmoryAssetsInfoDto>> UploadFavicon(
+        string stackId, [FromForm] IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { error = "No file was uploaded." });
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _assets.UploadFaviconAsync(stackId, file.FileName, stream, file.ContentType, cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>Removes the stack's uploaded armory favicon and marks the armory image for rebuild.</summary>
+    [HttpDelete("favicon")]
+    public async Task<ActionResult<ArmoryAssetsInfoDto>> DeleteFavicon(string stackId, CancellationToken cancellationToken)
+        => Ok(await _assets.DeleteFaviconAsync(stackId, cancellationToken));
+
     /// <summary>
     /// Lists one directory level of the stack's uploaded model-viewer dataset so it can be navigated in
     /// the file browser. <paramref name="path"/> is relative to the dataset root ('' = root); traversal
@@ -197,6 +235,24 @@ public class ArmoryAssetsController : ControllerBase
         {
             await using var stream = file.OpenReadStream();
             return Ok(await _assets.UploadStaticAsync(stackId, stream, cancellationToken));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Downloads <c>armory.data.zip</c>, <c>armory.textures.zip</c>, and <c>armory.static.zip</c> from the
+    /// configured GitHub release and applies them to the stack (same outcome as manual uploads).
+    /// </summary>
+    [HttpPost("download-release")]
+    public async Task<ActionResult<ArmoryReleaseDownloadResultDto>> DownloadRelease(
+        string stackId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _assets.DownloadLatestReleaseAssetsAsync(stackId, cancellationToken));
         }
         catch (InvalidOperationException ex)
         {

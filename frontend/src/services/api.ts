@@ -76,9 +76,12 @@ export const authApi = {
 export const stackApi = {
   // List all stacks
   list: () => apiClient.get<StackDetailsDto[]>('/stacks'),
+  probeAllStatus: () =>
+    apiClient.post<StackDetailsDto[]>('/stacks/probe-status', undefined, { timeout: 300_000 }),
   
   // Get stack details
-  get: (stackId: string) => apiClient.get<StackDetailsDto>(`/stacks/${stackId}`),
+  get: (stackId: string) =>
+    apiClient.get<StackDetailsDto>(`/stacks/${stackId}`, { timeout: 90_000 }),
   
   // Create stack
   create: (config: StackConfigurationDto) => 
@@ -102,6 +105,8 @@ export const stackApi = {
     apiClient.post<import('@/types/stack.types').StackJobStatus>(`/stacks/${stackId}/start-database`),
   stop: (stackId: string) =>
     apiClient.post<import('@/types/stack.types').StackJobStatus>(`/stacks/${stackId}/stop`),
+  forceStop: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').StackJobStatus>(`/stacks/${stackId}/force-stop`),
   restart: (stackId: string) =>
     apiClient.post<import('@/types/stack.types').StackJobStatus>(`/stacks/${stackId}/restart`),
   // Current lifecycle background-job status (null if none has run); used to reattach after navigating.
@@ -114,6 +119,12 @@ export const stackApi = {
   // Current armory background-job status (null if none has run); used to reattach after a refresh.
   armoryStatus: (stackId: string) =>
     apiClient.get<import('@/types/stack.types').ArmoryJobStatus | null>(`/stacks/${stackId}/armory/status`),
+  startClient: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').ClientJobStatus>(`/stacks/${stackId}/client/start`),
+  stopClient: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').ClientJobStatus>(`/stacks/${stackId}/client/stop`),
+  clientStatus: (stackId: string) =>
+    apiClient.get<import('@/types/stack.types').ClientJobStatus | null>(`/stacks/${stackId}/client/status`),
 
   // Player-facing HTTP network settings (armory/client host ports + publish bind interface).
   armoryNetwork: (stackId: string) =>
@@ -125,6 +136,22 @@ export const stackApi = {
   syncVpcFirewall: (stackId: string) =>
     apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
       `/stacks/${stackId}/sync-vpc-firewall`,
+      undefined,
+      { timeout: 300_000 },
+    ),
+  vpcFirewallStatus: (stackId: string) =>
+    apiClient.get<import('@/types/stack.types').VpcFirewallStatusDto>(
+      `/stacks/${stackId}/vpc-firewall-status`,
+      { timeout: 120_000 },
+    ),
+  vpcSshLogs: (stackId: string, limit = 100) =>
+    apiClient.get<import('@/types/stack.types').VpcSshLogsDto>(`/stacks/${stackId}/vpc-ssh-logs`, {
+      params: { limit },
+      timeout: 120_000,
+    }),
+  provisionVpcDocker: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
+      `/stacks/${stackId}/provision-vpc-docker`,
       undefined,
       { timeout: 300_000 },
     ),
@@ -380,6 +407,10 @@ export const systemApi = {
   }) =>
     apiClient.get<import('@/types/stack.types').VpcSecurityProfileDto>('/system/vpc-security-profile', {
       params,
+    }),
+  vpcLaunchUserData: (sshUser?: string) =>
+    apiClient.get<import('@/types/stack.types').VpcLaunchUserDataDto>('/system/vpc-launch-user-data', {
+      params: sshUser ? { sshUser } : undefined,
     }),
 }
 
@@ -834,6 +865,25 @@ export const armoryAssetsApi = {
     )
   },
 
+  uploadFavicon: (stackId: string, file: File, onProgress?: (percent: number) => void) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<import('@/types/armory.types').ArmoryAssetsInfoDto>(
+      `/stacks/${stackId}/armory-assets/favicon`,
+      form,
+      {
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+        },
+      },
+    )
+  },
+
+  deleteFavicon: (stackId: string) =>
+    apiClient.delete<import('@/types/armory.types').ArmoryAssetsInfoDto>(`/stacks/${stackId}/armory-assets/favicon`),
+
+  faviconPreviewUrl: (stackId: string) => `/api/stacks/${stackId}/armory-assets/favicon`,
+
   uploadData: (stackId: string, file: File, onProgress?: (percent: number) => void) =>
     uploadArmoryAsset(`/stacks/${stackId}/armory-assets/data`, file, onProgress),
 
@@ -852,6 +902,14 @@ export const armoryAssetsApi = {
   // detached background job. Returns the initial job status (tracked via armory job status / SignalR).
   syncDbcs: (stackId: string) =>
     apiClient.post<import('@/types/stack.types').ArmoryJobStatus>(`/stacks/${stackId}/armory-assets/sync-dbcs`),
+
+  /** Downloads armory.data.zip, armory.textures.zip, and armory.static.zip from GitHub and applies them. */
+  downloadRelease: (stackId: string) =>
+    apiClient.post<import('@/types/armory.types').ArmoryReleaseDownloadResultDto>(
+      `/stacks/${stackId}/armory-assets/download-release`,
+      null,
+      { timeout: 3_600_000 },
+    ),
 
   browseData: (stackId: string, path?: string) =>
     apiClient.get<import('@/types/client.types').ClientBrowseResultDto>(`/stacks/${stackId}/armory-assets/data/browse`, {

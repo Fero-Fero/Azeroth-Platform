@@ -86,6 +86,8 @@ export interface StackDockerVolumeDto {
 }
 
 export interface StackDockerOverviewDto {
+  isRemoteEngine?: boolean
+  remoteStatsLimited?: boolean
   diskUsage?: DockerDiskUsageDto | null
   diskUsageBreakdown?: DockerDiskUsageBreakdownDto | null
   reclaimableBreakdown?: DockerReclaimableBreakdownDto | null

@@ -75,6 +75,7 @@ public static class DependencyInjection
         services.AddScoped<IAccountManagementService, AccountManagementService>();
         services.AddScoped<IRealmService, RealmService>();
         services.AddScoped<IArmoryAccountsService, ArmoryAccountsService>();
+        services.AddScoped<IArmoryDatabaseProvisioningService, ArmoryDatabaseProvisioningService>();
         services.AddScoped<IDockerService, DockerService>();
         services.AddScoped<IGitService, GitService>();
         services.AddScoped<IBuildService, BuildService>();
@@ -116,6 +117,7 @@ public static class DependencyInjection
         services.AddScoped<IArmoryDbcService, ArmoryDbcService>();
         services.AddSingleton<IClientServerImageService, ClientServerImageService>();
         services.AddSingleton<IArmoryJobService, ArmoryJobService>();
+        services.AddSingleton<IClientJobService, ClientJobService>();
         services.AddSingleton<IStackJobService, StackJobService>();
         services.AddSingleton<IDockerCleanupJobService, DockerCleanupJobService>();
 

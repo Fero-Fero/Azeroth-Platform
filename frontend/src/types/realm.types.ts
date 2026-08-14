@@ -81,3 +81,8 @@ export const REALM_TIMEZONES: { value: number; label: string }[] = [
 export function timezoneLabel(timezone: number): string {
   return REALM_TIMEZONES.find(t => t.value === timezone)?.label ?? `Zone ${timezone}`
 }
+
+export interface SetRealmAddressResponse {
+  host: string
+  job: import('@/types/stack.types').StackJobStatus
+}

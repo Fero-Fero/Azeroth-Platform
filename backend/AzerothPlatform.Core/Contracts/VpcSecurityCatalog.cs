@@ -11,7 +11,6 @@ public static class VpcSecurityCatalog
     public static VpcSecurityCatalogDto CreateCatalog()
         => new()
         {
-            DocumentationPath = "EXTERNAL-VPC-SETUP.md",
             Roles =
             [
                 new VpcSecurityRoleDto

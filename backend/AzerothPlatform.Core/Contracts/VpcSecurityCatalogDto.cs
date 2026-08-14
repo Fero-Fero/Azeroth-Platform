@@ -4,6 +4,4 @@ namespace AzerothPlatform.Core.Contracts;
 public class VpcSecurityCatalogDto
 {
     public List<VpcSecurityRoleDto> Roles { get; set; } = new();
-
-    public string DocumentationPath { get; set; } = "EXTERNAL-VPC-SETUP.md";
 }
