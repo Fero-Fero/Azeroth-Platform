@@ -242,7 +242,7 @@ export function CloudTerminalPanel({
           {!credentialsReady ? (
             <span className="text-xs text-amber-800">Enter host, SSH user, and key above first.</span>
           ) : open && connected ? (
-            <span className="text-xs text-green-700">Connected — paste the bootstrap script and press Enter.</span>
+            <span className="text-xs text-green-700">Connected.</span>
           ) : open && connecting ? (
             <span className="inline-flex items-center gap-1.5 text-xs text-gray-600">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />

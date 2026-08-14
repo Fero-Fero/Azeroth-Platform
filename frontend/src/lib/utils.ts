@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { DeploymentTarget, type StackDetailsDto } from '@/types/stack.types'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -67,4 +68,34 @@ export function isSshConnectivityError(message: string | null | undefined): bool
     lower.includes('host is down') ||
     lower.includes('name or service not known')
   )
+}
+
+export type VpcListHostAlert =
+  | { kind: 'offline'; message: string }
+  | { kind: 'docker-stopped'; message: string }
+
+/** VPC host / Docker reachability for the stacks list (external stacks only). */
+export function getVpcListHostAlert(stack: Pick<
+  StackDetailsDto,
+  'configuration' | 'needsExternalReconnect' | 'dockerEngineAvailable' | 'dockerEngineUnavailableReason'
+>): VpcListHostAlert | null {
+  if (stack.configuration.deployment?.target !== DeploymentTarget.External) return null
+  if (stack.needsExternalReconnect) return null
+  if (stack.dockerEngineAvailable !== false) return null
+
+  const reason = stack.dockerEngineUnavailableReason
+  if (isVpcProbeSlow(reason) || isStaleVpcProbeCache(reason)) return null
+
+  if (isSshConnectivityError(reason)) {
+    return {
+      kind: 'offline',
+      message:
+        'Remote VPC host is unreachable — the cloud instance may be stopped or powered off. Start the instance in your cloud console, then refresh.',
+    }
+  }
+
+  return {
+    kind: 'docker-stopped',
+    message: 'VPC host is reachable but Docker is not running. Open the stack to start Docker or bring containers up.',
+  }
 }

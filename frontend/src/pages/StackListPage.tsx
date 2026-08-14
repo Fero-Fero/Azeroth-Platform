@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud } from 'lucide-react'
+import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud, PowerOff } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import DeleteStackDialog from '@/components/DeleteStackDialog'
@@ -11,6 +11,7 @@ import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import { useStackLifecycleJobs } from '@/hooks/useStackLifecycleJobs'
 import { useStacks, stackKeys } from '@/hooks/useStacks'
 import { isStackJobRunning } from '@/lib/stackJob'
+import { getVpcListHostAlert } from '@/lib/utils'
 import { stackApi, buildApi } from '@/services/api'
 import type { StackDetailsDto } from '@/types/stack.types'
 import { DeploymentTarget, StackStatus } from '@/types/stack.types'
@@ -263,6 +264,8 @@ export default function StackListPage() {
             const isDegraded = displayStatus === StackStatus.Degraded
             const uptime = calculateStackUptime(stack)
             const isExternal = stack.configuration.deployment?.target === DeploymentTarget.External
+            const vpcHostAlert = !isProbing ? getVpcListHostAlert(stack) : null
+            const vpcHostOffline = vpcHostAlert?.kind === 'offline'
 
             const lifecycleJob = lifecycleJobs[stack.stackId]
             const lifecycleBusy = isStackBusy(stack.stackId)
@@ -274,7 +277,11 @@ export default function StackListPage() {
             return (
               <div
                 key={stack.stackId}
-                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5"
+                className={`rounded-lg border bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5 ${
+                  vpcHostOffline
+                    ? 'border-amber-300 border-l-4 border-l-amber-500'
+                    : 'border-gray-200'
+                }`}
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
@@ -299,6 +306,30 @@ export default function StackListPage() {
                         {isExternal ? <Cloud className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
                         {isExternal ? 'VPC' : 'Local'}
                       </span>
+                      {vpcHostOffline && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-900"
+                          title={vpcHostAlert.message}
+                        >
+                          <PowerOff className="h-3 w-3" aria-hidden="true" />
+                          VPC host offline
+                        </span>
+                      )}
+                      {vpcHostAlert?.kind === 'docker-stopped' && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-900"
+                          title={vpcHostAlert.message}
+                        >
+                          <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                          Docker stopped
+                        </span>
+                      )}
+                      {isExternal && isProbing && (
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                          Checking VPC…
+                        </span>
+                      )}
                       {stack.updateStatus?.hasUpdates && (
                         <span className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
                           <AlertCircle className="h-3 w-3" />
@@ -322,7 +353,38 @@ export default function StackListPage() {
                     </div>
                     <p className="mt-2 text-sm text-gray-500">
                       Created {new Date(stack.createdAt).toLocaleDateString()}
+                      {isExternal && stack.configuration.deployment?.externalHost?.trim() && (
+                        <>
+                          {' '}
+                          · Host{' '}
+                          <span className="font-mono text-gray-600">
+                            {stack.configuration.deployment.externalHost.trim()}
+                          </span>
+                        </>
+                      )}
                     </p>
+                    {vpcHostAlert && (
+                      <div
+                        className={`mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+                          vpcHostAlert.kind === 'offline'
+                            ? 'border-amber-200 bg-amber-50 text-amber-950'
+                            : 'border-orange-200 bg-orange-50 text-orange-950'
+                        }`}
+                        role="status"
+                      >
+                        {vpcHostAlert.kind === 'offline' ? (
+                          <PowerOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <AlertCircle className="mt-0.5 h-3.5 shrink-0" aria-hidden="true" />
+                        )}
+                        <span>{vpcHostAlert.message}</span>
+                      </div>
+                    )}
+                    {isExternal && isStopped && !vpcHostAlert && !isProbing && stack.dockerEngineAvailable === true && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Stack containers are stopped. The VPC host is online — use Start to bring the server back up.
+                      </p>
+                    )}
                     <div className="mt-3 flex gap-4 text-sm text-gray-600">
                       <span>Auth: {stack.configuration.ports.authServer}</span>
                       <span>World: {stack.configuration.ports.worldServer}</span>

@@ -262,7 +262,7 @@ Optionally apply AWS security group rules from the same panel when using a linke
 6. Manage saved SSH keys, linked accounts, and the [audit log](#cloud-wizard-digitalocean-aws-gcp) under **Cloud**
    in the nav (`/admin/cloud`).
 
-See `CLOUD-INTEGRATION-PLAN.md` for implementation status and provider roadmap.
+See [`plans_support/00-implementation-order.md`](plans_support/00-implementation-order.md) for **numbered implementation order**. Shipped baseline: [`plans_support/01-cloud-integration-completed.md`](plans_support/01-cloud-integration-completed.md). Active work starts at [`plans/02-cloud-oauth-login-master-plan.md`](plans/02-cloud-oauth-login-master-plan.md).
 
 > The SSH key that reaches a remote host is powerful. Keep the manager machine and its
 > `azeroth-platform-data` volume secure, use a dedicated least-privilege key, and prefer a non-root

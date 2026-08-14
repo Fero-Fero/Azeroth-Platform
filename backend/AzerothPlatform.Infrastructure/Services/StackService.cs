@@ -2673,6 +2673,14 @@ public sealed class StackService : IStackService
                     cachedRuntimeStatus,
                     cachedEngineAvailable,
                     cachedEngineError);
+
+                if (!externalReconnect.NeedsReconnect)
+                {
+                    probeResult = await RefreshExternalEngineAvailabilityAsync(
+                        stack,
+                        probeResult,
+                        cancellationToken);
+                }
             }
             else if (stack.DeploymentTarget == DeploymentTarget.External)
             {
@@ -2833,6 +2841,39 @@ public sealed class StackService : IStackService
     private static bool ShouldServeCachedExternalProbeOnly(ManagedStackEntity stack) =>
         stack.DeploymentTarget == DeploymentTarget.External
         && stack.Status is StackStatus.Stopped or StackStatus.Failed;
+
+    /// <summary>
+    /// Re-probes SSH/Docker reachability for stopped external stacks that reuse cached container
+    /// status, so the list still reflects a powered-off cloud instance.
+    /// </summary>
+    private async Task<RuntimeProbeResult> RefreshExternalEngineAvailabilityAsync(
+        ManagedStackEntity stack,
+        RuntimeProbeResult cached,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (available, message) = await _remoteEngine.ProbeRemoteDockerAsync(stack, cancellationToken);
+            return cached with
+            {
+                EngineAvailable = available,
+                EngineUnavailableReason = available ? null : message,
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to refresh VPC engine availability for stack {StackId}.", stack.Id);
+            return cached with
+            {
+                EngineAvailable = false,
+                EngineUnavailableReason = ex.Message,
+            };
+        }
+    }
 
     private async Task<RuntimeProbeResult> ProbeRuntimeAsync(
         ManagedStackEntity stack,
