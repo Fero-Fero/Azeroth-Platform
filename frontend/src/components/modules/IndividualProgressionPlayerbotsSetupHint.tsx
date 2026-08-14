@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bot, Loader2, Play, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Bot, Loader2, Play, RotateCcw, TrendingUp } from 'lucide-react'
 import IndividualProgressionSyncHint from '@/components/modules/IndividualProgressionSyncHint'
+import { usePatchOverview, useProgressionSyncStatus } from '@/hooks/usePatches'
 import { useServerConfig, useServerConfigs } from '@/hooks/useServerFiles'
 import { useStackJob } from '@/hooks/useStackJob'
 import { stackKeys } from '@/hooks/useStacks'
@@ -61,6 +62,61 @@ interface IndividualProgressionPlayerbotsSetupHintProps {
   className?: string
 }
 
+function ReenablePlayerbotsConfirmDialog({
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  onCancel: () => void
+  onConfirm: () => void
+  pending: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+        <div className="border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Re-enable playerbots?</h2>
+          </div>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-sm text-gray-700">
+            Server-wide progression is not fully set up yet. Enabling playerbots before you prepare
+            progression and sync patches on the Patches tab may cause issues with bot behaviour and
+            progression state.
+          </p>
+          <p className="mt-3 text-sm text-gray-600">
+            Open the Patches tab first if you have not run <strong>Prepare progression</strong> and{' '}
+            <strong>Sync with mod-individual-progression</strong>.
+          </p>
+        </div>
+        <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={pending}
+            className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={pending}
+            className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            Re-enable anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Guides operators through temporarily disabling playerbots before the first launch on
  * Individual Progression stacks, then returns to the standard patch-sync hint.
@@ -74,6 +130,7 @@ export default function IndividualProgressionPlayerbotsSetupHint({
   const queryClient = useQueryClient()
   const setupComplete = isIpPlayerbotsSetupComplete(stackId)
   const [phase, setPhase] = useState<IpPlayerbotsPhase | null>(() => getIpPlayerbotsPhase(stackId))
+  const [showReenableConfirm, setShowReenableConfirm] = useState(false)
 
   const { job: stackJob, isStackBusy, applyStatus } = useStackJob(stackId)
 
@@ -91,6 +148,27 @@ export default function IndividualProgressionPlayerbotsSetupHint({
     ? getConfValue(configQuery.data.content, PLAYERBOTS_ENABLED_KEY)
     : null
   const playerbotsDisabled = enabledValue === '0'
+
+  const stackReadyForProgressionPrep =
+    stackStatus === StackStatus.Running ||
+    stackStatus === StackStatus.Degraded ||
+    phase === 'awaiting-reenable'
+  const { data: patchOverview } = usePatchOverview(
+    stackReadyForProgressionPrep && playerbotsDisabled ? stackId : '',
+  )
+  const { data: progressionSyncStatus } = useProgressionSyncStatus(
+    playerbotsDisabled ? stackId : '',
+  )
+  const hasCompletedProgressionSync =
+    progressionSyncStatus?.hasCompletedInitialSync === true ||
+    !!progressionSyncStatus?.lastSyncAt
+  const showProgressionPrepHint =
+    playerbotsDisabled &&
+    stackReadyForProgressionPrep &&
+    !(patchOverview?.individualProgressionBootstrapped ?? false)
+  const progressionNotReady =
+    stackReadyForProgressionPrep &&
+    (!(patchOverview?.individualProgressionBootstrapped ?? false) || !hasCompletedProgressionSync)
 
   const updatePhase = (next: IpPlayerbotsPhase | null) => {
     setIpPlayerbotsPhase(stackId, next)
@@ -119,6 +197,20 @@ export default function IndividualProgressionPlayerbotsSetupHint({
       queryClient.invalidateQueries({ queryKey: ['server-config', stackId] })
     },
   })
+
+  const requestReenablePlayerbots = () => {
+    if (progressionNotReady) {
+      setShowReenableConfirm(true)
+      return
+    }
+    toggleMutation.mutate(true)
+  }
+
+  const confirmReenablePlayerbots = () => {
+    toggleMutation.mutate(true, {
+      onSettled: () => setShowReenableConfirm(false),
+    })
+  }
 
   const startStackMutation = useMutation({
     mutationFn: async () => {
@@ -235,38 +327,68 @@ export default function IndividualProgressionPlayerbotsSetupHint({
 
   if (playerbotsDisabled) {
     return (
-      <div className={`rounded-lg border border-blue-200 bg-blue-50 px-5 py-4 ${className}`.trim()}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <>
+        <div className={`rounded-xl border border-blue-200 bg-blue-50 px-6 py-5 shadow-sm ${className}`.trim()}>
           <div className="flex min-w-0 items-start gap-3">
             <Bot className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden="true" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-blue-900">Playerbots are disabled</p>
-              <p className="mt-1 text-sm text-blue-800">
-                Configure patches and other content, then re-enable playerbots before inviting players.
-                Restart the worldserver after changing this setting.
-              </p>
+              {showProgressionPrepHint ? (
+                <p className="mt-2 text-sm leading-relaxed text-blue-900">
+                  The stack is running with playerbots off. Prepare server-wide progression on the
+                  Patches tab — click <strong>Prepare progression</strong>, then{' '}
+                  <strong>Sync with mod-individual-progression</strong> — before re-enabling
+                  playerbots.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-blue-800">
+                  Configure patches and other content, then re-enable playerbots before inviting
+                  players. Restart the worldserver after changing this setting.
+                </p>
+              )}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => toggleMutation.mutate(true)}
-            disabled={toggleMutation.isPending || !playerbotsPath}
-            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {toggleMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RotateCcw className="h-4 w-4" />
+
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {patchesHref && (
+              <a
+                href={patchesHref}
+                className="inline-flex items-center gap-2 rounded-md border border-violet-300 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50"
+              >
+                <TrendingUp className="h-4 w-4" />
+                Open Patches tab
+              </a>
             )}
-            Re-enable playerbots
-          </button>
+            <button
+              type="button"
+              onClick={requestReenablePlayerbots}
+              disabled={toggleMutation.isPending || !playerbotsPath}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {toggleMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Re-enable playerbots
+            </button>
+          </div>
+
+          {toggleMutation.isError && (
+            <p className="mt-3 text-sm text-red-700">
+              {(toggleMutation.error as Error)?.message ?? 'Failed to update playerbots.conf.'}
+            </p>
+          )}
         </div>
-        {toggleMutation.isError && (
-          <p className="mt-3 text-sm text-red-700">
-            {(toggleMutation.error as Error)?.message ?? 'Failed to update playerbots.conf.'}
-          </p>
+
+        {showReenableConfirm && (
+          <ReenablePlayerbotsConfirmDialog
+            onCancel={() => setShowReenableConfirm(false)}
+            onConfirm={confirmReenablePlayerbots}
+            pending={toggleMutation.isPending}
+          />
         )}
-      </div>
+      </>
     )
   }
 

@@ -3,6 +3,7 @@ using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Services;
+using AzerothPlatform.Infrastructure.Services.Cloud;
 using AzerothPlatform.Infrastructure.Services.Parsers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -111,6 +112,28 @@ public static class DependencyInjection
         services.AddScoped<IRevisionService, RevisionService>();
         services.AddScoped<ILauncherPortalService, LauncherPortalService>();
         services.AddScoped<IStackRegistryService, StackRegistryService>();
+        services.AddSingleton<ICloudAuditActorProvider, DefaultCloudAuditActorProvider>();
+        services.AddScoped<ICloudAuditService, CloudAuditService>();
+        services.AddScoped<ICloudSshKeyService, CloudSshKeyService>();
+        services.AddHttpClient<DigitalOceanClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.digitalocean.com/");
+        });
+        services.AddHttpClient<HetznerCloudClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.hetzner.cloud/v1/");
+        });
+        services.AddHttpClient<VultrClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.vultr.com/v2/");
+        });
+        services.AddSingleton<AwsEc2Client>();
+        services.AddSingleton<AwsSsmClient>();
+        services.AddSingleton<GcpComputeClient>();
+        services.AddSingleton<AzureComputeClient>();
+        services.AddScoped<ICloudProviderConnectionService, CloudProviderConnectionService>();
+        services.AddScoped<ICloudLaunchService, CloudLaunchService>();
+        services.AddScoped<ICloudFirewallService, CloudFirewallService>();
         services.AddSingleton<ILauncherBuildService, LauncherBuildService>();
         services.AddSingleton<IArmoryImageService, ArmoryImageService>();
         services.AddSingleton<IArmoryAssetsService, ArmoryAssetsService>();

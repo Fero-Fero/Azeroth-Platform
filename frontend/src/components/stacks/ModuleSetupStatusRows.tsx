@@ -112,7 +112,7 @@ export default function ModuleSetupStatusRows({ stack, onSelectTab }: ModuleSetu
           id="ip-playerbots"
           level="warning"
           title="Individual Progression — playerbots setup"
-          summary="Disable playerbots before the first launch, then re-enable after patches are configured."
+          summary="Disable playerbots before the first launch, prepare server-wide progression on Patches, then re-enable playerbots."
           defaultExpanded
           details={
             <IndividualProgressionPlayerbotsSetupHint

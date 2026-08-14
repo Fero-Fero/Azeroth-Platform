@@ -23,6 +23,7 @@ public class StacksController : ControllerBase
     private readonly IStackJobService _stackJobService;
     private readonly IStackDockerService _stackDockerService;
     private readonly IArmoryAccountsService _armoryAccountsService;
+    private readonly ICloudFirewallService _cloudFirewallService;
 
     public StacksController(
         IBuildService buildService,
@@ -33,7 +34,8 @@ public class StacksController : ControllerBase
         IClientJobService clientJobService,
         IStackJobService stackJobService,
         IStackDockerService stackDockerService,
-        IArmoryAccountsService armoryAccountsService)
+        IArmoryAccountsService armoryAccountsService,
+        ICloudFirewallService cloudFirewallService)
     {
         _buildService = buildService;
         _stackService = stackService;
@@ -44,6 +46,7 @@ public class StacksController : ControllerBase
         _stackJobService = stackJobService;
         _stackDockerService = stackDockerService;
         _armoryAccountsService = armoryAccountsService;
+        _cloudFirewallService = cloudFirewallService;
     }
 
     [HttpGet]
@@ -151,6 +154,34 @@ public class StacksController : ControllerBase
         {
             var result = await _stackService.SyncVpcFirewallAsync(stackId, cancellationToken);
             return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{stackId}/sync-cloud-security-group")]
+    public async Task<ActionResult<CloudFirewallApplyResultDto>> SyncCloudSecurityGroup(
+        string stackId,
+        [FromBody] SyncCloudSecurityGroupRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _cloudFirewallService.ApplyStackSecurityGroupRulesAsync(
+                stackId,
+                request,
+                cancellationToken);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

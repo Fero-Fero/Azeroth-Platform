@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Data.Entities;
 
@@ -115,6 +116,18 @@ public interface IRemoteEngineService
         string user,
         string privateKey,
         RemoteSetupOptionsDto options,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs the VPC bootstrap shell script on a remote host over SSH (<c>bash -s</c> stdin). Prefer this
+    /// over pasting into the browser terminal, which can drop newlines or exit early on errors.
+    /// </summary>
+    Task<RemoteBootstrapResultDto> RunVpcBootstrapScriptAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        string? scriptSshUser = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -338,6 +351,19 @@ public interface IRemoteEngineService
     Task<VpcSshLogsDto> FetchSshAuthLogsAsync(
         ManagedStackEntity stack,
         int limit = 100,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Opens an interactive SSH shell (<c>ssh -tt</c>) for wizard/cloud terminal sessions. Output and
+    /// input are raw bytes (PTY stream). The ephemeral ssh config block is removed when the session ends.
+    /// </summary>
+    Task RunInteractiveShellAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        Func<byte[], Task> onOutput,
+        ChannelReader<byte[]> input,
         CancellationToken cancellationToken = default);
 }
 

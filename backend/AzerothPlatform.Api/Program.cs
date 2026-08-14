@@ -82,6 +82,8 @@ try
     });
 
     builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddSingleton<ICloudAuditActorProvider, HttpCloudAuditActorProvider>();
 
     // Single-admin authentication (JWT bearer). The admin secret + signing key live in AdminAuthService;
     // ConfigureJwtBearerOptions resolves that same singleton so issuance and validation share a key.
@@ -245,6 +247,7 @@ try
     app.MapHub<ContainerLogsHub>("/hubs/container-logs");
     app.MapHub<ArmoryProgressHub>("/hubs/armory-progress");
     app.MapHub<StackProgressHub>("/hubs/stack-progress");
+    app.MapHub<CloudTerminalHub>("/hubs/cloud-terminal");
 
     // Fallback to index.html for client-side routing (SPA). Only for extensionless paths — if a hashed
     // bundle under /assets is missing (stale deploy / cache mismatch), return 404 instead of serving

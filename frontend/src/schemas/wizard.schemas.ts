@@ -72,10 +72,13 @@ export const deploymentSchema = z.object({
       externalSshPort: z.coerce.number().int().min(1).max(65535).default(22),
       externalSshUser: z.string().max(64).optional().default(''),
       externalSshPrivateKey: z.string().optional().default(''),
+      savedSshKeyId: z.string().optional().default(''),
+      saveSshKeyToVault: z.boolean().optional().default(true),
+      saveSshKeyLabel: z.string().max(100).optional().default(''),
       connectionVerified: z.boolean().optional().default(false),
       firstTimeSetupCompleted: z.boolean().optional().default(false),
       remoteOs: z.nativeEnum(RemoteHostOs).optional().default(RemoteHostOs.Linux),
-      enableHostFirewall: z.boolean().optional().default(false),
+      enableHostFirewall: z.boolean().optional().default(true),
       cloudSecurityGroupAcknowledged: z.boolean().optional().default(false),
     })
     .superRefine((deployment, ctx) => {
@@ -86,8 +89,12 @@ export const deploymentSchema = z.object({
         if (!deployment.externalSshUser?.trim()) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SSH user is required for external stacks', path: ['externalSshUser'] })
         }
-        if (!deployment.externalSshPrivateKey?.trim()) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SSH private key is required for external stacks', path: ['externalSshPrivateKey'] })
+        if (!deployment.externalSshPrivateKey?.trim() && !deployment.savedSshKeyId?.trim()) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'SSH private key is required (paste a key or select a saved key)',
+            path: ['externalSshPrivateKey'],
+          })
         }
       }
     }),
@@ -194,10 +201,13 @@ export const WIZARD_DEFAULTS: WizardFormData = {
     externalSshPort: 22,
     externalSshUser: '',
     externalSshPrivateKey: '',
+    savedSshKeyId: '',
+    saveSshKeyToVault: true,
+    saveSshKeyLabel: '',
     connectionVerified: false,
     firstTimeSetupCompleted: false,
     remoteOs: RemoteHostOs.Linux,
-    enableHostFirewall: false,
+    enableHostFirewall: true,
     cloudSecurityGroupAcknowledged: false,
   },
   armoryAccounts: {

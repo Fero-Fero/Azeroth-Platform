@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Channels;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data.Entities;
@@ -414,13 +415,11 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 };
             }
 
-            var (remoteDockerExit, remoteDockerOut, remoteDockerErr) = await RunSshAsync(
+            var (remoteDockerReady, remoteDockerOut, remoteDockerErr) = await TryRemoteDockerInfoAsync(
                 contextName,
-                ["docker", "info", "--format", "{{.ServerVersion}}"],
-                cancellationToken,
-                ConnectionTestConnectTimeoutSeconds);
+                cancellationToken);
 
-            if (remoteDockerExit != 0)
+            if (!remoteDockerReady)
             {
                 prerequisites.Add(new RemotePrerequisiteCheckDto
                 {
@@ -431,9 +430,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return new RemoteConnectionTestResultDto
                 {
                     Success = false,
-                    Message = "SSH works, but the remote Docker engine is not available. On a fresh EC2 Ubuntu " +
-                              "instance install Docker and add the SSH user to the docker group " +
-                              $"(sudo usermod -aG docker {user}; log out and back in), or run First Time Setup.",
+                    Message = "SSH works, but the remote Docker engine is not available. Use " +
+                              "Run bootstrap script in step 2, or First Time Setup in step 4.",
                     Prerequisites = prerequisites
                 };
             }
@@ -475,6 +473,190 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Success = false,
                 Message = ex.Message,
                 Prerequisites = prerequisites
+            };
+        }
+        finally
+        {
+            RemoveSshConfigBlock(contextName);
+        }
+    }
+
+    public async Task<RemoteBootstrapResultDto> RunVpcBootstrapScriptAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        string? scriptSshUser = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
+        {
+            return new RemoteBootstrapResultDto { Success = false, Message = "Host and SSH user are required." };
+        }
+
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            return new RemoteBootstrapResultDto { Success = false, Message = "SSH private key is required." };
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+
+        if (await IsDisallowedRemoteHostAsync(host, cancellationToken))
+        {
+            return new RemoteBootstrapResultDto
+            {
+                Success = false,
+                Message = "The specified host is not an allowed remote engine target (loopback and " +
+                          "link-local/metadata addresses are blocked)."
+            };
+        }
+
+        var contextName = $"acore-ext-bootstrap-{Guid.NewGuid():N}";
+        var steps = new List<RemotePrerequisiteCheckDto>();
+
+        try
+        {
+            WriteSshConfig(contextName, host, port, user, privateKey);
+
+            var (sshExit, _, sshStderr) = await RunSshAsync(
+                contextName,
+                ["echo", "ok"],
+                cancellationToken,
+                connectTimeoutSeconds: 60);
+            if (sshExit != 0)
+            {
+                return new RemoteBootstrapResultDto
+                {
+                    Success = false,
+                    Message = GetSshSetupFailureSummary(sshStderr),
+                    Output = sshStderr,
+                };
+            }
+
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "SSH",
+                Passed = true,
+                Message = "Connected to the remote host.",
+            });
+
+            var (sudoPassed, sudoMessage) = await EnsurePasswordlessSudoAsync(contextName, user, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Configure passwordless sudo",
+                Passed = sudoPassed,
+                Message = sudoMessage,
+            });
+            if (!sudoPassed)
+            {
+                return new RemoteBootstrapResultDto
+                {
+                    Success = false,
+                    Message = "Bootstrap stopped — could not configure passwordless sudo.",
+                    Output = FormatBootstrapStepsOutput(steps),
+                };
+            }
+
+            var dockerReadyBefore = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
+            if (dockerReadyBefore.Ready)
+            {
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Docker Engine",
+                    Passed = true,
+                    Message = string.IsNullOrWhiteSpace(dockerReadyBefore.Version)
+                        ? "Docker is already installed and running."
+                        : $"Docker {dockerReadyBefore.Version} is already running.",
+                });
+            }
+            else
+            {
+                var started = await TryStartRemoteDockerAsync(contextName, user, steps, cancellationToken);
+                if (!started)
+                {
+                    var installFailure = await InstallLinuxDockerAsync(contextName, user, steps, cancellationToken);
+                    if (installFailure is not null)
+                    {
+                        return new RemoteBootstrapResultDto
+                        {
+                            Success = false,
+                            Message = installFailure.Message,
+                            Output = FormatBootstrapStepsOutput(steps),
+                        };
+                    }
+                }
+            }
+
+            var bootstrapExtras = new (string Label, string Command)[]
+            {
+                (
+                    "Write bootstrap marker",
+                    SudoNonInteractive("mkdir -p /var/lib/azeroth-platform")
+                        + " && date -u +%Y-%m-%dT%H:%M:%SZ | "
+                        + SudoNonInteractive("tee /var/lib/azeroth-platform/bootstrap-ready")
+                        + " >/dev/null"
+                ),
+            };
+
+            foreach (var (label, command) in bootstrapExtras)
+            {
+                var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                    contextName,
+                    command,
+                    cancellationToken,
+                    allowTtyRetry: false);
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = label,
+                    Passed = exit == 0,
+                    Message = exit == 0
+                        ? SummarizeRemoteOutput(stdout, label)
+                        : FormatRemoteShellError(stderr, stdout),
+                });
+                if (exit != 0)
+                {
+                    return new RemoteBootstrapResultDto
+                    {
+                        Success = false,
+                        Message = $"Bootstrap stopped at “{label}”.",
+                        Output = FormatBootstrapStepsOutput(steps),
+                    };
+                }
+            }
+
+            var output = FormatBootstrapStepsOutput(steps);
+            var (dockerReady, dockerVersion, dockerErr) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+            if (!dockerReady)
+            {
+                return new RemoteBootstrapResultDto
+                {
+                    Success = false,
+                    Message = "Bootstrap steps ran but Docker is still not reachable over SSH. " +
+                              "Try Test connection again, or run First Time Setup in step 4.",
+                    Output = string.IsNullOrWhiteSpace(output)
+                        ? TrimRemoteError(dockerErr, string.Empty)
+                        : output,
+                };
+            }
+
+            return new RemoteBootstrapResultDto
+            {
+                Success = true,
+                Message = string.IsNullOrWhiteSpace(dockerVersion)
+                    ? "Bootstrap completed — Docker is installed on the remote host."
+                    : $"Bootstrap completed — Docker {dockerVersion} is running.",
+                Output = output,
+                DockerVersion = dockerVersion,
+            };
+        }
+        catch (Exception ex)
+        {
+            return new RemoteBootstrapResultDto
+            {
+                Success = false,
+                Message = ex.Message,
             };
         }
         finally
@@ -553,6 +735,18 @@ public sealed class RemoteEngineService : IRemoteEngineService
             if (sshExit != 0)
             {
                 return FailSetup(steps, GetSshSetupFailureSummary(sshStderr));
+            }
+
+            var (sudoPassed, sudoMessage) = await EnsurePasswordlessSudoAsync(contextName, user, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Configure passwordless sudo",
+                Passed = sudoPassed,
+                Message = sudoMessage,
+            });
+            if (!sudoPassed)
+            {
+                return FailSetup(steps, "Setup stopped — could not configure passwordless sudo.");
             }
 
             var dockerReady = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
@@ -1019,16 +1213,36 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return false;
         }
 
+        // A standalone docker CLI (e.g. leftover binary without docker.io) must not skip package install.
+        if (!await RemoteDockerServiceUnitExistsAsync(contextName, cancellationToken))
+        {
+            return false;
+        }
+
         var startCommands = new (string Label, string Command)[]
         {
-            ("Start Docker service", SudoNonInteractive("systemctl start docker")),
-            ("Enable Docker on boot", SudoNonInteractive("systemctl enable docker")),
             ("Grant Docker access to SSH user", SudoNonInteractive($"usermod -aG docker {user}")),
         };
 
+        var (dockerServicePassed, dockerServiceMessage) = await EnsureRemoteDockerServiceAsync(contextName, cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Start Docker service",
+            Passed = dockerServicePassed,
+            Message = dockerServiceMessage,
+        });
+        if (!dockerServicePassed)
+        {
+            return false;
+        }
+
         foreach (var (label, command) in startCommands)
         {
-            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, command, cancellationToken);
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                contextName,
+                command,
+                cancellationToken,
+                allowTtyRetry: false);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = label,
@@ -1080,43 +1294,136 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return FailSetup(steps, "Automatic Docker setup is not supported on this operating system.");
         }
 
-        var setupCommands = new (string Label, string Command)[]
+        var setupCommands = new (string Label, string Command, int TimeoutSeconds)[]
         {
-            ("Update package lists", SudoAptGet("update -qq")),
-            ("Install Docker Engine & Compose", SudoAptGet("install -y docker.io docker-compose-v2")),
-            ("Start Docker service", SudoNonInteractive("systemctl start docker")),
-            ("Enable Docker on boot", SudoNonInteractive("systemctl enable docker")),
-            ("Grant Docker access to SSH user", SudoNonInteractive($"usermod -aG docker {user}")),
+            ("Update package lists", SudoAptGet("update -qq"), 180),
+            ("Install Docker Engine", SudoAptGet("install -y docker.io"), 600),
         };
 
-        foreach (var (label, command) in setupCommands)
+        foreach (var (label, command, timeoutSeconds) in setupCommands)
         {
-            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(contextName, command, cancellationToken);
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                contextName,
+                command,
+                cancellationToken,
+                connectTimeoutSeconds: timeoutSeconds,
+                allowTtyRetry: false);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = label,
                 Passed = exit == 0,
-                Message = exit == 0 ? SummarizeRemoteOutput(stdout, label) : FormatRemoteShellError(stderr, stdout)
+                Message = exit == 0 ? SummarizeAptOutput(stdout, stderr, label) : FormatRemoteShellError(stderr, stdout)
             });
             if (exit != 0)
             {
-                return FailSetup(steps, $"Setup stopped at “{label}”. See the step detail below.");
+                if (label == "Install Docker Engine"
+                    && LooksLikeMissingDockerIoPackage(stderr, stdout))
+                {
+                    var (retryPassed, retryMessage) = await TryInstallDockerIoWithUniverseAsync(
+                        contextName,
+                        steps,
+                        cancellationToken);
+                    if (!retryPassed)
+                    {
+                        return FailSetup(steps, retryMessage);
+                    }
+                }
+                else
+                {
+                    return FailSetup(steps, $"Setup stopped at “{label}”. See the step detail below.");
+                }
             }
         }
 
-        var (verifyExit, verifyOut, verifyErr) = await RunSshAsync(
+        if (!await IsRemoteDockerIoPresentAsync(contextName, cancellationToken))
+        {
+            var (retryPassed, retryMessage) = await TryInstallDockerIoWithUniverseAsync(
+                contextName,
+                steps,
+                cancellationToken);
+            if (!retryPassed)
+            {
+                return FailSetup(steps, retryMessage);
+            }
+        }
+
+        await RunSshRemoteShellAsync(
             contextName,
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            cancellationToken);
+            SudoNonInteractive("systemctl daemon-reload"),
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+
+        var (composeExit, composeOut, composeErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoAptGet("install -y docker-compose-v2"),
+            cancellationToken,
+            connectTimeoutSeconds: 300,
+            allowTtyRetry: false);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Install Docker Compose (optional)",
+            Passed = composeExit == 0,
+            Message = composeExit == 0
+                ? SummarizeAptOutput(composeOut, composeErr, "Install Docker Compose (optional)")
+                : "Optional — Compose runs on the platform manager when unavailable on the VPC."
+        });
+
+        if (!await RemoteDockerSystemdUnitExistsAsync(contextName, cancellationToken)
+            && !await IsRemoteDockerIoPresentAsync(contextName, cancellationToken))
+        {
+            var diagnostics = await GetRemoteDockerInstallDiagnosticsAsync(contextName, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Verify Docker systemd unit",
+                Passed = false,
+                Message = string.IsNullOrWhiteSpace(diagnostics)
+                    ? "The docker.io package did not install the Docker systemd service."
+                    : diagnostics
+            });
+            return FailSetup(steps, "Docker packages were installed but the Docker service unit is missing.");
+        }
+
+        var (usermodExit, usermodOut, usermodErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive($"usermod -aG docker {user}"),
+            cancellationToken,
+            allowTtyRetry: false);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Grant Docker access to SSH user",
+            Passed = usermodExit == 0,
+            Message = usermodExit == 0
+                ? SummarizeRemoteOutput(usermodOut, "Grant Docker access to SSH user")
+                : FormatRemoteShellError(usermodErr, usermodOut)
+        });
+        if (usermodExit != 0)
+        {
+            return FailSetup(steps, "Setup stopped at “Grant Docker access to SSH user”. See the step detail below.");
+        }
+
+        var (dockerServicePassed, dockerServiceMessage) = await EnsureRemoteDockerServiceAsync(contextName, cancellationToken);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Start Docker service",
+            Passed = dockerServicePassed,
+            Message = dockerServiceMessage,
+        });
+        if (!dockerServicePassed)
+        {
+            return FailSetup(steps, "Setup stopped at “Start Docker service”. See the step detail below.");
+        }
+
+        var (verifyReady, verifyOut, verifyErr) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "Verify Docker Engine",
-            Passed = verifyExit == 0,
-            Message = verifyExit == 0
+            Passed = verifyReady,
+            Message = verifyReady
                 ? (string.IsNullOrWhiteSpace(verifyOut.Trim()) ? "Docker engine is responding." : $"Docker {verifyOut.Trim()} is running.")
                 : FormatRemoteDockerError(verifyErr, string.Empty, user, 22)
         });
-        if (verifyExit != 0)
+        if (!verifyReady)
         {
             return FailSetup(steps, "Docker was installed but the SSH user still cannot reach the engine.");
         }
@@ -1311,23 +1618,60 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return ports.OrderBy(p => p);
     }
 
+    private static string FormatBootstrapStepsOutput(IEnumerable<RemotePrerequisiteCheckDto> steps)
+    {
+        var lines = steps
+            .Select(step => $"{step.Name}: {step.Message}")
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var combined = string.Join(Environment.NewLine, lines);
+        return combined.Length > 8000 ? combined[..8000] + "…" : combined;
+    }
+
     private static RemoteSetupResultDto FailSetup(List<RemotePrerequisiteCheckDto> steps, string message)
         => new() { Success = false, Message = message, Steps = steps };
+
+    private async Task<(bool Ready, string Version, string Error)> TryRemoteDockerInfoAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var lastError = string.Empty;
+        foreach (var command in new[]
+                 {
+                     "/usr/bin/docker info --format '{{.ServerVersion}}'",
+                     "sudo -n /usr/bin/docker info --format '{{.ServerVersion}}'",
+                 })
+        {
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                contextName,
+                command,
+                cancellationToken,
+                allowTtyRetry: false);
+            if (exit == 0)
+            {
+                return (true, stdout.Trim(), string.Empty);
+            }
+
+            lastError = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+        }
+
+        return (false, string.Empty, lastError);
+    }
 
     private async Task<(bool Ready, string? Version, string? ComposeVersion)> IsRemoteDockerReadyAsync(
         string contextName,
         CancellationToken cancellationToken)
     {
-        var (dockerExit, dockerOut, _) = await RunSshAsync(
-            contextName,
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            cancellationToken);
-        if (dockerExit != 0)
+        var (ready, version, _) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+        if (!ready)
         {
             return (false, null, null);
         }
 
-        var version = dockerOut.Trim();
         var composeVersion = await TryGetRemoteComposeVersionAsync(contextName, cancellationToken);
         return (true, version, composeVersion);
     }
@@ -1340,12 +1684,21 @@ public sealed class RemoteEngineService : IRemoteEngineService
             contextName,
             ["docker", "compose", "version", "--short"],
             cancellationToken);
-        if (composeExit != 0 || string.IsNullOrWhiteSpace(composeOut))
+        if (composeExit == 0 && !string.IsNullOrWhiteSpace(composeOut))
         {
-            return null;
+            return composeOut.Trim();
         }
 
-        return composeOut.Trim();
+        var (sudoExit, sudoOut, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "sudo -n docker compose version --short",
+            cancellationToken);
+        if (sudoExit == 0 && !string.IsNullOrWhiteSpace(sudoOut))
+        {
+            return sudoOut.Trim();
+        }
+
+        return null;
     }
 
     private async Task<bool> IsUnattendedUpgradesEnabledAsync(
@@ -1371,6 +1724,11 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private const string UfwPathSetup =
         "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; " +
         "UFW=\"$(command -v ufw 2>/dev/null || echo /usr/sbin/ufw)\"";
+
+    private const string RemotePathSetup =
+        "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; ";
+
+    private const string PlatformSudoersFile = "/etc/sudoers.d/99-azeroth-platform";
 
     private static string SudoNonInteractive(string command)
         => $"sudo -n {command}";
@@ -1402,10 +1760,594 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private static string SudoAptGet(string arguments)
         => $"env DEBIAN_FRONTEND=noninteractive {SudoNonInteractive($"apt-get {arguments}")}";
 
+    private static string BuildFullPlatformSudoersContent(string user)
+        => $"Defaults !use_pty\nDefaults:{user} !use_pty\nDefaults !requiretty\nDefaults:{user} !requiretty\n{user} ALL=(ALL) NOPASSWD:ALL\n";
+
+    private static string BuildPlatformSudoDefaultsContent(string user)
+        => $"Defaults !use_pty\nDefaults:{user} !use_pty\nDefaults !requiretty\nDefaults:{user} !requiretty\n";
+
+    private static string BuildMinimalPlatformSudoersContent(string user)
+        => $"Defaults !use_pty\nDefaults:{user} !use_pty\n{user} ALL=(ALL) NOPASSWD:ALL\n";
+
+    private static string BuildMinimalPlatformSudoDefaultsContent(string user)
+        => $"Defaults !use_pty\nDefaults:{user} !use_pty\n";
+
+    private async Task<string> ResolveRemoteSshUserAsync(
+        string contextName,
+        string fallbackUser,
+        CancellationToken cancellationToken)
+    {
+        var (exit, stdout, _) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup + "id -un",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        if (exit == 0)
+        {
+            var line = stdout
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                try
+                {
+                    return SanitizeSshToken(line, "user");
+                }
+                catch (ArgumentException)
+                {
+                    // Fall back to the configured SSH user when whoami returns an unexpected value.
+                }
+            }
+        }
+
+        return SanitizeSshToken(fallbackUser, "user");
+    }
+
+    private async Task<bool> RemoteUserHasPasswordlessSudoRuleAsync(
+        string contextName,
+        string user,
+        CancellationToken cancellationToken)
+    {
+        var (exit, stdout, _) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup
+                + $"/usr/bin/grep -R -- \"{user}\" /etc/sudoers /etc/sudoers.d 2>/dev/null "
+                + "| /usr/bin/grep NOPASSWD | /usr/bin/head -1",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return exit == 0 && !string.IsNullOrWhiteSpace(stdout);
+    }
+
+    private async Task<(bool Passed, string Message)> TryInstallPlatformSudoersAsync(
+        string contextName,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var sudoersB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        var installCommand = RemotePathSetup
+            + "set -e; "
+            + "TMP=$(mktemp); "
+            + $"echo {ShellQuote(sudoersB64)} | /usr/bin/base64 -d > \"$TMP\"; "
+            + $"sudo install -o root -g root -m 440 \"$TMP\" {PlatformSudoersFile}; "
+            + "rm -f \"$TMP\"; "
+            + $"sudo /usr/sbin/visudo -c -f {PlatformSudoersFile}";
+
+        var (exit, stdout, stderr) = await RunSshAsync(
+            contextName,
+            ["bash", "-c", installCommand],
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            forceTty: true);
+
+        if (exit != 0)
+        {
+            return (false, FormatRemoteShellError(stderr, stdout));
+        }
+
+        return (true, string.Empty);
+    }
+
+    private Task<(int ExitCode, string StdOut, string StdErr)> TestNonInteractiveSudoAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+        => RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup + "/usr/bin/sudo -n /usr/bin/true",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+
+    /// <summary>
+    /// Ensures <c>sudo -n</c> works for subsequent setup commands. Uses one interactive TTY
+    /// session only when needed to write <c>/etc/sudoers.d/99-azeroth-platform</c>.
+    /// </summary>
+    private async Task<(bool Passed, string Message)> EnsurePasswordlessSudoAsync(
+        string contextName,
+        string user,
+        CancellationToken cancellationToken)
+    {
+        var remoteUser = await ResolveRemoteSshUserAsync(contextName, user, cancellationToken);
+
+        var (testExit, _, _) = await TestNonInteractiveSudoAsync(contextName, cancellationToken);
+        if (testExit == 0)
+        {
+            return (true, "Passwordless sudo is available.");
+        }
+
+        var hasExistingRule = await RemoteUserHasPasswordlessSudoRuleAsync(contextName, remoteUser, cancellationToken);
+        string[] candidates = hasExistingRule
+            ?
+            [
+                BuildPlatformSudoDefaultsContent(remoteUser),
+                BuildMinimalPlatformSudoDefaultsContent(remoteUser),
+            ]
+            :
+            [
+                BuildFullPlatformSudoersContent(remoteUser),
+                BuildMinimalPlatformSudoersContent(remoteUser),
+            ];
+
+        (bool Passed, string Message)? lastFailure = null;
+        foreach (var content in candidates)
+        {
+            var installResult = await TryInstallPlatformSudoersAsync(contextName, content, cancellationToken);
+            if (!installResult.Passed)
+            {
+                lastFailure = installResult;
+                continue;
+            }
+
+            (testExit, _, _) = await TestNonInteractiveSudoAsync(contextName, cancellationToken);
+            if (testExit == 0)
+            {
+                return (true, hasExistingRule
+                    ? "Adjusted sudo defaults for non-interactive automation."
+                    : "Configured passwordless sudo for platform setup.");
+            }
+        }
+
+        var (_, diagOut, diagErr) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup
+                + "/usr/bin/sudo -n /usr/bin/true 2>&1; "
+                + "/usr/bin/sudo -l -n 2>&1 | /usr/bin/head -5",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        var detail = FormatRemoteShellError(diagErr, diagOut);
+        if (lastFailure is { Passed: false, Message: var installMessage }
+            && !string.IsNullOrWhiteSpace(installMessage))
+        {
+            detail = $"{installMessage} {detail}".Trim();
+        }
+
+        return (false,
+            $"Could not enable non-interactive sudo for '{remoteUser}'. {detail} "
+            + $"If needed, SSH in and run: echo '{remoteUser} ALL=(ALL) NOPASSWD:ALL' | sudo tee {PlatformSudoersFile}");
+    }
+
     private static string SummarizeRemoteOutput(string stdout, string fallback)
     {
-        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        var line = stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(static value => IsUsefulRemoteOutputLine(value));
         return string.IsNullOrWhiteSpace(line) ? $"{fallback} completed." : line;
+    }
+
+    private static string SummarizeAptOutput(string stdout, string stderr, string fallback)
+    {
+        var lines = (stdout + "\n" + stderr)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var setupLine = lines.LastOrDefault(static line =>
+            line.Contains("Setting up docker", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Processing triggers", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("already the newest version", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("is already installed", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(setupLine))
+        {
+            return setupLine;
+        }
+
+        var usefulLine = lines.LastOrDefault(static line => IsUsefulRemoteOutputLine(line));
+        return string.IsNullOrWhiteSpace(usefulLine) ? $"{fallback} completed." : usefulLine;
+    }
+
+    private static bool IsUsefulRemoteOutputLine(string value)
+        => !string.IsNullOrWhiteSpace(value)
+           && !value.StartsWith("SHELL=", StringComparison.Ordinal)
+           && !value.StartsWith("PWD=", StringComparison.Ordinal)
+           && !value.StartsWith("HOME=", StringComparison.Ordinal)
+           && !value.StartsWith("LOGNAME=", StringComparison.Ordinal)
+           && !value.StartsWith("XDG_SESSION_TYPE=", StringComparison.Ordinal)
+           && !value.StartsWith("XDG_RUNTIME_DIR=", StringComparison.Ordinal)
+           && !value.StartsWith("declare -x ", StringComparison.Ordinal)
+           && !value.StartsWith("declare -", StringComparison.Ordinal)
+           && !value.StartsWith("DBUS_SESSION_BUS_ADDRESS=", StringComparison.Ordinal)
+           && !value.StartsWith("Reading package lists", StringComparison.OrdinalIgnoreCase)
+           && !value.StartsWith("Building dependency tree", StringComparison.OrdinalIgnoreCase)
+           && !value.StartsWith("Reading state information", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeMissingDockerIoPackage(string stderr, string stdout)
+    {
+        var message = $"{stderr} {stdout}";
+        return message.Contains("Unable to locate package docker.io", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("has no installation candidate", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<(bool Passed, string Message)> TryInstallDockerIoWithUniverseAsync(
+        string contextName,
+        List<RemotePrerequisiteCheckDto> steps,
+        CancellationToken cancellationToken)
+    {
+        var enableCommands = new (string Label, string Command)[]
+        {
+            ("Install prerequisites for universe repo", SudoAptGet("install -y software-properties-common")),
+            ("Enable Ubuntu universe repository", SudoNonInteractive("add-apt-repository -y universe")),
+            ("Refresh package lists", SudoAptGet("update -qq")),
+        };
+
+        foreach (var (label, command) in enableCommands)
+        {
+            var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+                contextName,
+                command,
+                cancellationToken,
+                connectTimeoutSeconds: 300,
+                allowTtyRetry: false);
+            if (exit != 0)
+            {
+                return (false, FormatRemoteShellError(stderr, stdout));
+            }
+        }
+
+        var (installExit, installOut, installErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoAptGet("install -y docker.io"),
+            cancellationToken,
+            connectTimeoutSeconds: 600,
+            allowTtyRetry: false);
+        steps.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Install Docker Engine",
+            Passed = installExit == 0,
+            Message = installExit == 0
+                ? SummarizeAptOutput(installOut, installErr, "Install Docker Engine")
+                : FormatRemoteShellError(installErr, installOut)
+        });
+
+        if (installExit != 0 || !await IsRemoteDockerIoPresentAsync(contextName, cancellationToken))
+        {
+            if (LooksLikeDockerIoAlreadyInstalled(installErr, installOut))
+            {
+                return (true, SummarizeAptOutput(installOut, installErr, "Install Docker Engine"));
+            }
+
+            return (false, "Could not install docker.io. Enable the Ubuntu universe repository on this host, then retry.");
+        }
+
+        return (true, "Installed docker.io after enabling the universe repository.");
+    }
+
+    private static bool LooksLikeDockerIoAlreadyInstalled(string stderr, string stdout)
+    {
+        var message = $"{stderr} {stdout}";
+        return message.Contains("already the newest version", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("is already installed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> RemoteDockerIoPackageInstalledAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (exit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "dpkg-query -s docker.io 2>/dev/null | grep -q '^Status: install ok installed'",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return exit == 0;
+    }
+
+    private async Task<bool> IsRemoteDockerIoPresentAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        if (await RemoteDockerIoPackageInstalledAsync(contextName, cancellationToken))
+        {
+            return true;
+        }
+
+        var (cliExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "command -v docker >/dev/null 2>&1",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return cliExit == 0 && await RemoteDockerServiceUnitExistsAsync(contextName, cancellationToken);
+    }
+
+    private async Task<bool> RemoteDockerServiceUnitExistsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (fileExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "test -f /usr/lib/systemd/system/docker.service -o -f /lib/systemd/system/docker.service",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        if (fileExit == 0)
+        {
+            return true;
+        }
+
+        var (unitExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "systemctl cat docker.service >/dev/null 2>&1 || systemctl cat docker >/dev/null 2>&1",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return unitExit == 0;
+    }
+
+    private async Task<bool> RemoteDockerSocketUnitExistsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (fileExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "test -f /usr/lib/systemd/system/docker.socket -o -f /lib/systemd/system/docker.socket",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        if (fileExit == 0)
+        {
+            return true;
+        }
+
+        var (unitExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "systemctl cat docker.socket >/dev/null 2>&1",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return unitExit == 0;
+    }
+
+    private async Task<bool> IsRemoteDockerServiceRunningAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        const string checkCommand =
+            "systemctl is-active docker 2>/dev/null | grep -qx active "
+            + "|| systemctl is-active docker.service 2>/dev/null | grep -qx active "
+            + "|| systemctl is-active docker.socket 2>/dev/null | grep -qx active";
+
+        foreach (var command in new[] { checkCommand, SudoNonInteractive(checkCommand) })
+        {
+            var (exit, _, _) = await RunSshRemoteShellAsync(
+                contextName,
+                command,
+                cancellationToken,
+                connectTimeoutSeconds: 30,
+                allowTtyRetry: false);
+            if (exit == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> RemoteDockerSystemdUnitExistsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        if (await IsRemoteDockerServiceRunningAsync(contextName, cancellationToken))
+        {
+            return true;
+        }
+
+        return await RemoteDockerServiceUnitExistsAsync(contextName, cancellationToken)
+               || await RemoteDockerSocketUnitExistsAsync(contextName, cancellationToken);
+    }
+
+    private async Task<string> GetRemoteDockerInstallDiagnosticsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+            contextName,
+            "dpkg-query -W docker.io 2>&1; "
+                + "ls -l /usr/lib/systemd/system/docker.service /lib/systemd/system/docker.service 2>&1; "
+                + "systemctl cat docker.service 2>&1 | head -5",
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+        if (exit == 0 && !string.IsNullOrWhiteSpace(stdout))
+        {
+            return TrimRemoteError(stderr, stdout);
+        }
+
+        return TrimRemoteError(stderr, stdout);
+    }
+
+    private static bool IsDockerSystemdUnitActive(string stdout)
+    {
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (line.Equals("active", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<string> GetRemoteDockerServiceDiagnosticsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (statusExit, statusOut, statusErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive("systemctl status docker.service docker.socket --no-pager -l 2>&1 | head -25"),
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+        if (statusExit == 0 && !string.IsNullOrWhiteSpace(statusOut))
+        {
+            return TrimRemoteError(statusErr, statusOut);
+        }
+
+        var (journalExit, journalOut, journalErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive("journalctl -u docker.service -u docker.socket --no-pager -n 15 2>&1"),
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+        if (journalExit == 0 && !string.IsNullOrWhiteSpace(journalOut))
+        {
+            return TrimRemoteError(journalErr, journalOut);
+        }
+
+        return TrimRemoteError(statusErr, statusOut);
+    }
+
+    private static bool IsTransientSshFailure(string stderr, string stdout)
+    {
+        var message = $"{stderr} {stdout}";
+        return message.Contains("Connection closed", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Connection reset", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Broken pipe", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("kex_exchange_identification", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Starts and enables the Docker systemd units after package install, then waits until the engine API responds.
+    /// Ubuntu's docker.io package uses socket activation — docker.service may stay inactive until first use.
+    /// </summary>
+    private async Task<(bool Passed, string Message)> EnsureRemoteDockerServiceAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (infoReady, version, _) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+        if (infoReady)
+        {
+            return (true, string.IsNullOrWhiteSpace(version)
+                ? "Docker engine is already responding."
+                : $"Docker {version} is already running.");
+        }
+
+        var (_, activeOut, _) = await RunSshRemoteShellAsync(
+            contextName,
+            "systemctl is-active docker.service docker.socket 2>/dev/null",
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+        if (IsDockerSystemdUnitActive(activeOut))
+        {
+            (infoReady, version, _) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+            if (infoReady)
+            {
+                return (true, string.IsNullOrWhiteSpace(version)
+                    ? "Docker engine is responding."
+                    : $"Docker {version} is running.");
+            }
+
+            return (true, "Docker service is active (systemctl).");
+        }
+
+        if (!await RemoteDockerSystemdUnitExistsAsync(contextName, cancellationToken))
+        {
+            return (false, "Docker systemd unit is not installed. Install the docker.io package first.");
+        }
+
+        await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive("systemctl daemon-reload"),
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: false);
+
+        var hasSocket = await RemoteDockerSocketUnitExistsAsync(contextName, cancellationToken);
+        var hasService = await RemoteDockerServiceUnitExistsAsync(contextName, cancellationToken);
+        var unitsToEnable = new List<string>();
+        if (hasSocket)
+        {
+            unitsToEnable.Add("docker.socket");
+        }
+
+        if (hasService)
+        {
+            unitsToEnable.Add("docker.service");
+        }
+
+        var (enableExit, _, enableErr) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive($"systemctl enable {string.Join(' ', unitsToEnable)}"),
+            cancellationToken,
+            connectTimeoutSeconds: 120,
+            allowTtyRetry: false);
+        if (enableExit != 0)
+        {
+            return (false, FormatRemoteShellError(enableErr, string.Empty));
+        }
+
+        if (hasSocket)
+        {
+            var (socketStartExit, _, socketStartErr) = await RunSshRemoteShellAsync(
+                contextName,
+                SudoNonInteractive("systemctl start docker.socket"),
+                cancellationToken,
+                connectTimeoutSeconds: 120,
+                allowTtyRetry: false);
+            if (socketStartExit != 0)
+            {
+                return (false, FormatRemoteShellError(socketStartErr, string.Empty));
+            }
+        }
+
+        if (hasService)
+        {
+            await RunSshRemoteShellAsync(
+                contextName,
+                SudoNonInteractive("systemctl start --no-block docker.service"),
+                cancellationToken,
+                connectTimeoutSeconds: 120,
+                allowTtyRetry: false);
+        }
+
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            (infoReady, version, _) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+            if (infoReady)
+            {
+                return (true, string.IsNullOrWhiteSpace(version)
+                    ? "Docker engine is responding."
+                    : $"Docker {version} is running.");
+            }
+
+            if (await IsRemoteDockerServiceRunningAsync(contextName, cancellationToken))
+            {
+                return (true, "Docker service is active (systemctl).");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+
+        if (await IsRemoteDockerServiceRunningAsync(contextName, cancellationToken))
+        {
+            return (true, "Docker service is active (systemctl).");
+        }
+
+        var diagnostics = await GetRemoteDockerServiceDiagnosticsAsync(contextName, cancellationToken);
+        return (false, string.IsNullOrWhiteSpace(diagnostics)
+            ? "Docker engine did not respond after starting docker.service."
+            : $"Docker engine did not respond after start. {diagnostics}");
     }
 
     private static string TrimRemoteError(string stderr, string stdout)
@@ -1427,6 +2369,12 @@ public sealed class RemoteEngineService : IRemoteEngineService
             || message.Contains("sorry, you must have a tty", StringComparison.OrdinalIgnoreCase))
         {
             return message + " The SSH user needs passwordless sudo (NOPASSWD) for setup commands to run non-interactively.";
+        }
+
+        if (message.Contains("Connection closed", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Connection reset", StringComparison.OrdinalIgnoreCase))
+        {
+            return message + " Close the in-browser terminal if it is open, wait a few seconds, and run setup again.";
         }
 
         if (message.Contains("usage: sudo", StringComparison.OrdinalIgnoreCase)
@@ -1455,25 +2403,66 @@ public sealed class RemoteEngineService : IRemoteEngineService
         string contextName,
         string shellCommand,
         CancellationToken cancellationToken,
-        int connectTimeoutSeconds = 30)
+        int connectTimeoutSeconds = 30,
+        bool allowTtyRetry = true)
     {
+        const int maxAttempts = 3;
+        (int ExitCode, string StdOut, string StdErr) lastResult = (1, string.Empty, string.Empty);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            lastResult = await RunSshRemoteShellOnceAsync(
+                contextName,
+                shellCommand,
+                cancellationToken,
+                connectTimeoutSeconds,
+                allowTtyRetry);
+
+            if (lastResult.ExitCode == 0 || !IsTransientSshFailure(lastResult.StdErr, lastResult.StdOut))
+            {
+                return lastResult;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2 * attempt), cancellationToken);
+            }
+        }
+
+        return lastResult;
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunSshRemoteShellOnceAsync(
+        string contextName,
+        string shellCommand,
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds,
+        bool allowTtyRetry)
+    {
+        var effectiveCommand = ShellCommandUsesSudo(shellCommand)
+            ? RemotePathSetup + shellCommand
+            : shellCommand;
+
         var (exit, stdout, stderr) = await RunSshAsync(
             contextName,
-            ["bash", "-lc", shellCommand],
+            ["bash", "-c", effectiveCommand],
             cancellationToken,
             connectTimeoutSeconds);
 
-        if (exit == 0 || !ShellCommandUsesSudo(shellCommand) || !LooksLikeSudoFailure(stderr, stdout))
+        if (exit == 0
+            || !allowTtyRetry
+            || !ShellCommandUsesSudo(shellCommand)
+            || !LooksLikeSudoFailure(stderr, stdout))
         {
             return (exit, stdout, stderr);
         }
 
-        // Some images (including stock Ubuntu AMIs) set sudo requiretty — retry with a TTY, which
-        // matches what works in an interactive SSH session.
-        var ttyCommand = shellCommand.Replace("sudo -n ", "sudo ", StringComparison.Ordinal);
+        // Some images set sudo requiretty — retry with a TTY for short commands (apt, etc.).
+        // Never use this path for systemctl: it drops the SSH session when the service starts.
+        var ttyCommand = effectiveCommand.Replace("sudo -n ", "sudo ", StringComparison.Ordinal);
         return await RunSshAsync(
             contextName,
-            ["bash", "-lc", ttyCommand],
+            ["bash", "-c", ttyCommand],
             cancellationToken,
             connectTimeoutSeconds,
             forceTty: true);
@@ -2867,8 +3856,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
             "-F", sshConfigPath,
             "-o", "BatchMode=yes",
             "-o", $"ConnectTimeout={connectTimeoutSeconds}",
+            "-o", "ConnectionAttempts=3",
             "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=4",
+            "-o", "ServerAliveCountMax=10",
         };
         if (forceTty)
         {
@@ -3287,6 +4277,169 @@ public sealed class RemoteEngineService : IRemoteEngineService
         finally
         {
             tunnel.Process.Dispose();
+        }
+    }
+
+    private static readonly TimeSpan InteractiveShellMaxDuration = TimeSpan.FromMinutes(60);
+
+    public async Task RunInteractiveShellAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        Func<byte[], Task> onOutput,
+        ChannelReader<byte[]> input,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
+        {
+            throw new InvalidOperationException("Host and SSH user are required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            throw new InvalidOperationException("SSH private key is required.");
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+        user = SanitizeSshToken(user, "user");
+
+        if (await IsDisallowedRemoteHostAsync(host, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "The specified host is not an allowed remote engine target (loopback and " +
+                "link-local/metadata addresses are blocked).");
+        }
+
+        using var durationCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        durationCts.CancelAfter(InteractiveShellMaxDuration);
+
+        var linkedToken = durationCts.Token;
+        var contextName = $"acore-term-{Guid.NewGuid():N}";
+        WriteSshConfig(contextName, host, port, user, privateKey);
+
+        Process? process = null;
+        try
+        {
+            var sshConfigPath = Path.Combine(GetSshDir(), "config");
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "ssh",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            startInfo.ArgumentList.Add("-F");
+            startInfo.ArgumentList.Add(sshConfigPath);
+            startInfo.ArgumentList.Add("-tt");
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add("BatchMode=yes");
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add("ConnectTimeout=30");
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add("ServerAliveInterval=15");
+            startInfo.ArgumentList.Add("-o");
+            startInfo.ArgumentList.Add("ServerAliveCountMax=4");
+            startInfo.ArgumentList.Add(contextName);
+
+            process = new Process { StartInfo = startInfo };
+            if (!process.Start())
+            {
+                throw new InvalidOperationException("Failed to start ssh.");
+            }
+
+            var stdoutTask = PumpShellOutputAsync(process.StandardOutput.BaseStream, onOutput, linkedToken);
+            var stderrTask = PumpShellOutputAsync(process.StandardError.BaseStream, onOutput, linkedToken);
+            var stdinTask = PumpShellInputAsync(process.StandardInput.BaseStream, input, linkedToken);
+            var exitTask = process.WaitForExitAsync(linkedToken);
+
+            var completed = await Task.WhenAny(exitTask, stdoutTask, stderrTask);
+            if (completed == exitTask)
+            {
+                await Task.WhenAll(stdoutTask, stderrTask);
+            }
+
+            try
+            {
+                await stdinTask;
+            }
+            catch
+            {
+                // Input pump cancelled when the session ends.
+            }
+        }
+        finally
+        {
+            if (process is not null && !process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to stop interactive ssh session {Context}", contextName);
+                }
+            }
+
+            process?.Dispose();
+            RemoveSshConfigBlock(contextName);
+        }
+    }
+
+    private static async Task PumpShellOutputAsync(
+        Stream stream,
+        Func<byte[], Task> onOutput,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[8192];
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            int read;
+            try
+            {
+                read = await stream.ReadAsync(buffer, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (read <= 0)
+            {
+                break;
+            }
+
+            var chunk = new byte[read];
+            Buffer.BlockCopy(buffer, 0, chunk, 0, read);
+            await onOutput(chunk);
+        }
+    }
+
+    private static async Task PumpShellInputAsync(
+        Stream stream,
+        ChannelReader<byte[]> input,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var chunk in input.ReadAllAsync(cancellationToken))
+            {
+                await stream.WriteAsync(chunk, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Session ended.
+        }
+        catch (ChannelClosedException)
+        {
+            // Input channel completed.
         }
     }
 }

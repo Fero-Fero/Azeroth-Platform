@@ -25,6 +25,8 @@ You only need **Docker** on your machine. The .NET and Node toolchains run insid
    - [Prerequisites](#prerequisites)
    - [Local setup — everything on this machine](#local-setup--everything-on-this-machine)
    - [External setup — servers on a remote host](#external-setup--servers-on-a-remote-host)
+     - [Cloud wizard (DigitalOcean, AWS, GCP)](#cloud-wizard-digitalocean-aws-gcp)
+     - [Cloud credentials & IAM policies](#cloud-credentials--iam-policies)
    - [Security hardening](#security-hardening)
    - [Everyday commands](#everyday-commands)
 4. [Getting Started (first tour)](#4-getting-started-first-tour)
@@ -246,18 +248,204 @@ actually runs.
 **Remote host requirements:** reachable over SSH from the manager, Docker installed, and the SSH user
 able to run it (e.g. a non-root user in the `docker` group). Configure VPC security roles in the stack
 wizard (Deployment step) and sync the host firewall from the stack VPC overview tab after deploy.
+Optionally apply AWS security group rules from the same panel when using a linked AWS account.
 
 **Steps:**
 
 1. Install and launch the platform (see [Local setup](#local-setup--everything-on-this-machine)).
 2. Click **Create Stack** and go through the wizard.
-3. On the **Advanced** step choose the **External** target and provide the host, SSH port, username,
-   and private key.
-4. Build. Players connect to the remote host's address (used automatically as the realmlist).
+3. On the **Deployment** step choose **External VPC**, then either:
+   - Use the [cloud wizard](#cloud-wizard-digitalocean-aws-gcp) (link an account, pick or launch a VM), or
+   - Enter the host, SSH user, and private key manually.
+4. Use the in-browser terminal and bootstrap script if Docker is not installed yet, then **Test connection**.
+5. Optionally run **First Time Setup**, acknowledge cloud firewall rules, and continue the wizard.
+6. Manage saved SSH keys, linked accounts, and the [audit log](#cloud-wizard-digitalocean-aws-gcp) under **Cloud**
+   in the nav (`/admin/cloud`).
+
+See `CLOUD-INTEGRATION-PLAN.md` for implementation status and provider roadmap.
 
 > The SSH key that reaches a remote host is powerful. Keep the manager machine and its
 > `azeroth-platform-data` volume secure, use a dedicated least-privilege key, and prefer a non-root
-> SSH user in the `docker` group.
+> SSH user in the `docker` group. **Back up `secret-protection.key`** inside that volume — without it,
+> encrypted SSH keys and cloud tokens cannot be decrypted after a restore (see
+> [Security hardening](#security-hardening)).
+
+#### Cloud wizard (DigitalOcean, AWS, GCP)
+
+The Deployment step is a four-stage flow for Linux external stacks (Windows cloud integration is not
+available yet). Supported cloud providers: **DigitalOcean, Hetzner, Vultr, AWS, GCP, and Azure**.
+
+| Step | What you do |
+| --- | --- |
+| **1 — OS** | Choose **Linux** (Ubuntu/Debian recommended). |
+| **2 — Connection & bootstrap** | Link a cloud account, pick an existing VM or launch a new one, paste or save an SSH key, open the in-browser terminal, copy the bootstrap script if needed. |
+| **3 — Verify** | **Test connection** (SSH + Docker check). Must pass before continuing. |
+| **4 — First Time Setup** | Optional stack prep on the remote host (name stays **First Time Setup**). |
+
+**Pick from cloud account** vs **Launch via platform** (both use the same linked account):
+
+| Panel | Purpose |
+| --- | --- |
+| **Pick from cloud account** | Select a **running** VM you already have → auto-fills host and SSH user. |
+| **Launch via platform** | **Create** a new VM (DigitalOcean, Hetzner, Vultr, GCP, AWS EC2) or **bootstrap an existing AWS instance** via SSM or **Azure VM** via Run Command. Catalog dropdowns load regions, sizes, and images from the provider API. |
+
+Saved SSH keys and cloud account tokens are **encrypted at rest** on the manager (`SecretProtector`).
+The platform never returns decrypted secrets after save. An audit log on `/admin/cloud` records key,
+connection, terminal, and launch events (no PEM or tokens in log entries).
+
+#### Cloud credentials & IAM policies
+
+Grant **only** the permissions you need. Link accounts in the wizard or on `/admin/cloud`.
+
+**DigitalOcean**
+
+| Use case | Token scope |
+| --- | --- |
+| List droplets (pick existing) | Read |
+| Launch new droplet | Read + Write |
+
+Create a personal access token under **API → Tokens/Keys**. Read scope is enough to list droplets;
+write scope is required for **Launch via platform**.
+
+**Hetzner Cloud**
+
+| Use case | Token permission |
+| --- | --- |
+| List servers (pick existing) | Read |
+| Launch new server | Read + Write |
+
+Create an API token under **Security → API tokens** in the Hetzner Cloud Console. Optional default **location** (e.g. `nbg1`) limits instance listing.
+
+**Vultr**
+
+| Use case | API key permission |
+| --- | --- |
+| List instances (pick existing) | Read |
+| Launch new instance | Read + Write |
+
+Create an API key under **Account → API**. Optional default **region** (e.g. `ewr`) limits instance listing.
+
+**AWS**
+
+Use a dedicated IAM user (access key). Three common permission sets:
+
+*List / pick existing EC2 instances only:*
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus",
+      "ec2:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeRegions",
+      "ec2:DescribeInstanceTypeOfferings"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+*Launch new EC2 (user_data bootstrap)* — add to the above, or use standalone. Requires a **default VPC**
+in the target region; the platform creates security group `azeroth-platform-launch` (SSH port 22) if
+needed:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceStatus",
+      "ec2:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeRegions",
+      "ec2:DescribeInstanceTypeOfferings",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeSecurityGroups",
+      "ec2:RunInstances",
+      "ec2:ImportKeyPair",
+      "ec2:DeleteKeyPair",
+      "ec2:CreateSecurityGroup",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:CreateTags"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+*Bootstrap an existing instance via SSM* — instance needs SSM agent and instance profile
+`AmazonSSMManagedInstanceCore`. IAM user also needs:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ssm:SendCommand",
+      "ssm:GetCommandInvocation",
+      "ssm:ListCommandInvocations",
+      "ssm:DescribeInstanceInformation"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+You can combine EC2 create and SSM statements in one policy if you use both launch modes.
+
+*Apply stack security group rules (opt-in)* — from the stack **VPC security** panel after deploy.
+Finds the EC2 instance by public IP (or optional instance id + region) and adds ingress rules from
+the stack profile. SSH is restricted to your admin CIDR; game/web ports use `0.0.0.0/0`. Duplicate
+rules are skipped. Requires:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "ec2:DescribeInstances",
+      "ec2:DescribeSecurityGroups",
+      "ec2:AuthorizeSecurityGroupIngress"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+**Google Cloud (GCP)**
+
+| Use case | Service account role / scope |
+| --- | --- |
+| List VMs (pick existing) | `roles/compute.viewer` or `compute.readonly` OAuth scope |
+| Launch new VM | `roles/compute.instanceAdmin.v1` (or `compute` write scope) on the project |
+
+Download a JSON key for a service account with the roles above and paste it when linking the account.
+Launch injects a startup script and optional SSH public key via instance metadata.
+
+**Azure**
+
+Create an app registration (service principal) in Azure AD and assign it roles on your subscription or resource group.
+
+| Use case | RBAC |
+| --- | --- |
+| List VMs (pick existing) | `Microsoft.Compute/virtualMachines/read`, `Microsoft.Network/networkInterfaces/read`, `Microsoft.Network/publicIPAddresses/read` |
+| Bootstrap existing VM (Run Command) | Above plus `Microsoft.Compute/virtualMachines/runCommand/action` (Virtual Machine Contributor on the VM or resource group) |
+
+When linking, provide **tenant ID**, **application (client) ID**, **client secret**, and **subscription ID**. Optional default **location** (e.g. `eastus`) speeds up instance listing.
+
+**Manual / other providers (bare metal)**
+
+Enter host and SSH credentials manually, use the in-browser terminal, and paste the bootstrap script
+from the wizard (or provider user-data at VM create time).
 
 ### Security hardening
 
@@ -283,6 +471,13 @@ gateway (e.g. `172.17.0.1`).
 **Handled for you by default:** no raw Docker socket (allowlisted proxy; non-root manager with dropped
 caps), deny-by-default auth with rate-limited credentials, signed client manifests + verified launcher
 self-update, and encrypted secrets at rest. More in [DOCKER.md → Security Notes](./DOCKER.md#security-notes).
+
+**Backup the encryption key:** external-stack SSH keys, saved cloud SSH keys, and linked cloud account
+credentials are encrypted with AES-256-GCM. The data key is stored as `secret-protection.key` in the
+manager data directory (same Docker volume as the SQLite database — typically `azeroth-platform-data` at
+`/app/data/secret-protection.key`). **Include this file in your backup.** If you restore the database
+without the same key, encrypted secrets cannot be decrypted and you must re-enter SSH keys and re-link
+cloud accounts. Optional override: set `Auth:KeyDir` in configuration to pin the key directory.
 
 ### Everyday commands
 

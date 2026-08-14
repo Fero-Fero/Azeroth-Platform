@@ -73,6 +73,7 @@ public sealed class StackService : IStackService
     private readonly IStackImageShippingService _stackImageShipping;
     private readonly IArmoryDatabaseProvisioningService _armoryDatabase;
     private readonly IMySqlConnectionFactory _connectionFactory;
+    private readonly ICloudSshKeyService _cloudSshKeyService;
 
     public StackService(
         AzerothCoreDbContext dbContext, 
@@ -97,7 +98,8 @@ public sealed class StackService : IStackService
         IStackLauncherService stackLauncher,
         IStackImageShippingService stackImageShipping,
         IArmoryDatabaseProvisioningService armoryDatabase,
-        IMySqlConnectionFactory connectionFactory)
+        IMySqlConnectionFactory connectionFactory,
+        ICloudSshKeyService cloudSshKeyService)
     {
         _dbContext = dbContext;
         _dockerService = dockerService;
@@ -122,6 +124,7 @@ public sealed class StackService : IStackService
         _stackImageShipping = stackImageShipping;
         _armoryDatabase = armoryDatabase;
         _connectionFactory = connectionFactory;
+        _cloudSshKeyService = cloudSshKeyService;
     }
 
     /// <summary>
@@ -294,6 +297,13 @@ public sealed class StackService : IStackService
 
         var (serviceEnvJson, worldserverEnvJson) = BuildEnvJson(configuration.Advanced);
 
+        var protectedSshPrivateKey = string.Empty;
+        if (deployment.Target == DeploymentTarget.External)
+        {
+            var resolvedPrivateKey = await ResolveAndMaybeVaultDeploymentKeyAsync(deployment, cancellationToken);
+            protectedSshPrivateKey = _secretProtector.Protect(resolvedPrivateKey);
+        }
+
         var stack = new ManagedStackEntity
         {
             Id = stackId,
@@ -322,8 +332,7 @@ public sealed class StackService : IStackService
             ExternalHost = externalHost,
             ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort,
             ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim(),
-            // Encrypt the SSH private key at rest so a database leak alone cannot use it.
-            ExternalSshPrivateKey = _secretProtector.Protect(deployment.ExternalSshPrivateKey),
+            ExternalSshPrivateKey = protectedSshPrivateKey,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -529,16 +538,7 @@ public sealed class StackService : IStackService
             throw new InvalidOperationException("Remote host and SSH user are required to reconnect.");
         }
 
-        var privateKey = deployment.ExternalSshPrivateKey;
-        if (string.IsNullOrWhiteSpace(privateKey))
-        {
-            if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
-            {
-                throw new InvalidOperationException("SSH private key is required to reconnect.");
-            }
-
-            privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
-        }
+        var privateKey = await ResolveReconnectPrivateKeyAsync(deployment, stack, cancellationToken);
 
         var test = await _remoteEngine.TestConnectionAsync(
             deployment.ExternalHost.Trim(),
@@ -562,9 +562,10 @@ public sealed class StackService : IStackService
         stack.ExternalHost = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost);
         stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
         stack.ExternalSshUser = deployment.ExternalSshUser.Trim();
-        if (!string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey))
+        if (!string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey)
+            || !string.IsNullOrWhiteSpace(deployment.SavedSshKeyId))
         {
-            stack.ExternalSshPrivateKey = _secretProtector.Protect(deployment.ExternalSshPrivateKey);
+            stack.ExternalSshPrivateKey = _secretProtector.Protect(privateKey);
         }
 
         if (string.IsNullOrWhiteSpace(overrideHost)
@@ -5449,4 +5450,60 @@ public sealed class StackService : IStackService
 
     private static bool IsDockerPublishBindAddress(System.Net.IPAddress address) =>
         address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+
+    private async Task<string> ResolveAndMaybeVaultDeploymentKeyAsync(
+        DeploymentConfigDto deployment,
+        CancellationToken cancellationToken)
+    {
+        var pem = await DeploymentSshKeyResolver.ResolvePrivateKeyAsync(
+            deployment,
+            _cloudSshKeyService,
+            "stack",
+            cancellationToken);
+
+        if (deployment.SaveSshKeyToVault
+            && !string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey)
+            && string.IsNullOrWhiteSpace(deployment.SavedSshKeyId))
+        {
+            try
+            {
+                await _cloudSshKeyService.CreateAsync(
+                    new CreateCloudSshKeyRequestDto
+                    {
+                        Label = deployment.SaveSshKeyLabel,
+                        PrivateKey = pem,
+                        DefaultSshUser = deployment.ExternalSshUser,
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not save SSH key to the vault during stack creation.");
+            }
+        }
+
+        return pem;
+    }
+
+    private async Task<string> ResolveReconnectPrivateKeyAsync(
+        DeploymentConfigDto deployment,
+        ManagedStackEntity stack,
+        CancellationToken cancellationToken)
+    {
+        if (DeploymentSshKeyResolver.HasResolvableKey(deployment))
+        {
+            return await DeploymentSshKeyResolver.ResolvePrivateKeyAsync(
+                deployment,
+                _cloudSshKeyService,
+                "stack",
+                cancellationToken);
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            throw new InvalidOperationException("SSH private key is required to reconnect.");
+        }
+
+        return _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
+    }
 }

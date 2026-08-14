@@ -3,6 +3,8 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   HelpCircle,
   Loader2,
   RefreshCw,
@@ -11,7 +13,8 @@ import {
 } from 'lucide-react'
 import { CloudSecurityGroupGuideDialog } from '@/components/stacks/CloudSecurityGroupGuideDialog'
 import { VpcSecurityProfileCard, VpcSecurityRolesCard } from '@/components/stacks/VpcSecurityRolesCard'
-import { stackApi } from '@/services/api'
+import { resolvePublicAdminSourceCidr } from '@/lib/public-ip'
+import { cloudApi, stackApi, systemApi } from '@/services/api'
 import { apiErrorMessage } from '@/lib/utils'
 import type {
   RemotePrerequisiteCheckDto,
@@ -19,7 +22,7 @@ import type {
   VpcSecurityCheckDto,
   VpcSecurityCheckStatus,
 } from '@/types/stack.types'
-import { DeploymentTarget } from '@/types/stack.types'
+import { CloudProvider, DeploymentTarget } from '@/types/stack.types'
 
 function StatusIcon({ status }: { status: VpcSecurityCheckStatus }) {
   switch (status) {
@@ -119,6 +122,13 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
   const [syncSuccess, setSyncSuccess] = useState<boolean | null>(null)
   const [syncSteps, setSyncSteps] = useState<RemotePrerequisiteCheckDto[] | null>(null)
   const [sgGuideOpen, setSgGuideOpen] = useState(false)
+  const [cloudSgOpen, setCloudSgOpen] = useState(false)
+  const [connectionId, setConnectionId] = useState('')
+  const [adminSourceCidr, setAdminSourceCidr] = useState('')
+  const [instanceId, setInstanceId] = useState('')
+  const [awsRegion, setAwsRegion] = useState('')
+  const [cloudSgMessage, setCloudSgMessage] = useState<string | null>(null)
+  const [cloudSgSuccess, setCloudSgSuccess] = useState<boolean | null>(null)
 
   const deployment = stack.configuration?.deployment
   const remoteHost = deployment?.externalHost?.trim()
@@ -139,6 +149,28 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
     queryFn: async () => (await stackApi.vpcFirewallStatus(stack.stackId)).data,
     enabled: isExternal,
     refetchInterval: 120_000,
+  })
+
+  const { data: awsConnections = [] } = useQuery({
+    queryKey: ['cloud-connections', 'aws'],
+    queryFn: async () => {
+      const res = await cloudApi.listConnections()
+      return res.data.filter((connection) => connection.provider === CloudProvider.Aws)
+    },
+    enabled: isExternal,
+  })
+
+  const { data: networkInfo } = useQuery({
+    queryKey: ['system-network', 'admin-source'],
+    queryFn: async () => {
+      const res = await systemApi.network()
+      const suggestedAdminSourceCidr = await resolvePublicAdminSourceCidr(
+        res.data.suggestedAdminSourceCidr,
+      )
+      return { suggestedAdminSourceCidr }
+    },
+    enabled: isExternal && cloudSgOpen,
+    staleTime: 60_000,
   })
 
   const syncFirewall = useMutation({
@@ -163,6 +195,28 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
         ),
       )
       setSyncSteps(null)
+    },
+  })
+
+  const syncCloudSg = useMutation({
+    mutationFn: () =>
+      stackApi.syncCloudSecurityGroup(stack.stackId, {
+        connectionId,
+        adminSourceCidr: adminSourceCidr.trim(),
+        instanceId: instanceId.trim() || undefined,
+        region: awsRegion.trim() || undefined,
+      }),
+    onMutate: () => {
+      setCloudSgSuccess(null)
+      setCloudSgMessage(null)
+    },
+    onSuccess: (res) => {
+      setCloudSgSuccess(res.data.success)
+      setCloudSgMessage(res.data.message)
+    },
+    onError: (err) => {
+      setCloudSgSuccess(false)
+      setCloudSgMessage(apiErrorMessage(err, 'Failed to apply AWS security group rules.'))
     },
   })
 
@@ -267,6 +321,130 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
         <VpcSecurityRolesCard compact />
         {profileLoading && <p className="text-xs text-gray-500">Loading rule profile…</p>}
         {profile && <VpcSecurityProfileCard profile={profile} />}
+        <div className="rounded-md border border-blue-200 bg-blue-50/60">
+          <button
+            type="button"
+            onClick={() => setCloudSgOpen((open) => !open)}
+            className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left"
+          >
+            <div>
+              <p className="text-xs font-semibold text-blue-950">Apply AWS security group rules (optional)</p>
+              <p className="mt-0.5 text-[11px] text-blue-900/90">
+                Uses a linked AWS account to add ingress rules from this stack&apos;s profile. SSH is restricted
+                to your admin CIDR; game and web ports use the public template.
+              </p>
+            </div>
+            {cloudSgOpen ? (
+              <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-blue-800" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-blue-800" aria-hidden="true" />
+            )}
+          </button>
+          {cloudSgOpen && (
+            <div className="space-y-3 border-t border-blue-200 px-3 py-3">
+              {awsConnections.length === 0 ? (
+                <p className="text-xs text-blue-950">
+                  Link an AWS account under <span className="font-medium">Admin → Cloud</span> to use automation.
+                </p>
+              ) : (
+                <>
+                  <label className="block text-xs text-blue-950">
+                    <span className="mb-1 block font-medium">Linked AWS account</span>
+                    <select
+                      value={connectionId}
+                      onChange={(event) => setConnectionId(event.target.value)}
+                      className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 text-xs text-gray-900"
+                    >
+                      <option value="">Select connection…</option>
+                      {awsConnections.map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.label}
+                          {connection.defaultRegion ? ` (${connection.defaultRegion})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-blue-950">
+                    <span className="mb-1 block font-medium">Admin SSH source CIDR</span>
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="text"
+                        value={adminSourceCidr}
+                        onChange={(event) => setAdminSourceCidr(event.target.value)}
+                        placeholder="203.0.113.10/32"
+                        className="min-w-[12rem] flex-1 rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
+                      />
+                      {networkInfo?.suggestedAdminSourceCidr && (
+                        <button
+                          type="button"
+                          onClick={() => setAdminSourceCidr(networkInfo.suggestedAdminSourceCidr ?? '')}
+                          className="rounded-md border border-blue-300 bg-white px-2 py-1.5 text-[11px] font-medium text-blue-800 hover:bg-blue-100"
+                        >
+                          Use my IP
+                        </button>
+                      )}
+                    </div>
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block text-xs text-blue-950">
+                      <span className="mb-1 block font-medium">EC2 instance id (optional)</span>
+                      <input
+                        type="text"
+                        value={instanceId}
+                        onChange={(event) => setInstanceId(event.target.value)}
+                        placeholder="i-0abc123…"
+                        className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
+                      />
+                    </label>
+                    <label className="block text-xs text-blue-950">
+                      <span className="mb-1 block font-medium">AWS region (optional)</span>
+                      <input
+                        type="text"
+                        value={awsRegion}
+                        onChange={(event) => setAwsRegion(event.target.value)}
+                        placeholder="us-east-1"
+                        className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-blue-900/90">
+                    When instance id is omitted, the platform finds the running EC2 instance whose public IP or DNS
+                    matches this stack&apos;s host ({remoteHost || 'not set'}). Duplicate rules are skipped.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => syncCloudSg.mutate()}
+                    disabled={
+                      syncCloudSg.isPending
+                      || !connectionId
+                      || !adminSourceCidr.trim()
+                    }
+                    className="inline-flex items-center gap-2 rounded-md border border-blue-400 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {syncCloudSg.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    Apply AWS security group rules
+                  </button>
+                </>
+              )}
+              {cloudSgMessage && (
+                <div
+                  role="status"
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    cloudSgSuccess
+                      ? 'border-green-200 bg-green-50 text-green-900'
+                      : 'border-amber-200 bg-amber-50 text-amber-950'
+                  }`}
+                >
+                  {cloudSgMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         {syncMessage && (
           <div
             role="status"

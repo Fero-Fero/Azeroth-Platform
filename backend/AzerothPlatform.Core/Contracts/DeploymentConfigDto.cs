@@ -20,7 +20,17 @@ public class DeploymentConfigDto
 
     /// <summary>
     /// PEM-encoded SSH private key used to authenticate to the remote host. Stored in the platform
-    /// database at rest (hardening / encryption is a documented follow-up).
+    /// database at rest (encrypted via <see cref="ISecretProtector"/>). Leave empty when
+    /// <see cref="SavedSshKeyId"/> is set.
     /// </summary>
     public string ExternalSshPrivateKey { get; set; } = string.Empty;
+
+    /// <summary>When set, the platform loads the private key from the SSH key vault (never returned to clients).</summary>
+    public string SavedSshKeyId { get; set; } = string.Empty;
+
+    /// <summary>When creating a stack, save a newly pasted key to the vault for reuse.</summary>
+    public bool SaveSshKeyToVault { get; set; } = true;
+
+    /// <summary>Label for a new vault entry when <see cref="SaveSshKeyToVault"/> is true.</summary>
+    public string SaveSshKeyLabel { get; set; } = string.Empty;
 }

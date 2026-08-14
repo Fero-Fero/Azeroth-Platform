@@ -369,12 +369,12 @@ export default function CreateStackWizardPage() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-visible rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
           <StepIndicator steps={steps} currentStep={currentStep} />
         </div>
 
-        <div className="min-h-[24rem] px-6 py-6">
+        <div className="min-h-[24rem] overflow-visible px-6 py-6">
           {steps[currentStep]?.id === 'deployment' && <DeploymentStep form={form} />}
           {steps[currentStep]?.id === 'server-config' && <ServerConfigStep form={form} />}
           {steps[currentStep]?.id === 'modules' && <ModulesStep form={form} />}
@@ -462,6 +462,9 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
           externalSshPort: values.deployment.externalSshPort ?? 22,
           externalSshUser: values.deployment.externalSshUser ?? '',
           externalSshPrivateKey: values.deployment.externalSshPrivateKey ?? '',
+          savedSshKeyId: values.deployment.savedSshKeyId ?? '',
+          saveSshKeyToVault: values.deployment.saveSshKeyToVault ?? true,
+          saveSshKeyLabel: values.deployment.saveSshKeyLabel ?? '',
         }
       : undefined,
     customFork: values.serverType === ServerType.Custom

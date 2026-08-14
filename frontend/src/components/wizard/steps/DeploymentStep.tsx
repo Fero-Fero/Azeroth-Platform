@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Cloud, Copy, Loader2, Server, Sparkles, XCircle } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
+import { CloudTerminalPanel } from '@/components/wizard/common/CloudTerminalPanel'
+import { VpcConnectionMethodTabs } from '@/components/wizard/common/VpcConnectionMethodTabs'
+import { VpcSecurityOverviewSection } from '@/components/wizard/common/VpcSecurityOverviewSection'
+import { SavedSshKeySelector } from '@/components/wizard/common/SavedSshKeySelector'
 import { SshPrivateKeyField } from '@/components/wizard/common/SshPrivateKeyField'
 import type { WizardForm } from '@/components/wizard/types'
-import { VpcSecurityRolesCard } from '@/components/stacks/VpcSecurityRolesCard'
 import { DEFAULT_ARMORY_PORT, DEFAULT_CLIENT_PORT } from '@/lib/stack-network-defaults'
 import { CloudSecurityGroupGuideDialog } from '@/components/stacks/CloudSecurityGroupGuideDialog'
 import { cn } from '@/lib/utils'
@@ -193,10 +196,12 @@ function VpcLaunchGuidePanel({
   sshUser,
   launchData,
   embedded = false,
+  hintsOnly = false,
 }: {
   sshUser: string
   launchData: VpcLaunchUserDataDto | undefined
   embedded?: boolean
+  hintsOnly?: boolean
 }) {
   const [copied, setCopied] = useState(false)
   const [provider, setProvider] = useState<'aws' | 'gcp' | 'digitalocean' | 'other'>('aws')
@@ -228,7 +233,7 @@ function VpcLaunchGuidePanel({
       ],
     },
     other: {
-      title: 'Other provider (Azure, Hetzner, etc.)',
+      title: 'Other provider (bare metal, etc.)',
       steps: [
         'Create a new Ubuntu 22.04/24.04 VM (not an existing one).',
         'Look for User data, Custom data, Cloud-init, or Startup script in the create wizard.',
@@ -251,27 +256,43 @@ function VpcLaunchGuidePanel({
     }
   }
 
-  const Wrapper = embedded ? 'div' : 'section'
+  const Wrapper = embedded ? 'details' : 'section'
   const wrapperClass = embedded
-    ? 'space-y-2'
+    ? 'group rounded-md border border-blue-200 bg-blue-50/60'
     : 'rounded-lg border border-blue-200 bg-blue-50 p-4'
 
-  return (
-    <Wrapper className={wrapperClass}>
+  const summaryClass = embedded
+    ? 'cursor-pointer list-none px-3 py-2 text-xs font-medium text-blue-950 marker:content-none [&::-webkit-details-marker]:hidden'
+    : undefined
+
+  const content = (
+    <>
       {!embedded ? (
         <h3 className="text-sm font-semibold text-blue-950">Launch a new cloud server (optional)</h3>
-      ) : (
+      ) : hintsOnly ? null : (
         <p className="text-xs font-medium text-gray-800">Bootstrap script (Linux)</p>
       )}
-      <p className="mt-1 text-xs text-blue-900">
-        The script below works on <span className="font-medium">any</span> cloud that supports Ubuntu and a
-        startup/user-data field (AWS, GCP, DigitalOcean, Azure, etc.). It only runs when you{' '}
-        <span className="font-medium">create</span> a new VM — not on a server you already started.
+      <p className={cn('text-xs text-blue-900', !embedded || hintsOnly ? undefined : 'mt-1', hintsOnly && 'pt-0')}>
+        {hintsOnly ? (
+          <>
+            Creating a <span className="font-medium">new</span> VM? Paste the bootstrap script into your
+            provider&apos;s startup / user-data field — it runs once on first boot. For an existing server, use
+            the terminal sticky note instead.
+          </>
+        ) : (
+          <>
+            The script below works on <span className="font-medium">any</span> cloud that supports Ubuntu and a
+            startup/user-data field (AWS, GCP, DigitalOcean, Azure, etc.). It only runs when you{' '}
+            <span className="font-medium">create</span> a new VM — not on a server you already started.
+          </>
+        )}
       </p>
-      <p className="mt-2 rounded-md border border-blue-300 bg-white/80 px-2.5 py-2 text-xs text-blue-950">
-        Paste the script into your SSH session after opening the terminal in step 2, or into your cloud
-        provider&apos;s startup/user-data field when <span className="font-medium">creating</span> a new VM.
-      </p>
+      {!hintsOnly ? (
+        <p className="mt-2 rounded-md border border-blue-300 bg-white/80 px-2.5 py-2 text-xs text-blue-950">
+          Paste the script into your SSH session after opening the terminal in step 2, or into your cloud
+          provider&apos;s startup/user-data field when <span className="font-medium">creating</span> a new VM.
+        </p>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {(
           [
@@ -296,34 +317,55 @@ function VpcLaunchGuidePanel({
           </button>
         ))}
       </div>
-      <p className="mt-2 text-xs font-medium text-blue-950">{providerSteps[provider].title}</p>
-      <ol className="mt-1 list-decimal space-y-1 pl-4 text-xs text-blue-900">
+      <p className="mt-2 text-xs font-medium text-blue-950">
+        {providerSteps[provider].title}
+      </p>
+      <ol className="mt-1 list-decimal space-y-1 pl-5 text-xs text-blue-900">
         {providerSteps[provider].steps.map((step) => (
           <li key={step}>{step}</li>
         ))}
-        <li>When the terminal is connected, paste the script below and press Enter.</li>
+        {!hintsOnly ? <li>When the terminal is connected, paste the script below and press Enter.</li> : null}
       </ol>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void handleCopy()}
-          disabled={!launchData?.script}
-          className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-60"
-        >
-          <Copy className="h-3 w-3" aria-hidden="true" />
-          {copied ? 'Copied!' : 'Copy launch script'}
-        </button>
-        <span className="text-[11px] text-blue-800">
-          SSH user: <span className="font-mono">{user}</span>
-        </span>
-      </div>
-      {launchData?.script ? (
-        <pre className="mt-2 max-h-40 overflow-auto rounded border border-blue-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-blue-950">
-          {launchData.script}
-        </pre>
-      ) : (
-        <p className="mt-2 text-xs text-blue-800">Loading launch script…</p>
-      )}
+      {!hintsOnly ? (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCopy()}
+              disabled={!launchData?.script}
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-2.5 py-1 text-[11px] font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-60"
+            >
+              <Copy className="h-3 w-3" aria-hidden="true" />
+              {copied ? 'Copied!' : 'Copy launch script'}
+            </button>
+            <span className="text-[11px] text-blue-800">
+              SSH user: <span className="font-mono">{user}</span>
+            </span>
+          </div>
+          {launchData?.script ? (
+            <pre className="mt-2 max-h-40 overflow-auto rounded border border-blue-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-blue-950">
+              {launchData.script}
+            </pre>
+          ) : (
+            <p className="mt-2 text-xs text-blue-800">Loading launch script…</p>
+          )}
+        </>
+      ) : null}
+    </>
+  )
+
+  if (embedded && hintsOnly) {
+    return (
+      <Wrapper className={wrapperClass}>
+        <summary className={summaryClass}>New VM? Paste at create time (optional)</summary>
+        <div className="border-t border-blue-200 px-3 pb-3 pt-2">{content}</div>
+      </Wrapper>
+    )
+  }
+
+  return (
+    <Wrapper className={wrapperClass}>
+      {content}
     </Wrapper>
   )
 }
@@ -375,6 +417,7 @@ function buildProvisionRequest(
   externalSshPort: number | string | undefined,
   externalSshUser: string,
   externalSshPrivateKey: string,
+  savedSshKeyId: string,
   remoteOs: RemoteHostOs,
   enableHostFirewall: boolean,
   enableUnattendedUpgrades: boolean,
@@ -389,6 +432,7 @@ function buildProvisionRequest(
       externalSshPort: Number(externalSshPort) || 22,
       externalSshUser,
       externalSshPrivateKey,
+      savedSshKeyId,
     },
     options: {
       remoteOs,
@@ -415,12 +459,12 @@ function DeploymentSubstep({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-4">
+    <section className="overflow-visible rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-900 text-xs font-semibold text-white">
           {step}
         </span>
-        <div className="min-w-0 flex-1 space-y-3">
+        <div className="min-w-0 flex-1 space-y-3 overflow-visible">
           <div>
             <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
             {description ? <p className="mt-1 text-xs text-gray-600">{description}</p> : null}
@@ -531,10 +575,13 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const externalSshPort = watch('deployment.externalSshPort')
   const externalSshUser = watch('deployment.externalSshUser') ?? ''
   const externalSshPrivateKey = watch('deployment.externalSshPrivateKey') ?? ''
+  const savedSshKeyId = watch('deployment.savedSshKeyId') ?? ''
+  const saveSshKeyToVault = watch('deployment.saveSshKeyToVault') ?? true
+  const saveSshKeyLabel = watch('deployment.saveSshKeyLabel') ?? ''
   const connectionVerified = watch('deployment.connectionVerified')
   const firstTimeSetupCompleted = watch('deployment.firstTimeSetupCompleted')
   const remoteOs = watch('deployment.remoteOs') ?? RemoteHostOs.Linux
-  const enableHostFirewall = watch('deployment.enableHostFirewall') ?? false
+  const enableHostFirewall = watch('deployment.enableHostFirewall') ?? true
   const cloudSecurityGroupAcknowledged = watch('deployment.cloudSecurityGroupAcknowledged')
   const authServerPort = watch('ports.authServer') ?? 3724
   const worldServerPort = watch('ports.worldServer') ?? 8085
@@ -545,22 +592,40 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
       externalHost,
       externalSshPort: Number(externalSshPort) || 22,
       externalSshUser,
-      externalSshPrivateKey,
+      externalSshPrivateKey: savedSshKeyId ? '' : externalSshPrivateKey,
+      savedSshKeyId,
+      saveSshKeyToVault,
+      saveSshKeyLabel,
     }),
-    [externalHost, externalSshPort, externalSshPrivateKey, externalSshUser]
+    [
+      externalHost,
+      externalSshPort,
+      externalSshPrivateKey,
+      externalSshUser,
+      saveSshKeyLabel,
+      saveSshKeyToVault,
+      savedSshKeyId,
+    ]
   )
+
+  const usingSavedKey = savedSshKeyId.trim().length > 0
 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<RemoteConnectionTestResultDto | null>(null)
   const [testProgress, setTestProgress] = useState<ConnectionTestProgress | null>(null)
+  const [sshTesting, setSshTesting] = useState(false)
+  const [sshTestResult, setSshTestResult] = useState<RemoteConnectionTestResultDto | null>(null)
   const [settingUp, setSettingUp] = useState(false)
   const [setupResult, setSetupResult] = useState<RemoteSetupResultDto | null>(null)
   const [sgGuideOpen, setSgGuideOpen] = useState(false)
+  const [cloudConnectionId, setCloudConnectionId] = useState('')
+
+  const connectionFieldsReady =
+    externalHost.trim().length > 0 && externalSshUser.trim().length > 0
 
   const credentialsReady =
-    externalHost.trim().length > 0
-    && externalSshUser.trim().length > 0
-    && externalSshPrivateKey.trim().length > 0
+    connectionFieldsReady
+    && (usingSavedKey || externalSshPrivateKey.trim().length > 0)
 
   const sshVerified = sshCheckPassed(testResult)
   const dockerReady = prerequisitesMet(testResult)
@@ -571,8 +636,9 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     setValue('deployment.cloudSecurityGroupAcknowledged', false, { shouldDirty: true })
     setTestResult(null)
     setTestProgress(null)
+    setSshTestResult(null)
     setSetupResult(null)
-  }, [deploymentTarget, externalHost, externalSshPort, externalSshUser, externalSshPrivateKey, setValue])
+  }, [deploymentTarget, externalHost, externalSshPort, externalSshUser, externalSshPrivateKey, savedSshKeyId, setValue])
 
   const { data: securityProfile } = useQuery({
     queryKey: ['vpc-security-profile', externalHost, authServerPort, worldServerPort],
@@ -671,6 +737,24 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     }
   }, [runConnectionTest, setValue])
 
+  const handleTestSshConnection = useCallback(async () => {
+    setSshTesting(true)
+    setSshTestResult(null)
+
+    try {
+      const sshRes = await systemApi.testRemoteConnection(deploymentPayload, RemoteConnectionTestPhase.SshOnly)
+      setSshTestResult(sshRes.data)
+    } catch {
+      setSshTestResult({
+        success: false,
+        message: 'Failed to reach the platform to run the test.',
+        prerequisites: [],
+      })
+    } finally {
+      setSshTesting(false)
+    }
+  }, [deploymentPayload])
+
   const handleSetupNow = useCallback(async () => {
     if (remoteOs === RemoteHostOs.Windows) {
       return
@@ -686,6 +770,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
           externalSshPort,
           externalSshUser,
           externalSshPrivateKey,
+          savedSshKeyId,
           remoteOs,
           enableHostFirewall,
           true,
@@ -823,8 +908,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
       {deploymentTarget === DeploymentTarget.External && (
         <div className="space-y-4 rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-600">
-            Follow the steps below to connect a cloud VM. Cloud account linking and an in-browser terminal are
-            planned — see <span className="font-medium">CLOUD-INTEGRATION-PLAN.md</span>.
+            Follow the sections below: review ports, choose how to connect, add your SSH key, then bootstrap over the terminal.
           </p>
 
           <DeploymentSubstep
@@ -870,26 +954,156 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
 
           <DeploymentSubstep
             step={2}
-            title="Bootstrap the server"
-            description="Open a terminal to your VM and paste the bootstrap script. Use your own SSH client for now, or wait for the in-browser terminal from cloud integration."
+            title="Connection & bootstrap"
+            description="Connect to your server, run the bootstrap script, and prepare Docker on the VM."
           >
-            <div className="space-y-3">
-              <button
-                type="button"
-                disabled
-                title="In-browser terminal ships with cloud integration (Phase 2)"
-                className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500"
+            <div className="space-y-4">
+              <VpcSecurityOverviewSection />
+
+              <VpcConnectionMethodTabs
+                disabled={testing || settingUp || sshTesting}
+                cloudConnectionId={cloudConnectionId}
+                onCloudConnectionIdChange={setCloudConnectionId}
+                externalHost={externalHost}
+                externalSshUser={externalSshUser}
+                savedSshKeyId={savedSshKeyId}
+                register={register}
+                errors={errors}
+                connectionFieldsReady={connectionFieldsReady}
+                credentialsReady={credentialsReady}
+                sshTesting={sshTesting}
+                onTestConnection={handleTestSshConnection}
+                sshTestResult={sshTestResult}
+                onSelectInstance={(instance) => {
+                  setValue('deployment.externalHost', instance.publicHost, { shouldDirty: true, shouldValidate: true })
+                  if (instance.suggestedSshUser) {
+                    setValue('deployment.externalSshUser', instance.suggestedSshUser, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                }}
+                onLaunched={(result) => {
+                  setValue('deployment.externalHost', result.instance.publicHost, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                  if (result.instance.suggestedSshUser) {
+                    setValue('deployment.externalSshUser', result.instance.suggestedSshUser, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                  if (result.savedSshKeyId) {
+                    setValue('deployment.savedSshKeyId', result.savedSshKeyId, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                    setValue('deployment.externalSshPrivateKey', '', { shouldDirty: true, shouldValidate: true })
+                  }
+                }}
               >
-                Open terminal (coming soon)
-              </button>
-              <p className="text-xs text-gray-600">
-                Until the integrated terminal is available, SSH from your machine:{' '}
-                <code className="text-[11px]">
-                  ssh -i your-key.pem {externalSshUser.trim() || 'ubuntu'}@{externalHost.trim() || 'YOUR_HOST'}
-                </code>
-              </p>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-900">SSH credentials</p>
+                    <p className="mt-0.5 text-[11px] text-gray-600">
+                      Required for the connection test and terminal below.
+                    </p>
+                  </div>
+
+                  <SavedSshKeySelector
+                    selectedKeyId={savedSshKeyId}
+                    disabled={testing || settingUp || sshTesting}
+                    onSelectedKeyIdChange={(id) => {
+                      setValue('deployment.savedSshKeyId', id, { shouldDirty: true, shouldValidate: true })
+                      if (id) {
+                        setValue('deployment.externalSshPrivateKey', '', { shouldDirty: true, shouldValidate: true })
+                      }
+                    }}
+                    onSelectKey={(key) => {
+                      if (key?.defaultSshUser && !externalSshUser.trim()) {
+                        setValue('deployment.externalSshUser', key.defaultSshUser, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        })
+                      }
+                    }}
+                  />
+
+                  {!usingSavedKey ? (
+                    <>
+                      <SshPrivateKeyField
+                        id="external-ssh-key"
+                        value={externalSshPrivateKey}
+                        onChange={(value) => {
+                          setValue('deployment.externalSshPrivateKey', value, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          })
+                          if (value.trim()) {
+                            setValue('deployment.savedSshKeyId', '', { shouldDirty: true, shouldValidate: true })
+                          }
+                        }}
+                        error={errors.deployment?.externalSshPrivateKey?.message}
+                        hint="PEM-encoded private key (.pem). Used for this session and saved encrypted when the box below is checked."
+                        required
+                      />
+                      <label className="flex items-start gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={saveSshKeyToVault}
+                          onChange={(event) =>
+                            setValue('deployment.saveSshKeyToVault', event.target.checked, { shouldDirty: true })
+                          }
+                          className="mt-0.5 rounded border-gray-300"
+                        />
+                        <span>
+                          Save SSH key on this platform{' '}
+                          <span className="block text-xs text-gray-500">
+                            Encrypted at rest so you can reuse it when creating more stacks.
+                          </span>
+                        </span>
+                      </label>
+                      {saveSshKeyToVault ? (
+                        <FormField
+                          label="Key label (optional)"
+                          htmlFor="save-ssh-key-label"
+                          hint="Shown in the saved key dropdown"
+                        >
+                          <input
+                            id="save-ssh-key-label"
+                            type="text"
+                            placeholder="e.g. AWS production key"
+                            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            {...register('deployment.saveSshKeyLabel')}
+                          />
+                        </FormField>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-600">
+                      Using saved key — paste a new key by choosing “Paste a new key below…” in the dropdown.
+                    </p>
+                  )}
+                </div>
+              </VpcConnectionMethodTabs>
+
               {remoteOs === RemoteHostOs.Linux ? (
-                <VpcLaunchGuidePanel sshUser={externalSshUser} launchData={launchData} embedded />
+                <>
+                  <CloudTerminalPanel
+                    deployment={deploymentPayload}
+                    credentialsReady={credentialsReady}
+                    disabled={remoteOs !== RemoteHostOs.Linux}
+                    bootstrapScript={launchData?.script}
+                    sshUser={externalSshUser}
+                  />
+                  <VpcLaunchGuidePanel
+                    sshUser={externalSshUser}
+                    launchData={launchData}
+                    embedded
+                    hintsOnly
+                  />
+                </>
               ) : (
                 <p className="text-xs text-gray-600">Windows bootstrap scripts will be added when Windows VPC support ships.</p>
               )}
@@ -898,83 +1112,10 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
 
           <DeploymentSubstep
             step={3}
-            title="Connection"
-            description="Enter SSH credentials and verify the platform can reach Docker on the host."
+            title="Verify connection"
+            description="Confirm the platform can reach your server and Docker is available."
           >
-            <div className="space-y-4">
-              <VpcSecurityRolesCard compact />
-
-              <div className="grid gap-4 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <FormField
-                label="Remote Host"
-                htmlFor="external-host"
-                error={errors.deployment?.externalHost?.message}
-                hint="Public IP or DNS of your cloud instance"
-                required
-              >
-                <input
-                  id="external-host"
-                  type="text"
-                  placeholder="e.g. 203.0.113.10 or vpc-server.example.com"
-                  className={cn(
-                    'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                    errors.deployment?.externalHost ? 'border-red-400' : 'border-gray-300'
-                  )}
-                  {...register('deployment.externalHost')}
-                />
-              </FormField>
-            </div>
-            <FormField
-              label="SSH Port"
-              htmlFor="external-ssh-port"
-              error={errors.deployment?.externalSshPort?.message}
-            >
-              <input
-                id="external-ssh-port"
-                type="number"
-                min={1}
-                max={65535}
-                className={cn(
-                  'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  errors.deployment?.externalSshPort ? 'border-red-400' : 'border-gray-300'
-                )}
-                {...register('deployment.externalSshPort', { valueAsNumber: true })}
-              />
-            </FormField>
-          </div>
-
-          <FormField
-            label="SSH User"
-            htmlFor="external-ssh-user"
-            error={errors.deployment?.externalSshUser?.message}
-            hint="Typically ubuntu, ec2-user, or debian depending on your cloud image"
-            required
-          >
-            <input
-              id="external-ssh-user"
-              type="text"
-              placeholder="e.g. ubuntu"
-              className={cn(
-                'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
-                errors.deployment?.externalSshUser ? 'border-red-400' : 'border-gray-300'
-              )}
-              {...register('deployment.externalSshUser')}
-            />
-          </FormField>
-
-          <SshPrivateKeyField
-            id="external-ssh-key"
-            value={externalSshPrivateKey}
-            onChange={(value) =>
-              setValue('deployment.externalSshPrivateKey', value, { shouldDirty: true, shouldValidate: true })
-            }
-            error={errors.deployment?.externalSshPrivateKey?.message}
-            hint="PEM-encoded private key with access to the remote host. You can paste it or select a file from this machine."
-            required
-          />
-
-          <div className="space-y-3">
+            <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -1027,7 +1168,6 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                 </p>
               </div>
             )}
-          </div>
             </div>
           </DeploymentSubstep>
 

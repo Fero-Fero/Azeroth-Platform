@@ -139,6 +139,15 @@ export const stackApi = {
       undefined,
       { timeout: 300_000 },
     ),
+  syncCloudSecurityGroup: (
+    stackId: string,
+    request: import('@/types/stack.types').SyncCloudSecurityGroupRequestDto,
+  ) =>
+    apiClient.post<import('@/types/stack.types').CloudFirewallApplyResultDto>(
+      `/stacks/${stackId}/sync-cloud-security-group`,
+      request,
+      { timeout: 120_000 },
+    ),
   vpcFirewallStatus: (stackId: string) =>
     apiClient.get<import('@/types/stack.types').VpcFirewallStatusDto>(
       `/stacks/${stackId}/vpc-firewall-status`,
@@ -393,6 +402,12 @@ export const systemApi = {
       '/system/provision-remote-host',
       request
     ),
+  runVpcBootstrap: (deployment: import('@/types/stack.types').DeploymentConfigDto) =>
+    apiClient.post<import('@/types/stack.types').RemoteBootstrapResultDto>(
+      '/system/run-vpc-bootstrap',
+      { deployment },
+      { timeout: 600_000 }
+    ),
   vpcSecurityRoles: () =>
     apiClient.get<import('@/types/stack.types').VpcSecurityCatalogDto>('/system/vpc-security-roles'),
   vpcSecurityProfile: (params: {
@@ -411,6 +426,42 @@ export const systemApi = {
   vpcLaunchUserData: (sshUser?: string) =>
     apiClient.get<import('@/types/stack.types').VpcLaunchUserDataDto>('/system/vpc-launch-user-data', {
       params: sshUser ? { sshUser } : undefined,
+    }),
+}
+
+export const cloudApi = {
+  listSshKeys: () =>
+    apiClient.get<import('@/types/stack.types').CloudSshKeyDto[]>('/cloud/ssh-keys'),
+  createSshKey: (request: import('@/types/stack.types').CreateCloudSshKeyRequestDto) =>
+    apiClient.post<import('@/types/stack.types').CloudSshKeyDto>('/cloud/ssh-keys', request),
+  deleteSshKey: (id: string) => apiClient.delete(`/cloud/ssh-keys/${id}`),
+  listConnections: () =>
+    apiClient.get<import('@/types/stack.types').CloudProviderConnectionDto[]>('/cloud/connections'),
+  createConnection: (request: import('@/types/stack.types').CreateCloudProviderConnectionRequestDto) =>
+    apiClient.post<import('@/types/stack.types').CloudProviderConnectionDto>('/cloud/connections', request),
+  deleteConnection: (id: string) => apiClient.delete(`/cloud/connections/${id}`),
+  listInstances: (connectionId: string, region?: string) =>
+    apiClient.get<import('@/types/stack.types').CloudInstanceDto[]>(
+      `/cloud/connections/${connectionId}/instances`,
+      { params: region ? { region } : undefined }
+    ),
+  getLaunchDefaults: (connectionId: string) =>
+    apiClient.get<import('@/types/stack.types').CloudLaunchDefaultsDto>(
+      `/cloud/connections/${connectionId}/launch-defaults`
+    ),
+  getLaunchCatalog: (connectionId: string, region?: string) =>
+    apiClient.get<import('@/types/stack.types').CloudLaunchCatalogDto>(
+      `/cloud/connections/${connectionId}/launch-catalog`,
+      { params: region ? { region } : undefined }
+    ),
+  launch: (connectionId: string, request: import('@/types/stack.types').CloudLaunchRequestDto) =>
+    apiClient.post<import('@/types/stack.types').CloudLaunchResultDto>(
+      `/cloud/connections/${connectionId}/launch`,
+      request
+    ),
+  listAuditLogs: (limit = 100) =>
+    apiClient.get<import('@/types/stack.types').CloudAuditLogDto[]>('/cloud/audit-logs', {
+      params: { limit },
     }),
 }
 

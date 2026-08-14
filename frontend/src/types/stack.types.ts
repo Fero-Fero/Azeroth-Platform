@@ -111,6 +111,139 @@ export interface DeploymentConfigDto {
   externalSshPort: number
   externalSshUser: string
   externalSshPrivateKey: string
+  savedSshKeyId?: string
+  saveSshKeyToVault?: boolean
+  saveSshKeyLabel?: string
+}
+
+export interface CloudSshKeyDto {
+  id: string
+  label: string
+  fingerprint: string
+  defaultSshUser: string
+  createdAtUtc: string
+}
+
+export interface CreateCloudSshKeyRequestDto {
+  label: string
+  privateKey: string
+  defaultSshUser: string
+}
+
+export enum CloudProvider {
+  DigitalOcean = 'DigitalOcean',
+  Aws = 'Aws',
+  Gcp = 'Gcp',
+  Azure = 'Azure',
+  Hetzner = 'Hetzner',
+  Vultr = 'Vultr',
+}
+
+export interface CloudProviderConnectionDto {
+  id: string
+  provider: CloudProvider
+  label: string
+  defaultRegion?: string
+  createdAtUtc: string
+}
+
+export interface CreateCloudProviderConnectionRequestDto {
+  provider: CloudProvider
+  label: string
+  accessToken?: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  serviceAccountJson?: string
+  azureTenantId?: string
+  azureClientId?: string
+  azureClientSecret?: string
+  azureSubscriptionId?: string
+  defaultRegion?: string
+}
+
+export interface CloudInstanceDto {
+  id: string
+  provider: CloudProvider
+  name: string
+  region: string
+  state: string
+  publicHost: string
+  suggestedSshUser: string
+  image: string
+}
+
+export enum CloudLaunchMode {
+  Create = 'Create',
+  BootstrapExisting = 'BootstrapExisting',
+}
+
+export interface CloudLaunchRequestDto {
+  mode: CloudLaunchMode
+  name: string
+  sshUser: string
+  region?: string
+  instanceId?: string
+  size?: string
+  image?: string
+  savedSshKeyId?: string
+  generateSshKey?: boolean
+}
+
+export interface CloudLaunchResultDto {
+  instance: CloudInstanceDto
+  savedSshKeyId?: string
+  message: string
+  bootstrapCommandId?: string
+}
+
+export interface CloudLaunchDefaultsDto {
+  provider: CloudProvider
+  region: string
+  size: string
+  image: string
+  sshUser: string
+  supportsCreate: boolean
+  supportsBootstrapExisting: boolean
+}
+
+export interface CloudLaunchCatalogOptionDto {
+  value: string
+  label: string
+  description?: string
+}
+
+export interface CloudLaunchCatalogDto {
+  provider: CloudProvider
+  regions: CloudLaunchCatalogOptionDto[]
+  sizes: CloudLaunchCatalogOptionDto[]
+  images: CloudLaunchCatalogOptionDto[]
+}
+
+export interface CloudAuditLogDto {
+  id: string
+  occurredAtUtc: string
+  actor: string
+  eventType: string
+  resourceType: string
+  resourceId?: string
+  summary: string
+  metadataJson?: string
+}
+
+export interface SyncCloudSecurityGroupRequestDto {
+  connectionId: string
+  adminSourceCidr: string
+  instanceId?: string
+  region?: string
+}
+
+export interface CloudFirewallApplyResultDto {
+  success: boolean
+  message: string
+  provider: CloudProvider
+  rulesApplied: number
+  rulesSkipped: number
+  securityGroupIds: string[]
 }
 
 export interface StackConfigurationDto {
@@ -174,6 +307,13 @@ export interface RemoteSetupResultDto {
   message: string
   serverVersion?: string
   steps?: RemotePrerequisiteCheckDto[]
+}
+
+export interface RemoteBootstrapResultDto {
+  success: boolean
+  message: string
+  output?: string
+  dockerVersion?: string
 }
 
 export enum RemoteHostOs {

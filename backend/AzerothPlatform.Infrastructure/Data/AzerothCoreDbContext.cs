@@ -16,6 +16,12 @@ public class AzerothCoreDbContext : DbContext
 
     public DbSet<ManagedStackEntity> ManagedStacks => Set<ManagedStackEntity>();
 
+    public DbSet<CloudSshKeyEntity> CloudSshKeys => Set<CloudSshKeyEntity>();
+
+    public DbSet<CloudProviderConnectionEntity> CloudProviderConnections => Set<CloudProviderConnectionEntity>();
+
+    public DbSet<CloudAuditLogEntity> CloudAuditLogs => Set<CloudAuditLogEntity>();
+
     public DbSet<CatalogModuleEntity> CatalogModules => Set<CatalogModuleEntity>();
 
     public DbSet<StackRevisionEntity> StackRevisions => Set<StackRevisionEntity>();
@@ -51,6 +57,41 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.ExternalHost).HasMaxLength(255).IsRequired();
             entity.Property(stack => stack.ExternalSshUser).HasMaxLength(64).IsRequired();
             entity.Property(stack => stack.ExternalSshPrivateKey).IsRequired();
+        });
+
+        modelBuilder.Entity<CloudSshKeyEntity>(entity =>
+        {
+            entity.ToTable("CloudSshKeys");
+            entity.HasKey(key => key.Id);
+            entity.Property(key => key.Id).HasMaxLength(64);
+            entity.Property(key => key.Label).HasMaxLength(100).IsRequired();
+            entity.Property(key => key.ProtectedPrivateKey).IsRequired();
+            entity.Property(key => key.Fingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(key => key.DefaultSshUser).HasMaxLength(64).IsRequired();
+        });
+
+        modelBuilder.Entity<CloudProviderConnectionEntity>(entity =>
+        {
+            entity.ToTable("CloudProviderConnections");
+            entity.HasKey(connection => connection.Id);
+            entity.Property(connection => connection.Id).HasMaxLength(64);
+            entity.Property(connection => connection.Provider).HasMaxLength(32).IsRequired();
+            entity.Property(connection => connection.Label).HasMaxLength(100).IsRequired();
+            entity.Property(connection => connection.ProtectedCredentials).IsRequired();
+            entity.Property(connection => connection.DefaultRegion).HasMaxLength(64).IsRequired();
+        });
+
+        modelBuilder.Entity<CloudAuditLogEntity>(entity =>
+        {
+            entity.ToTable("CloudAuditLogs");
+            entity.HasKey(entry => entry.Id);
+            entity.HasIndex(entry => entry.OccurredAtUtc);
+            entity.Property(entry => entry.Id).HasMaxLength(64);
+            entity.Property(entry => entry.Actor).HasMaxLength(128).IsRequired();
+            entity.Property(entry => entry.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(entry => entry.ResourceType).HasMaxLength(32).IsRequired();
+            entity.Property(entry => entry.ResourceId).HasMaxLength(64);
+            entity.Property(entry => entry.Summary).HasMaxLength(500).IsRequired();
         });
 
         modelBuilder.Entity<CatalogModuleEntity>(entity =>

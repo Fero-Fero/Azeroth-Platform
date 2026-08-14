@@ -52,7 +52,7 @@ export default function IndividualProgressionSyncHint({
         <Info className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-sm text-violet-900">
-            Sync with mod-individual-progression on the{' '}
+            Open the{' '}
             {patchesHref ? (
               <a
                 href={patchesHref}
@@ -63,7 +63,8 @@ export default function IndividualProgressionSyncHint({
             ) : (
               <strong>Patches tab</strong>
             )}{' '}
-            to simulate progression.
+            to <strong>prepare server-wide progression</strong> (bootstrap), run{' '}
+            <strong>Sync with mod-individual-progression</strong>, and apply patches in order.
           </p>
         </div>
         <button

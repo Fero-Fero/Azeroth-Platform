@@ -15,6 +15,7 @@ const ContainerLogsPage = lazyWithRetry(() => import('@/pages/ContainerLogsPage'
 const LauncherPage = lazyWithRetry(() => import('@/pages/LauncherPage'))
 const GlobalNewsPage = lazyWithRetry(() => import('@/pages/GlobalNewsPage'))
 const GlobalDockerPage = lazyWithRetry(() => import('@/pages/GlobalDockerPage'))
+const CloudSettingsPage = lazyWithRetry(() => import('@/pages/CloudSettingsPage'))
 const NotFoundPage = lazyWithRetry(() => import('@/pages/NotFoundPage'))
 const LoginPage = lazyWithRetry(() => import('@/pages/LoginPage'))
 
@@ -43,6 +44,7 @@ function App() {
             <Route path="launcher" element={<Suspense fallback={<PageLoader />}><LauncherPage /></Suspense>} />
             <Route path="news" element={<Suspense fallback={<PageLoader />}><GlobalNewsPage /></Suspense>} />
             <Route path="docker" element={<Suspense fallback={<PageLoader />}><GlobalDockerPage /></Suspense>} />
+            <Route path="cloud" element={<Suspense fallback={<PageLoader />}><CloudSettingsPage /></Suspense>} />
             <Route path="*" element={<Suspense fallback={<PageLoader />}><NotFoundPage /></Suspense>} />
           </Route>
         </Routes>

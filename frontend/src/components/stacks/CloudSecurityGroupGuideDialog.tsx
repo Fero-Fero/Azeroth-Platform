@@ -255,8 +255,8 @@ export function CloudSecurityGroupGuideDialog({
             </h2>
             <p className="mt-1 text-sm text-gray-600">
               Host <span className="font-medium">ufw</span> (from Setup Now) protects the Linux instance.
-              Your cloud provider&apos;s security group is a separate layer in front of the VPC — you configure
-              it manually in AWS, GCP, or Azure (automatic sync is planned for a future release).
+              Your cloud provider&apos;s security group is a separate layer in front of the VPC — configure it
+              manually in AWS, GCP, or Azure, or use the optional AWS automation on the stack overview.
             </p>
           </div>
           <button

@@ -7,6 +7,7 @@ using AzerothPlatform.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using AzerothPlatform.Core.Services.Interfaces;
 
 namespace AzerothPlatform.Api.Controllers;
 
@@ -20,13 +21,16 @@ namespace AzerothPlatform.Api.Controllers;
 public class SystemController : ControllerBase
 {
     private readonly IRemoteEngineService _remoteEngine;
+    private readonly ICloudSshKeyService _cloudSshKeyService;
     private readonly MigrationOptions _migrationOptions;
 
     public SystemController(
         IRemoteEngineService remoteEngine,
+        ICloudSshKeyService cloudSshKeyService,
         IOptions<MigrationOptions> migrationOptions)
     {
         _remoteEngine = remoteEngine;
+        _cloudSshKeyService = cloudSshKeyService;
         _migrationOptions = migrationOptions.Value;
     }
 
@@ -257,11 +261,25 @@ public class SystemController : ControllerBase
         CancellationToken cancellationToken)
     {
         var deployment = request.Deployment ?? new DeploymentConfigDto();
+        string privateKey;
+        try
+        {
+            privateKey = await DeploymentSshKeyResolver.ResolvePrivateKeyAsync(
+                deployment,
+                _cloudSshKeyService,
+                "connection-test",
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
         var result = await _remoteEngine.TestConnectionAsync(
             deployment.ExternalHost,
             deployment.ExternalSshPort,
             deployment.ExternalSshUser,
-            deployment.ExternalSshPrivateKey,
+            privateKey,
             request.Phase,
             cancellationToken);
 
@@ -276,11 +294,25 @@ public class SystemController : ControllerBase
     {
         var deployment = request.Deployment ?? new DeploymentConfigDto();
         var options = request.Options ?? new RemoteSetupOptionsDto();
+        string privateKey;
+        try
+        {
+            privateKey = await DeploymentSshKeyResolver.ResolvePrivateKeyAsync(
+                deployment,
+                _cloudSshKeyService,
+                "connection-test",
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
         var result = await _remoteEngine.ProvisionRemoteHostAsync(
             deployment.ExternalHost,
             deployment.ExternalSshPort,
             deployment.ExternalSshUser,
-            deployment.ExternalSshPrivateKey,
+            privateKey,
             options,
             cancellationToken);
 
@@ -299,6 +331,38 @@ public class SystemController : ControllerBase
     [HttpGet("vpc-launch-user-data")]
     public ActionResult<VpcLaunchUserDataDto> GetVpcLaunchUserData([FromQuery] string? sshUser = "ubuntu")
         => Ok(VpcBootstrapUserData.CreateDto(sshUser ?? "ubuntu"));
+
+    /// <summary>Runs the VPC bootstrap script on a remote host over SSH (preferred over terminal paste).</summary>
+    [HttpPost("run-vpc-bootstrap")]
+    public async Task<ActionResult<RemoteBootstrapResultDto>> RunVpcBootstrap(
+        [FromBody] RemoteConnectionTestRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var deployment = request.Deployment ?? new DeploymentConfigDto();
+        string privateKey;
+        try
+        {
+            privateKey = await DeploymentSshKeyResolver.ResolvePrivateKeyAsync(
+                deployment,
+                _cloudSshKeyService,
+                "bootstrap",
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+
+        var result = await _remoteEngine.RunVpcBootstrapScriptAsync(
+            deployment.ExternalHost,
+            deployment.ExternalSshPort,
+            deployment.ExternalSshUser,
+            privateKey,
+            deployment.ExternalSshUser,
+            cancellationToken);
+
+        return Ok(result);
+    }
 
     /// <summary>Suggested firewall rules before stack ports are fully known.</summary>
     [HttpGet("vpc-security-profile")]

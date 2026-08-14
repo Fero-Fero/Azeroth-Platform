@@ -23,16 +23,31 @@ public static class VpcBootstrapUserData
               exit 1
             fi
 
-            apt-get update -qq
-            apt-get install -y docker.io docker-compose-v2
-            systemctl enable --now docker
-            usermod -aG docker {{user}}
+            if [ "$(id -u)" -eq 0 ]; then
+              SUDO=""
+            elif command -v sudo >/dev/null 2>&1; then
+              SUDO="sudo"
+            else
+              echo "Run as root or install sudo, then re-run this script." >&2
+              exit 1
+            fi
 
-            echo '{{user}} ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/90-azeroth-platform
-            chmod 440 /etc/sudoers.d/90-azeroth-platform
+            echo "==> Updating package lists…"
+            $SUDO apt-get update -qq
+            echo "==> Installing Docker Engine and Compose…"
+            $SUDO apt-get install -y docker.io docker-compose-v2
+            echo "==> Starting Docker…"
+            $SUDO systemctl enable --now docker
+            echo "==> Granting Docker access to {{user}}…"
+            $SUDO usermod -aG docker {{user}}
 
-            mkdir -p /var/lib/azeroth-platform
-            date -u +%Y-%m-%dT%H:%M:%SZ > /var/lib/azeroth-platform/bootstrap-ready
+            echo '{{user}} ALL=(ALL) NOPASSWD:ALL' | $SUDO tee /etc/sudoers.d/90-azeroth-platform >/dev/null
+            $SUDO chmod 440 /etc/sudoers.d/90-azeroth-platform
+
+            $SUDO mkdir -p /var/lib/azeroth-platform
+            date -u +%Y-%m-%dT%H:%M:%SZ | $SUDO tee /var/lib/azeroth-platform/bootstrap-ready >/dev/null
+            echo "==> Bootstrap complete. Docker is installed — run Test connection in the wizard."
+            $SUDO docker --version 2>/dev/null || true
             """;
     }
 

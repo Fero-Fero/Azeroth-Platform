@@ -1,0 +1,194 @@
+using System.Net;
+using System.Text.Json;
+using AzerothPlatform.Core.Contracts;
+using AzerothPlatform.Core.Services.Interfaces;
+using AzerothPlatform.Infrastructure.Data;
+using AzerothPlatform.Infrastructure.Services.Cloud;
+using Microsoft.EntityFrameworkCore;
+
+namespace AzerothPlatform.Infrastructure.Services;
+
+public sealed class CloudFirewallService : ICloudFirewallService
+{
+    private readonly AzerothCoreDbContext _dbContext;
+    private readonly ISecretProtector _secretProtector;
+    private readonly AwsEc2Client _awsEc2Client;
+    private readonly ICloudAuditService _cloudAuditService;
+
+    public CloudFirewallService(
+        AzerothCoreDbContext dbContext,
+        ISecretProtector secretProtector,
+        AwsEc2Client awsEc2Client,
+        ICloudAuditService cloudAuditService)
+    {
+        _dbContext = dbContext;
+        _secretProtector = secretProtector;
+        _awsEc2Client = awsEc2Client;
+        _cloudAuditService = cloudAuditService;
+    }
+
+    public async Task<CloudFirewallApplyResultDto> ApplyStackSecurityGroupRulesAsync(
+        string stackId,
+        SyncCloudSecurityGroupRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(entity => entity.Id == stackId, cancellationToken)
+            ?? throw new KeyNotFoundException("Stack not found.");
+
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("Cloud security group automation is only available for external VPC stacks.");
+        }
+
+        var publicHost = (stack.ExternalHost ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(publicHost))
+        {
+            throw new InvalidOperationException("This stack has no external host configured.");
+        }
+
+        var connectionId = (request.ConnectionId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(connectionId))
+        {
+            throw new ArgumentException("A linked cloud connection is required.");
+        }
+
+        var adminCidr = ValidateAdminSourceCidr(request.AdminSourceCidr);
+
+        var connection = await _dbContext.CloudProviderConnections.AsNoTracking()
+            .FirstOrDefaultAsync(entity => entity.Id == connectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Cloud connection not found.");
+
+        if (!Enum.TryParse<CloudProvider>(connection.Provider, ignoreCase: true, out var provider)
+            || provider != CloudProvider.Aws)
+        {
+            throw new InvalidOperationException("Only AWS connections support automated security group sync today.");
+        }
+
+        var profile = VpcSecurityCatalog.BuildProfile(
+            publicHost,
+            stack.AuthServerPort,
+            stack.WorldServerPort,
+            stack.ArmoryPort,
+            stack.ClientPort,
+            stack.DatabasePort,
+            stack.SoapPort,
+            stack.ExternalSshPort);
+
+        var ingressRules = profile.CloudSecurityGroupRules
+            .Select(rule => new AwsEc2Client.AwsIngressRule
+            {
+                Port = rule.Port,
+                Protocol = "tcp",
+                Cidr = ResolveRuleCidr(rule.Source, adminCidr),
+                Description = rule.Description ?? string.Empty,
+            })
+            .ToList();
+
+        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
+            _secretProtector,
+            connection.ProtectedCredentials);
+
+        var instanceId = (request.InstanceId ?? string.Empty).Trim();
+        var region = (request.Region ?? connection.DefaultRegion ?? string.Empty).Trim();
+
+        var target = await _awsEc2Client.ResolveInstanceForFirewallAsync(
+            credentials.AccessKeyId,
+            credentials.SecretAccessKey,
+            publicHost,
+            string.IsNullOrWhiteSpace(region) ? null : region,
+            string.IsNullOrWhiteSpace(instanceId) ? null : instanceId,
+            cancellationToken);
+
+        var (applied, skipped) = await _awsEc2Client.ApplySecurityGroupIngressRulesAsync(
+            credentials.AccessKeyId,
+            credentials.SecretAccessKey,
+            target.Region,
+            target.SecurityGroupIds,
+            ingressRules,
+            cancellationToken);
+
+        var message = applied > 0
+            ? $"Applied {applied} ingress rule(s) to {target.SecurityGroupIds.Count} AWS security group(s). Skipped {skipped} duplicate rule(s)."
+            : skipped > 0
+                ? $"All {skipped} rule(s) were already present on the instance security group(s)."
+                : "No security group rules were applied.";
+
+        await _cloudAuditService.WriteAsync(
+            new WriteCloudAuditLogRequestDto
+            {
+                EventType = CloudAuditEventTypes.CloudFirewallApplied,
+                ResourceType = "stack",
+                ResourceId = stackId,
+                Summary = message,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    connectionId,
+                    provider = CloudProvider.Aws.ToString(),
+                    instanceId = target.InstanceId,
+                    region = target.Region,
+                    publicHost = target.PublicHost,
+                    adminSourceCidr = adminCidr,
+                    rulesApplied = applied,
+                    rulesSkipped = skipped,
+                    securityGroupIds = target.SecurityGroupIds,
+                }),
+            },
+            cancellationToken);
+
+        return new CloudFirewallApplyResultDto
+        {
+            Success = true,
+            Message = message,
+            Provider = CloudProvider.Aws,
+            RulesApplied = applied,
+            RulesSkipped = skipped,
+            SecurityGroupIds = target.SecurityGroupIds,
+        };
+    }
+
+    private static string ValidateAdminSourceCidr(string? value)
+    {
+        var cidr = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(cidr))
+        {
+            throw new ArgumentException("Admin source CIDR is required (for example 203.0.113.10/32).");
+        }
+
+        var slashIndex = cidr.LastIndexOf('/');
+        if (slashIndex <= 0 || slashIndex >= cidr.Length - 1)
+        {
+            throw new ArgumentException("Admin source CIDR must include a prefix length, for example 203.0.113.10/32.");
+        }
+
+        var addressPart = cidr[..slashIndex];
+        if (!IPAddress.TryParse(addressPart, out _))
+        {
+            throw new ArgumentException("Admin source CIDR contains an invalid IP address.");
+        }
+
+        if (!int.TryParse(cidr[(slashIndex + 1)..], out var prefixLength)
+            || prefixLength is < 0 or > 32)
+        {
+            throw new ArgumentException("Admin source CIDR prefix length must be between 0 and 32.");
+        }
+
+        return cidr;
+    }
+
+    private static string ResolveRuleCidr(string? template, string adminCidr)
+    {
+        var source = (template ?? string.Empty).Trim();
+        if (string.Equals(source, "your-ip/32", StringComparison.OrdinalIgnoreCase))
+        {
+            return adminCidr;
+        }
+
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            throw new InvalidOperationException("Cloud security group profile rule is missing a source CIDR.");
+        }
+
+        return source;
+    }
+}

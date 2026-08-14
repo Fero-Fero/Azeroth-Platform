@@ -174,7 +174,7 @@ export default function StackListPage() {
         }
       />
 
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Your Stacks</h1>
           <p className="mt-1 text-gray-500">
@@ -182,28 +182,29 @@ export default function StackListPage() {
             cached until you refresh or open a stack for a live update.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => probeAll.mutate()}
             disabled={isProbing || stacks.length === 0}
-            className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            {isProbing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {isProbing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Refresh all
           </button>
           <button
             onClick={() => setImportDialogOpen(true)}
-            className="flex items-center gap-2 rounded-md bg-white border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
           >
-            <Download className="h-4 w-4" />
-            Import Existing Stacks
+            <Download className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Import Existing Stacks</span>
+            <span className="sm:hidden">Import</span>
           </button>
           <Link
             to="/stacks/new"
-            className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             Create Stack
           </Link>
         </div>
@@ -235,19 +236,19 @@ export default function StackListPage() {
         <div className="rounded-lg border-2 border-dashed border-gray-300 p-12 text-center">
           <h3 className="text-lg font-medium text-gray-900">No stacks yet</h3>
           <p className="mt-2 text-gray-500">Get started by creating your first AzerothCore server stack or import an existing one.</p>
-          <div className="mt-4 flex items-center justify-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <button
               onClick={() => setImportDialogOpen(true)}
-              className="inline-flex items-center gap-2 rounded-md bg-white border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-3.5 w-3.5" />
               Import Existing Stacks
             </button>
             <Link
               to="/stacks/new"
-              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-3.5 w-3.5" />
               Create Stack
             </Link>
           </div>
@@ -273,10 +274,10 @@ export default function StackListPage() {
             return (
               <div
                 key={stack.stackId}
-                className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow"
+                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-3">
                       <Link
                         to={`/stacks/${stack.stackId}`}
@@ -329,17 +330,17 @@ export default function StackListPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
                     {(isStopped || isDegraded) && (
                       <button
                         onClick={() => startStack.mutate(stack.stackId)}
                         disabled={lifecycleBusy}
-                        className="flex items-center gap-2 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                       >
                         {startActionBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Play className="h-4 w-4" />
+                          <Play className="h-3.5 w-3.5" />
                         )}
                         {startActionBusy ? 'Starting…' : 'Start'}
                       </button>
@@ -349,12 +350,12 @@ export default function StackListPage() {
                         onClick={() => startDatabase.mutate(stack.stackId)}
                         disabled={lifecycleBusy}
                         title="Start only the database container (for patches/maintenance)"
-                        className="flex items-center gap-2 rounded-md border border-green-600 bg-white px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md border border-green-600 bg-white px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
                       >
                         {startDbActionBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Database className="h-4 w-4" />
+                          <Database className="h-3.5 w-3.5" />
                         )}
                         {startDbActionBusy ? 'Starting DB…' : 'Start DB'}
                       </button>
@@ -363,12 +364,12 @@ export default function StackListPage() {
                       <button
                         onClick={() => restartStack.mutate(stack.stackId)}
                         disabled={lifecycleBusy}
-                        className="flex items-center gap-2 rounded-md bg-yellow-600 px-3 py-2 text-sm font-medium text-white hover:bg-yellow-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-yellow-600 px-2 py-1 text-xs font-medium text-white hover:bg-yellow-700 disabled:opacity-50"
                       >
                         {restartActionBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <RefreshCw className="h-4 w-4" />
+                          <RefreshCw className="h-3.5 w-3.5" />
                         )}
                         {restartActionBusy ? 'Restarting…' : 'Restart'}
                       </button>
@@ -377,12 +378,12 @@ export default function StackListPage() {
                       <button
                         onClick={() => stopStack.mutate(stack.stackId)}
                         disabled={lifecycleBusy}
-                        className="flex items-center gap-2 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
                       >
                         {stopActionBusy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Square className="h-4 w-4" />
+                          <Square className="h-3.5 w-3.5" />
                         )}
                         {stopActionBusy ? 'Stopping…' : 'Stop'}
                       </button>
@@ -390,9 +391,9 @@ export default function StackListPage() {
                     {stack.status === 'Building' && (
                       <Link
                         to={`/stacks/${stack.stackId}/build`}
-                        className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100"
+                        className="inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
                       >
-                        <Hammer className="h-4 w-4" />
+                        <Hammer className="h-3.5 w-3.5" />
                         View progress
                       </Link>
                     )}
@@ -401,13 +402,13 @@ export default function StackListPage() {
                       <button
                         onClick={() => rebuildStack.mutate(stack.stackId)}
                         disabled={rebuildStack.isPending}
-                        className="flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                         title={stack.status === 'Building' ? 'Retry build' : 'Rebuild stack'}
                       >
                         {rebuildStack.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Hammer className="h-4 w-4" />
+                          <Hammer className="h-3.5 w-3.5" />
                         )}
                         Rebuild
                       </button>
@@ -420,10 +421,10 @@ export default function StackListPage() {
                           isExternal,
                         })
                       }
-                      className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
                       title="Delete stack"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>

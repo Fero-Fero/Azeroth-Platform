@@ -63,12 +63,12 @@ public sealed class AzerothPlatformWebApplicationFactory : WebApplicationFactory
                 .ReturnsAsync(false);
             mockDocker
                 .Setup(d => d.ListContainersAsync(
-                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(
                     Array.Empty<AzerothPlatform.Core.Contracts.ContainerStatusDto>());
             mockDocker
                 .Setup(d => d.ListContainersWithEngineStatusAsync(
-                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new AzerothPlatform.Core.Contracts.DockerListContainersResult
                 {
                     EngineReachable = false,
