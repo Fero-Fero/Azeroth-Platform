@@ -15,6 +15,7 @@ const ContainerLogsPage = lazyWithRetry(() => import('@/pages/ContainerLogsPage'
 const LauncherPage = lazyWithRetry(() => import('@/pages/LauncherPage'))
 const GlobalNewsPage = lazyWithRetry(() => import('@/pages/GlobalNewsPage'))
 const GlobalDockerPage = lazyWithRetry(() => import('@/pages/GlobalDockerPage'))
+const CloudOAuthCallbackPage = lazyWithRetry(() => import('@/pages/CloudOAuthCallbackPage'))
 const CloudSettingsPage = lazyWithRetry(() => import('@/pages/CloudSettingsPage'))
 const NotFoundPage = lazyWithRetry(() => import('@/pages/NotFoundPage'))
 const LoginPage = lazyWithRetry(() => import('@/pages/LoginPage'))
@@ -27,6 +28,10 @@ function App() {
       <BrowserRouter basename="/admin">
         <Routes>
           <Route path="/login" element={<Suspense fallback={<PageLoader />}><LoginPage /></Suspense>} />
+          <Route
+            path="/cloud/oauth-callback"
+            element={<Suspense fallback={<PageLoader />}><CloudOAuthCallbackPage /></Suspense>}
+          />
           <Route
             path="/"
             element={

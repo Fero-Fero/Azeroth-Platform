@@ -11,20 +11,20 @@ namespace AzerothPlatform.Infrastructure.Services;
 public sealed class CloudFirewallService : ICloudFirewallService
 {
     private readonly AzerothCoreDbContext _dbContext;
-    private readonly ISecretProtector _secretProtector;
     private readonly AwsEc2Client _awsEc2Client;
     private readonly ICloudAuditService _cloudAuditService;
+    private readonly IAwsCredentialResolver _awsCredentialResolver;
 
     public CloudFirewallService(
         AzerothCoreDbContext dbContext,
-        ISecretProtector secretProtector,
         AwsEc2Client awsEc2Client,
-        ICloudAuditService cloudAuditService)
+        ICloudAuditService cloudAuditService,
+        IAwsCredentialResolver awsCredentialResolver)
     {
         _dbContext = dbContext;
-        _secretProtector = secretProtector;
         _awsEc2Client = awsEc2Client;
         _cloudAuditService = cloudAuditService;
+        _awsCredentialResolver = awsCredentialResolver;
     }
 
     public async Task<CloudFirewallApplyResultDto> ApplyStackSecurityGroupRulesAsync(
@@ -85,24 +85,20 @@ public sealed class CloudFirewallService : ICloudFirewallService
             })
             .ToList();
 
-        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
-            _secretProtector,
-            connection.ProtectedCredentials);
+        var credentials = await _awsCredentialResolver.ResolveAsync(connection, cancellationToken);
 
         var instanceId = (request.InstanceId ?? string.Empty).Trim();
         var region = (request.Region ?? connection.DefaultRegion ?? string.Empty).Trim();
 
         var target = await _awsEc2Client.ResolveInstanceForFirewallAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             publicHost,
             string.IsNullOrWhiteSpace(region) ? null : region,
             string.IsNullOrWhiteSpace(instanceId) ? null : instanceId,
             cancellationToken);
 
         var (applied, skipped) = await _awsEc2Client.ApplySecurityGroupIngressRulesAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             target.Region,
             target.SecurityGroupIds,
             ingressRules,
@@ -145,6 +141,104 @@ public sealed class CloudFirewallService : ICloudFirewallService
             RulesSkipped = skipped,
             SecurityGroupIds = target.SecurityGroupIds,
         };
+    }
+
+    public async Task<CloudFirewallProbeResultDto> ProbeLaunchSecurityGroupAsync(
+        string connectionId,
+        CloudFirewallProbeRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var host = (request.PublicHost ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new ArgumentException("Public host is required.");
+        }
+
+        var connection = await _dbContext.CloudProviderConnections.AsNoTracking()
+            .FirstOrDefaultAsync(entity => entity.Id == connectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Cloud connection not found.");
+
+        if (!Enum.TryParse<CloudProvider>(connection.Provider, ignoreCase: true, out var provider)
+            || provider != CloudProvider.Aws)
+        {
+            return new CloudFirewallProbeResultDto
+            {
+                Success = false,
+                Message = "Cloud security group probe currently supports AWS only.",
+                Checks =
+                [
+                    new RemotePrerequisiteCheckDto
+                    {
+                        Name = "Cloud security group",
+                        Passed = false,
+                        Message = "Automated security group checks are only implemented for AWS."
+                    }
+                ]
+            };
+        }
+
+        var credentials = await _awsCredentialResolver.ResolveAsync(connection, cancellationToken);
+        var actual = await _awsEc2Client.ListInstanceIngressRulesAsync(
+            credentials,
+            host,
+            string.IsNullOrWhiteSpace(request.Region) ? connection.DefaultRegion : request.Region,
+            request.InstanceId,
+            cancellationToken);
+
+        var expected = VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr);
+        var checks = new List<RemotePrerequisiteCheckDto>();
+        foreach (var rule in expected)
+        {
+            var present = actual.Any(item =>
+                item.Port == rule.Port
+                && string.Equals(item.Protocol, "tcp", StringComparison.OrdinalIgnoreCase)
+                && CidrCovers(item.Cidr, rule.Source));
+            checks.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = $"AWS SG tcp/{rule.Port}",
+                Passed = present,
+                Message = present
+                    ? $"{rule.Description} is open in the instance security group."
+                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the instance security group."
+            });
+        }
+
+        foreach (var denied in new (int Port, string Label)[] { (3306, "MySQL"), (7878, "SOAP") })
+        {
+            var publicOpen = actual.Any(item =>
+                item.Port == denied.Port
+                && (item.Cidr == "0.0.0.0/0" || item.Cidr == "::/0"));
+            checks.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = $"AWS SG deny {denied.Port}/tcp ({denied.Label})",
+                Passed = !publicOpen,
+                Message = publicOpen
+                    ? $"{denied.Label} is open to the internet on the instance security group."
+                    : $"{denied.Label} is not publicly opened (expected)."
+            });
+        }
+
+        var success = checks.All(check => check.Passed);
+        return new CloudFirewallProbeResultDto
+        {
+            Success = success,
+            Message = success
+                ? "Cloud security group matches the launch profile."
+                : "Cloud security group does not yet match the launch profile.",
+            Checks = checks,
+        };
+    }
+
+    private static bool CidrCovers(string actualCidr, string expectedCidr)
+    {
+        var actual = (actualCidr ?? string.Empty).Trim();
+        var expected = (expectedCidr ?? string.Empty).Trim();
+        if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return actual is "0.0.0.0/0" or "::/0";
     }
 
     private static string ValidateAdminSourceCidr(string? value)

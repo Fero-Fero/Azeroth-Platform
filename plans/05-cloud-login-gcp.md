@@ -87,7 +87,17 @@ Requires `compute` scope + IAM roles on user (`compute.admin` or custom role).
 
 ---
 
-## Part 2 — Automatic VPC firewall setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**. Shared specs: [`09`](../plans_support/09-cloud-security-group-providers.md) (2A/2B), [`10`](../plans_support/10-wow-vpc-network-security.md) (2C).
+
+| Part | Goal |
+|------|------|
+| **2A VPC firewall** | Tag-based rules; SSH admin CIDR only |
+| **2B API identity** | User OAuth or dedicated SA — **not** the Google Cloud org super-admin / owner key |
+| **2C Host SSH** | Operator user; root/`ubuntu` internet-SSH ❌; serial / IAP for break-glass |
+
+### 2A — Automatic VPC firewall setup
 
 | Step | Action |
 |------|--------|
@@ -100,9 +110,13 @@ Requires `compute` scope + IAM roles on user (`compute.admin` or custom role).
 
 ---
 
-## SSH hardening (operator user + final lockdown)
+### 2B — API identity (not the GCP org owner)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+- User OAuth with `compute` scope **or** a dedicated service account JSON
+- Do not store the Google account owner’s user password; SA keys must be least-privilege (`compute.admin` or custom)
+- Firewall write: `compute.firewalls.create`, `compute.instances.setTags`
+
+### 2C — SSH: root locked out of the public internet
 
 ### During setup
 

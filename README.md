@@ -257,8 +257,8 @@ Optionally apply AWS security group rules from the same panel when using a linke
 3. On the **Deployment** step choose **External VPC**, then either:
    - Use the [cloud wizard](#cloud-wizard-digitalocean-aws-gcp) (link an account, pick or launch a VM), or
    - Enter the host, SSH user, and private key manually.
-4. Use the in-browser terminal and bootstrap script if Docker is not installed yet, then **Test connection**.
-5. Optionally run **First Time Setup**, acknowledge cloud firewall rules, and continue the wizard.
+4. Choose **Configure VPC** to use the in-browser terminal and First Time Setup, or **Skip configuration** if the host is already prepared.
+5. **Test connection**, then continue the wizard. If you configured the VPC, acknowledge cloud firewall rules first.
 6. Manage saved SSH keys, linked accounts, and the [audit log](#cloud-wizard-digitalocean-aws-gcp) under **Cloud**
    in the nav (`/admin/cloud`).
 
@@ -278,9 +278,9 @@ available yet). Supported cloud providers: **DigitalOcean, Hetzner, Vultr, AWS, 
 | Step | What you do |
 | --- | --- |
 | **1 — OS** | Choose **Linux** (Ubuntu/Debian recommended). |
-| **2 — Connection & bootstrap** | Link a cloud account, pick an existing VM or launch a new one, paste or save an SSH key, open the in-browser terminal, copy the bootstrap script if needed. |
-| **3 — Verify** | **Test connection** (SSH + Docker check). Must pass before continuing. |
-| **4 — First Time Setup** | Optional stack prep on the remote host (name stays **First Time Setup**). |
+| **2 — Connect** | Link a cloud account, pick an existing VM or launch a new one, or enter a host and SSH key. |
+| **3 — Setup VPC** | **Configure VPC** (in-browser terminal, bootstrap, First Time Setup) or **Skip configuration**. |
+| **4 — Verify** | **Test connection** (SSH + Docker check). Must pass before continuing. |
 
 **Pick from cloud account** vs **Launch via platform** (both use the same linked account):
 
@@ -342,7 +342,8 @@ Use a dedicated IAM user (access key). Three common permission sets:
       "ec2:DescribeTags",
       "ec2:DescribeImages",
       "ec2:DescribeRegions",
-      "ec2:DescribeInstanceTypeOfferings"
+      "ec2:DescribeInstanceTypeOfferings",
+      "ec2:DescribeInstanceTypes"
     ],
     "Resource": "*"
   }]
@@ -365,6 +366,7 @@ needed:
       "ec2:DescribeImages",
       "ec2:DescribeRegions",
       "ec2:DescribeInstanceTypeOfferings",
+      "ec2:DescribeInstanceTypes",
       "ec2:DescribeVpcs",
       "ec2:DescribeSubnets",
       "ec2:DescribeSecurityGroups",

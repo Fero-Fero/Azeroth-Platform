@@ -8,7 +8,8 @@ import {
   type CloudLaunchCatalogOptionDto,
   type CloudLaunchResultDto,
 } from '@/types/stack.types'
-import { cn } from '@/lib/utils'
+import { cn, apiErrorMessage } from '@/lib/utils'
+import { downloadPemFile } from '@/lib/ssh-key-download'
 
 interface CloudLaunchPanelProps {
   disabled?: boolean
@@ -17,17 +18,21 @@ interface CloudLaunchPanelProps {
   connectionId?: string
   onConnectionIdChange?: (connectionId: string) => void
   onLaunched: (result: CloudLaunchResultDto) => void
+  /** Skip the collapsible chrome (used inside Configure instance). */
+  embedded?: boolean
+  /** Hide the linked-account dropdown when the parent already selected one. */
+  hideAccountSelect?: boolean
+  applyNetworkProfile?: boolean
+  adminSourceCidr?: string
 }
 
 function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object' && 'response' in error) {
-    const data = (error as { response?: { data?: unknown } }).response?.data
-    if (typeof data === 'string' && data.trim().length > 0) {
-      return data
-    }
+  const message = apiErrorMessage(error)
+  if (!message || message === 'Something went wrong.' || message === 'Request failed with status code 500') {
+    return fallback
   }
 
-  return fallback
+  return message
 }
 
 function withCurrentOption(
@@ -63,43 +68,47 @@ function CatalogField({
   onChange,
   placeholder = 'Select…',
 }: CatalogFieldProps) {
-  if (options.length > 0) {
-    return (
-      <div>
-        <label htmlFor={id} className="block text-xs font-medium text-gray-800">
-          {label}
-        </label>
-        <select
-          id={id}
-          value={value}
-          disabled={disabled || loading}
-          onChange={(event) => onChange(event.target.value)}
-          className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
-        >
-          <option value="">{loading ? 'Loading…' : placeholder}</option>
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    )
-  }
+  const busy = loading && !disabled
 
   return (
     <div>
-      <label htmlFor={id} className="block text-xs font-medium text-gray-800">
+      <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium text-gray-800">
         {label}
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600" aria-hidden="true" />
+        ) : null}
       </label>
-      <input
-        id={id}
-        type="text"
-        value={value}
-        disabled={disabled || loading}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-      />
+      <div className="relative mt-1">
+        {options.length > 0 || loading ? (
+          <select
+            id={id}
+            value={value}
+            disabled={disabled || loading}
+            aria-busy={busy}
+            onChange={(event) => onChange(event.target.value)}
+            className={cn(
+              'block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500',
+              busy && 'cursor-wait border-emerald-300 bg-emerald-50/40'
+            )}
+          >
+            <option value="">{loading ? 'Loading…' : placeholder}</option>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={id}
+            type="text"
+            value={value}
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.value)}
+            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -111,8 +120,12 @@ export function CloudLaunchPanel({
   connectionId: controlledConnectionId,
   onConnectionIdChange,
   onLaunched,
+  embedded = false,
+  hideAccountSelect = false,
+  applyNetworkProfile = true,
+  adminSourceCidr = '',
 }: CloudLaunchPanelProps) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(embedded)
   const [internalConnectionId, setInternalConnectionId] = useState('')
   const connectionId = controlledConnectionId ?? internalConnectionId
   const setConnectionId = (id: string) => {
@@ -207,18 +220,34 @@ export function CloudLaunchPanel({
       return
     }
 
-    if (
-      (isAwsAccount || selectedConnection?.provider === CloudProvider.Vultr)
-      && !image.trim()
-      && catalog.images.length > 0
-    ) {
-      setImage(catalog.images[0].value)
+    if (catalog.sizes.length > 0) {
+      const sizeInCatalog = catalog.sizes.some((option) => option.value === size)
+      if (!size.trim() || !sizeInCatalog) {
+        const preferred = catalog.sizes.find((option) =>
+          option.value === 't3.micro'
+          || option.value === 't2.micro'
+          || option.value === 't3.small'
+          || option.value === 'cx22'
+          || option.value === 'vc2-2c-4gb')
+        setSize(preferred?.value ?? catalog.sizes[0].value)
+        return
+      }
     }
 
-    if (!size.trim() && catalog.sizes.length > 0) {
-      const preferred = catalog.sizes.find((option) =>
-        option.value === 't3.medium' || option.value === 'cx22' || option.value === 'vc2-2c-4gb')
-      setSize(preferred?.value ?? catalog.sizes[0].value)
+    if (
+      (isAwsAccount || selectedConnection?.provider === CloudProvider.Vultr)
+      && catalog.images.length > 0
+    ) {
+      const selectedSize = catalog.sizes.find((option) => option.value === size)
+      const architecture = isAwsAccount ? selectedSize?.description : undefined
+      const matchingImages = architecture
+        ? catalog.images.filter((option) => option.description === architecture)
+        : catalog.images
+      const imagePool = matchingImages.length > 0 ? matchingImages : catalog.images
+      const imageInPool = imagePool.some((option) => option.value === image)
+      if (!image.trim() || !imageInPool) {
+        setImage(imagePool[0].value)
+      }
     }
   }, [catalog, image, isAwsAccount, awsLaunchMode, size, showCreateForm, selectedConnection?.provider])
 
@@ -227,13 +256,21 @@ export function CloudLaunchPanel({
     [catalog?.regions, region]
   )
   const sizeOptions = useMemo(
-    () => withCurrentOption(catalog?.sizes, size),
-    [catalog?.sizes, size]
+    () => (isAwsAccount ? (catalog?.sizes ?? []) : withCurrentOption(catalog?.sizes, size)),
+    [catalog?.sizes, isAwsAccount, size]
   )
-  const imageOptions = useMemo(
-    () => withCurrentOption(catalog?.images, image),
-    [catalog?.images, image]
-  )
+  const imageOptions = useMemo(() => {
+    const images = catalog?.images ?? []
+    if (!isAwsAccount) {
+      return withCurrentOption(images, image)
+    }
+
+    const architecture = catalog?.sizes.find((option) => option.value === size)?.description
+    const matching = architecture
+      ? images.filter((option) => option.description === architecture)
+      : images
+    return matching.length > 0 ? matching : images
+  }, [catalog?.images, catalog?.sizes, image, isAwsAccount, size])
 
   const launchMutation = useMutation({
     mutationFn: async () => {
@@ -255,13 +292,18 @@ export function CloudLaunchPanel({
           size: size.trim() || undefined,
           image: image.trim() || undefined,
           savedSshKeyId: savedSshKeyId.trim() || undefined,
-          generateSshKey: generateSshKey && !savedSshKeyId.trim(),
+          generateSshKey: (embedded || generateSshKey) && !savedSshKeyId.trim(),
+          applyNetworkProfile,
+          adminSourceCidr: adminSourceCidr.trim() || undefined,
         })
       ).data
     },
     onSuccess: (result) => {
       setLaunchError(null)
       setLaunchMessage(result.message)
+      if (result.privateKeyPem) {
+        downloadPemFile(`azeroth-${(result.savedSshKeyId ?? 'launch').slice(0, 8)}`, result.privateKeyPem)
+      }
       onLaunched(result)
     },
     onError: (error: unknown) => {
@@ -312,8 +354,11 @@ export function CloudLaunchPanel({
     setLaunchMessage(null)
   }
 
+  const showBody = embedded || expanded
+
   return (
-    <div className="rounded-lg border border-emerald-200 bg-emerald-50/60">
+    <div className={embedded ? 'space-y-3' : 'rounded-lg border border-emerald-200 bg-emerald-50/60'}>
+      {embedded ? null : (
       <button
         type="button"
         disabled={disabled}
@@ -330,17 +375,20 @@ export function CloudLaunchPanel({
           <ChevronDown className="h-4 w-4 text-emerald-700" aria-hidden="true" />
         )}
       </button>
+      )}
 
-      {expanded ? (
-        <div className="space-y-3 border-t border-emerald-200 px-4 py-3">
+      {showBody ? (
+        <div className={embedded ? 'space-y-3' : 'space-y-3 border-t border-emerald-200 px-4 py-3'}>
+          {embedded ? null : (
           <p className="text-xs text-emerald-900">
             <span className="font-medium">Different from “Pick from cloud account” above:</span> this creates a{' '}
             <span className="font-medium">new</span> VM on DigitalOcean, Hetzner, Vultr, AWS, or GCP (bootstrap script injected
             automatically), bootstraps an <span className="font-medium">existing</span> AWS instance via SSM, or an
             Azure VM via Run Command. You must link an account first (above) — the same linked account is used here.
           </p>
+          )}
 
-          {loadingConnections ? (
+          {hideAccountSelect ? null : loadingConnections ? (
             <div className="flex items-center gap-2 text-xs text-emerald-900">
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               Loading linked accounts…
@@ -405,7 +453,7 @@ export function CloudLaunchPanel({
 
           {connectionId && defaults ? (
             <>
-              {isAwsAccount && defaults.supportsCreate && defaults.supportsBootstrapExisting ? (
+              {isAwsAccount && !embedded && defaults.supportsCreate && defaults.supportsBootstrapExisting ? (
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -460,33 +508,47 @@ export function CloudLaunchPanel({
                       className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
-                  <CatalogField
-                    id="launch-region"
-                    label={regionLabel}
-                    value={region}
-                    options={regionOptions}
-                    disabled={disabled || launchMutation.isPending}
-                    loading={loadingCatalog}
-                    onChange={handleRegionChange}
-                    placeholder={`Select ${regionLabel.toLowerCase()}…`}
-                  />
-                  <CatalogField
-                    id="launch-size"
-                    label={sizeLabel}
-                    value={size}
-                    options={sizeOptions}
-                    disabled={disabled || launchMutation.isPending}
-                    loading={loadingCatalog}
-                    onChange={setSize}
-                    placeholder={`Select ${sizeLabel.toLowerCase()}…`}
-                  />
+                  <div>
+                    <CatalogField
+                      id="launch-region"
+                      label={regionLabel}
+                      value={region}
+                      options={regionOptions}
+                      disabled={disabled || launchMutation.isPending}
+                      loading={loadingDefaults || loadingCatalog}
+                      onChange={handleRegionChange}
+                      placeholder={`Select ${regionLabel.toLowerCase()}…`}
+                    />
+                    {isAwsAccount ? (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Loaded from this access key. Changing region reloads instance types and AMIs.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <CatalogField
+                      id="launch-size"
+                      label={sizeLabel}
+                      value={size}
+                      options={sizeOptions}
+                      disabled={disabled || launchMutation.isPending}
+                      loading={loadingDefaults || loadingCatalog}
+                      onChange={setSize}
+                      placeholder={`Select ${sizeLabel.toLowerCase()}…`}
+                    />
+                    {isAwsAccount ? (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Only Free Tier eligible types this account can launch in the selected region.
+                      </p>
+                    ) : null}
+                  </div>
                   <CatalogField
                     id="launch-image"
                     label={imageLabel}
                     value={image}
                     options={imageOptions}
                     disabled={disabled || launchMutation.isPending}
-                    loading={loadingCatalog}
+                    loading={loadingDefaults || loadingCatalog}
                     onChange={setImage}
                     placeholder={`Select ${imageLabel.toLowerCase()}…`}
                   />
@@ -516,7 +578,7 @@ export function CloudLaunchPanel({
                     value={region}
                     options={regionOptions}
                     disabled={disabled || launchMutation.isPending}
-                    loading={loadingCatalog}
+                    loading={loadingDefaults || loadingCatalog}
                     onChange={handleRegionChange}
                     placeholder={`Select ${isAzureAccount ? 'location' : 'region'}…`}
                   />
@@ -553,7 +615,7 @@ export function CloudLaunchPanel({
                 </p>
               ) : null}
 
-              {!savedSshKeyId && showCreateForm ? (
+              {!savedSshKeyId && showCreateForm && !embedded ? (
                 <label className="flex items-start gap-2 text-sm text-gray-700">
                   <input
                     type="checkbox"
@@ -596,11 +658,15 @@ export function CloudLaunchPanel({
                 ) : (
                   <Rocket className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
-                {isBootstrapMode
-                  ? isAzureAccount
-                    ? 'Bootstrap via Azure Run Command'
-                    : 'Bootstrap via AWS SSM'
-                  : 'Launch server'}
+                {launchMutation.isPending
+                  ? isBootstrapMode
+                    ? 'Bootstrapping…'
+                    : 'Launching server…'
+                  : isBootstrapMode
+                    ? isAzureAccount
+                      ? 'Bootstrap via Azure Run Command'
+                      : 'Bootstrap via AWS SSM'
+                    : 'Launch server'}
               </button>
             </>
           ) : connectionId ? null : launchableConnections.length > 0 ? (

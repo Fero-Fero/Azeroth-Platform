@@ -415,6 +415,17 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 };
             }
 
+            var (sudoPassed, sudoMessage) = await EnsurePasswordlessSudoAsync(
+                contextName,
+                user,
+                cancellationToken);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Non-interactive sudo",
+                Passed = sudoPassed,
+                Message = sudoMessage
+            });
+
             var (remoteDockerReady, remoteDockerOut, remoteDockerErr) = await TryRemoteDockerInfoAsync(
                 contextName,
                 cancellationToken);
@@ -430,8 +441,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return new RemoteConnectionTestResultDto
                 {
                     Success = false,
-                    Message = "SSH works, but the remote Docker engine is not available. Use " +
-                              "Run bootstrap script in step 2, or First Time Setup in step 4.",
+                    Message = "SSH works, but the remote Docker engine is not available. Wait for launch " +
+                              "user-data to finish, then verify again. If this host was not launched from " +
+                              "the wizard, use Repair host setup.",
                     Prerequisites = prerequisites
                 };
             }
@@ -456,13 +468,18 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     : "Runs on the platform manager — not required on the VPC host."
             });
 
+            await AppendHostSecurityPrerequisiteChecksAsync(contextName, prerequisites, cancellationToken);
+
+            var allPassed = prerequisites.All(check => check.Passed);
             return new RemoteConnectionTestResultDto
             {
-                Success = true,
+                Success = allPassed,
                 ServerVersion = version,
-                Message = string.IsNullOrWhiteSpace(version)
-                    ? "Remote host is ready for deployment."
-                    : $"Remote host is ready (Docker {version}).",
+                Message = allPassed
+                    ? (string.IsNullOrWhiteSpace(version)
+                        ? "Remote host is ready for deployment."
+                        : $"Remote host is ready (Docker {version}). Host firewall and OS baselines look good.")
+                    : "SSH and Docker work, but host firewall or OS baselines are not ready yet. Wait for launch user data to finish, then verify again.",
                 Prerequisites = prerequisites
             };
         }
@@ -634,7 +651,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 {
                     Success = false,
                     Message = "Bootstrap steps ran but Docker is still not reachable over SSH. " +
-                              "Try Test connection again, or run First Time Setup in step 4.",
+                              "Wait for launch user-data, then verify again, or use Repair host setup.",
                     Output = string.IsNullOrWhiteSpace(output)
                         ? TrimRemoteError(dockerErr, string.Empty)
                         : output,
@@ -1643,6 +1660,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         foreach (var command in new[]
                  {
                      "/usr/bin/docker info --format '{{.ServerVersion}}'",
+                     "sg docker -c \"/usr/bin/docker info --format '{{.ServerVersion}}'\"",
                      "sudo -n /usr/bin/docker info --format '{{.ServerVersion}}'",
                  })
         {
@@ -1699,6 +1717,74 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         return null;
+    }
+
+    private async Task AppendHostSecurityPrerequisiteChecksAsync(
+        string contextName,
+        List<RemotePrerequisiteCheckDto> prerequisites,
+        CancellationToken cancellationToken)
+    {
+        var baselinesReady = await IsUnattendedUpgradesEnabledAsync(contextName, cancellationToken);
+        prerequisites.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "OS security baselines",
+            Passed = baselinesReady,
+            Message = baselinesReady
+                ? "Automatic security updates are enabled."
+                : "unattended-upgrades is not enabled yet. Wait for launch user data, or run Repair host setup."
+        });
+
+        var (_, statusOut, _) = await RunSshRemoteShellAsync(
+            contextName,
+            SudoUfw("status verbose"),
+            cancellationToken);
+        var ufwActive = statusOut.Contains("Status: active", StringComparison.OrdinalIgnoreCase);
+        prerequisites.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "Host firewall (ufw)",
+            Passed = ufwActive,
+            Message = ufwActive
+                ? "ufw is active."
+                : "ufw is not active yet. Wait for launch user data, or run Repair host setup."
+        });
+        if (!ufwActive)
+        {
+            return;
+        }
+
+        var allowPorts = new (int Port, string Label)[]
+        {
+            (22, "SSH"),
+            (3724, "Authserver"),
+            (8085, "Worldserver"),
+            (StackNetworkDefaults.DefaultArmoryPort, "Armory"),
+            (StackNetworkDefaults.DefaultClientPort, "Client files"),
+        };
+        foreach (var (port, label) in allowPorts)
+        {
+            var allowed = IsUfwPortAllowed(statusOut, port);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = $"ufw allow {port}/tcp ({label})",
+                Passed = allowed,
+                Message = allowed
+                    ? $"{label} is allowed in ufw."
+                    : $"{label} port {port}/tcp is not allowed in ufw."
+            });
+        }
+
+        foreach (var (port, label) in new (int Port, string Label)[] { (3306, "MySQL"), (7878, "SOAP") })
+        {
+            var allowed = IsUfwPortAllowed(statusOut, port);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = $"ufw deny {port}/tcp ({label})",
+                Passed = !allowed,
+                Message = allowed
+                    ? $"{label} port {port}/tcp is publicly allowed in ufw — it should stay VPC-only."
+                    : $"{label} is not opened in ufw (expected)."
+            });
+        }
     }
 
     private async Task<bool> IsUnattendedUpgradesEnabledAsync(
@@ -1761,7 +1847,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         => $"env DEBIAN_FRONTEND=noninteractive {SudoNonInteractive($"apt-get {arguments}")}";
 
     private static string BuildFullPlatformSudoersContent(string user)
-        => $"Defaults !use_pty\nDefaults:{user} !use_pty\nDefaults !requiretty\nDefaults:{user} !requiretty\n{user} ALL=(ALL) NOPASSWD:ALL\n";
+        => VpcBootstrapUserData.BuildPasswordlessSudoers(user);
 
     private static string BuildPlatformSudoDefaultsContent(string user)
         => $"Defaults !use_pty\nDefaults:{user} !use_pty\nDefaults !requiretty\nDefaults:{user} !requiretty\n";
@@ -3955,7 +4041,13 @@ public sealed class RemoteEngineService : IRemoteEngineService
             }
         }
 
-        if (message.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
+        if (message.Contains("a password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("sorry, you must have a tty", StringComparison.OrdinalIgnoreCase))
+        {
+            message += " Non-interactive sudo is not ready yet (common on Ubuntu 24.04). Wait for launch " +
+                       "user-data, or use Repair host setup so the platform can write NOPASSWD and disable sudo use_pty.";
+        }
+        else if (message.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
         {
             message += $" Add '{user}' to the docker group on the remote host " +
                        $"(sudo usermod -aG docker {user}; log out and back in).";

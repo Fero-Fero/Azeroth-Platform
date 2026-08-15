@@ -100,7 +100,17 @@ Assign **Virtual Machine Contributor** + **Network Contributor** (scoped to reso
 
 ---
 
-## Part 2 — Automatic NSG setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**. Shared specs: [`09`](../plans_support/09-cloud-security-group-providers.md) (2A/2B), [`10`](../plans_support/10-wow-vpc-network-security.md) (2C).
+
+| Part | Goal |
+|------|------|
+| **2A NSG** | Inbound from profile; SSH admin CIDR only |
+| **2B API identity** | Entra user or dedicated service principal — **not** the tenant Global Admin secret |
+| **2C Host SSH** | Operator user; root/`azureuser` internet-SSH ❌; Bastion / serial / Run Command for break-glass |
+
+### 2A — Automatic NSG setup
 
 | Step | Action |
 |------|--------|
@@ -115,9 +125,13 @@ Assign **Virtual Machine Contributor** + **Network Contributor** (scoped to reso
 
 ---
 
-## SSH hardening (operator user + final lockdown)
+### 2B — API identity (not the Entra Global Admin)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+- Delegated ARM token or dedicated app registration / service principal
+- Do not persist the tenant Global Admin password
+- NSG write: `Microsoft.Network/networkSecurityGroups/write`, `.../securityRules/write`
+
+### 2C — SSH: root locked out of the public internet
 
 ### During setup
 

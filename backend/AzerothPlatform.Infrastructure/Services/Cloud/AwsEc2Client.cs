@@ -3,40 +3,17 @@ using Amazon;
 using Amazon.EC2;
 using Amazon.EC2.Model;
 using Amazon.Runtime;
+using AzerothPlatform.Core.Contracts;
 
 namespace AzerothPlatform.Infrastructure.Services.Cloud;
 
 public sealed class AwsEc2Client
 {
-    private static readonly string[] PreferredInstanceTypePrefixes =
-    [
-        "t3.",
-        "t3a.",
-        "t2.",
-        "m5.",
-        "m6i.",
-        "c5.",
-        "c6i.",
-    ];
-
-    private static readonly HashSet<string> PreferredInstanceTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "t3.micro",
-        "t3.small",
-        "t3.medium",
-        "t3.large",
-        "t2.micro",
-        "t2.small",
-        "m5.large",
-        "c5.large",
-    };
-
     public async Task ValidateCredentialsAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, "us-east-1");
+        using var client = CreateClient(credentials, "us-east-1");
         try
         {
             await client.DescribeRegionsAsync(new DescribeRegionsRequest(), cancellationToken);
@@ -52,26 +29,23 @@ public sealed class AwsEc2Client
     }
 
     public async Task<IReadOnlyList<string>> ListRegionsAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         CancellationToken cancellationToken)
-        => await ResolveRegionsAsync(accessKeyId, secretAccessKey, region: null, cancellationToken);
+        => await ResolveRegionsAsync(credentials, region: null, cancellationToken);
 
     public async Task<IReadOnlyList<AwsEc2Instance>> ListRunningInstancesAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string? region,
         CancellationToken cancellationToken)
     {
-        var regions = await ResolveRegionsAsync(accessKeyId, secretAccessKey, region, cancellationToken);
+        var regions = await ResolveRegionsAsync(credentials, region, cancellationToken);
         var instances = new List<AwsEc2Instance>();
 
         foreach (var regionName in regions)
         {
             cancellationToken.ThrowIfCancellationRequested();
             instances.AddRange(await ListRunningInstancesInRegionAsync(
-                accessKeyId,
-                secretAccessKey,
+                credentials,
                 regionName,
                 cancellationToken));
         }
@@ -83,8 +57,7 @@ public sealed class AwsEc2Client
     }
 
     public async Task<AwsInstanceNetworkTarget> ResolveInstanceForFirewallAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string publicHost,
         string? region,
         string? instanceId,
@@ -102,8 +75,7 @@ public sealed class AwsEc2Client
             }
 
             return await ResolveInstanceInRegionAsync(
-                accessKeyId,
-                secretAccessKey,
+                credentials,
                 regionName,
                 id,
                 host,
@@ -116,15 +88,14 @@ public sealed class AwsEc2Client
         }
 
         var regions = string.IsNullOrWhiteSpace(regionName)
-            ? await ResolveRegionsAsync(accessKeyId, secretAccessKey, region: null, cancellationToken)
+            ? await ResolveRegionsAsync(credentials, region: null, cancellationToken)
             : [regionName];
 
         foreach (var candidateRegion in regions)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var match = await FindInstanceByPublicHostInRegionAsync(
-                accessKeyId,
-                secretAccessKey,
+                credentials,
                 candidateRegion,
                 host,
                 cancellationToken);
@@ -139,8 +110,7 @@ public sealed class AwsEc2Client
     }
 
     public async Task<(int Applied, int Skipped)> ApplySecurityGroupIngressRulesAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         IReadOnlyList<string> securityGroupIds,
         IReadOnlyList<AwsIngressRule> rules,
@@ -151,7 +121,7 @@ public sealed class AwsEc2Client
             throw new InvalidOperationException("The EC2 instance has no security groups to update.");
         }
 
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         var applied = 0;
         var skipped = 0;
 
@@ -195,15 +165,65 @@ public sealed class AwsEc2Client
         return (applied, skipped);
     }
 
+    public async Task<IReadOnlyList<AwsIngressRule>> ListInstanceIngressRulesAsync(
+        AwsRuntimeCredentials credentials,
+        string publicHost,
+        string? region,
+        string? instanceId,
+        CancellationToken cancellationToken)
+    {
+        var target = await ResolveInstanceForFirewallAsync(
+            credentials,
+            publicHost,
+            region,
+            instanceId,
+            cancellationToken);
+        if (target.SecurityGroupIds.Count == 0)
+        {
+            return [];
+        }
+
+        using var client = CreateClient(credentials, target.Region);
+        var groups = await client.DescribeSecurityGroupsAsync(new DescribeSecurityGroupsRequest
+        {
+            GroupIds = [.. target.SecurityGroupIds],
+        }, cancellationToken);
+
+        var rules = new List<AwsIngressRule>();
+        foreach (var group in groups.SecurityGroups)
+        {
+            foreach (var permission in group.IpPermissions)
+            {
+                var port = permission.FromPort;
+                foreach (var range in permission.Ipv4Ranges)
+                {
+                    if (string.IsNullOrWhiteSpace(range.CidrIp))
+                    {
+                        continue;
+                    }
+
+                    rules.Add(new AwsIngressRule
+                    {
+                        Port = port,
+                        Protocol = permission.IpProtocol ?? "tcp",
+                        Cidr = range.CidrIp,
+                        Description = range.Description ?? string.Empty,
+                    });
+                }
+            }
+        }
+
+        return rules;
+    }
+
     private static async Task<AwsInstanceNetworkTarget> ResolveInstanceInRegionAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string instanceId,
         string publicHost,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         var response = await client.DescribeInstancesAsync(new DescribeInstancesRequest
         {
             InstanceIds = [instanceId],
@@ -218,13 +238,12 @@ public sealed class AwsEc2Client
     }
 
     private static async Task<AwsInstanceNetworkTarget?> FindInstanceByPublicHostInRegionAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string publicHost,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         var reservations = new List<Reservation>();
         string? nextToken = null;
 
@@ -290,18 +309,45 @@ public sealed class AwsEc2Client
 
     private static string TruncateDescription(string? description)
     {
-        var text = (description ?? string.Empty).Trim();
-        if (text.Length <= 255)
+        var text = ToAwsAscii(description);
+        return text.Length <= 255 ? text : text[..255];
+    }
+
+    /// <summary>
+    /// EC2 GroupDescription and rule descriptions reject non-ASCII (em dashes, smart quotes, etc.).
+    /// </summary>
+    private static string ToAwsAscii(string? value)
+    {
+        var text = (value ?? string.Empty)
+            .Replace('\u2014', '-')
+            .Replace('\u2013', '-')
+            .Replace('\u2212', '-')
+            .Replace('\u00B7', '-')
+            .Replace('\u2018', '\'')
+            .Replace('\u2019', '\'')
+            .Replace('\u201C', '"')
+            .Replace('\u201D', '"')
+            .Trim();
+
+        if (text.All(static c => c <= 0x7F))
         {
             return text;
         }
 
-        return text[..255];
+        var builder = new StringBuilder(text.Length);
+        foreach (var ch in text)
+        {
+            if (ch <= 0x7F)
+            {
+                builder.Append(ch);
+            }
+        }
+
+        return builder.ToString().Trim();
     }
 
     private static async Task<IReadOnlyList<string>> ResolveRegionsAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string? region,
         CancellationToken cancellationToken)
     {
@@ -311,7 +357,7 @@ public sealed class AwsEc2Client
             return [regionFilter];
         }
 
-        using var client = CreateClient(accessKeyId, secretAccessKey, "us-east-1");
+        using var client = CreateClient(credentials, "us-east-1");
         var response = await client.DescribeRegionsAsync(new DescribeRegionsRequest(), cancellationToken);
         return response.Regions
             .Select(entry => entry.RegionName)
@@ -322,8 +368,7 @@ public sealed class AwsEc2Client
     }
 
     public async Task<IReadOnlyList<AwsCatalogOption>> ListLaunchInstanceTypesAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         CancellationToken cancellationToken)
     {
@@ -333,47 +378,30 @@ public sealed class AwsEc2Client
             throw new ArgumentException("AWS region is required to list instance types.");
         }
 
-        using var client = CreateClient(accessKeyId, secretAccessKey, regionName);
-        var offerings = new List<string>();
-        string? nextToken = null;
+        using var client = CreateClient(credentials, regionName);
+        var availabilityZone = await TryGetDefaultSubnetAvailabilityZoneAsync(client, cancellationToken);
+        var offerings = await ListOfferedInstanceTypesAsync(
+            client,
+            regionName,
+            availabilityZone,
+            cancellationToken);
+        var freeTierTypes = await ListFreeTierInstanceTypesAsync(client, cancellationToken);
+        var available = AwsLaunchInstanceTypeCatalog.SelectAvailable(offerings, freeTierTypes);
 
-        do
-        {
-            var response = await client.DescribeInstanceTypeOfferingsAsync(new DescribeInstanceTypeOfferingsRequest
-            {
-                LocationType = LocationType.Region,
-                Filters =
-                [
-                    new Filter("location", [regionName]),
-                ],
-                NextToken = nextToken,
-            }, cancellationToken);
-
-            offerings.AddRange(response.InstanceTypeOfferings
-                .Select(offering => offering.InstanceType?.Value ?? string.Empty)
-                .Where(type => !string.IsNullOrWhiteSpace(type)));
-
-            nextToken = response.NextToken;
-        }
-        while (!string.IsNullOrWhiteSpace(nextToken));
-
-        return offerings
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(IsPreferredLaunchInstanceType)
-            .OrderBy(type => PreferredInstanceTypes.Contains(type) ? 0 : 1)
-            .ThenBy(type => type, StringComparer.OrdinalIgnoreCase)
+        return available
             .Select(type => new AwsCatalogOption
             {
-                Value = type,
-                Label = type,
+                Value = type.Type,
+                Label = AwsLaunchInstanceTypeCatalog.FormatLabel(type),
+                Description = type.Architecture,
             })
             .ToList();
     }
 
     public async Task<IReadOnlyList<AwsCatalogOption>> ListLaunchImagesAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
+        IReadOnlyCollection<string>? architectures,
         CancellationToken cancellationToken)
     {
         var regionName = (region ?? string.Empty).Trim();
@@ -382,48 +410,67 @@ public sealed class AwsEc2Client
             throw new ArgumentException("AWS region is required to list AMIs.");
         }
 
-        using var client = CreateClient(accessKeyId, secretAccessKey, regionName);
+        var requested = (architectures ?? [])
+            .Where(architecture => !string.IsNullOrWhiteSpace(architecture))
+            .Select(architecture => architecture.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (requested.Count == 0)
+        {
+            requested.Add("x86_64");
+        }
+
+        using var client = CreateClient(credentials, regionName);
         var images = new List<AwsCatalogOption>();
 
-        var ubuntu = await FindLatestImageAsync(
-            client,
-            owners: ["099720109477"],
-            namePattern: "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*",
-            labelPrefix: "Ubuntu 22.04 LTS",
-            cancellationToken);
-        if (ubuntu is not null)
+        foreach (var architecture in requested)
         {
-            images.Add(ubuntu);
-        }
+            var isArm = architecture.Contains("arm", StringComparison.OrdinalIgnoreCase);
+            var ubuntuArch = isArm ? "arm64" : "amd64";
+            var amazonArch = isArm ? "arm64" : "x86_64";
 
-        var ubuntu2404 = await FindLatestImageAsync(
-            client,
-            owners: ["099720109477"],
-            namePattern: "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
-            labelPrefix: "Ubuntu 24.04 LTS",
-            cancellationToken);
-        if (ubuntu2404 is not null)
-        {
-            images.Add(ubuntu2404);
-        }
+            var ubuntu = await FindLatestImageAsync(
+                client,
+                owners: ["099720109477"],
+                namePattern: $"ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-{ubuntuArch}-server-*",
+                labelPrefix: "Ubuntu 22.04 LTS",
+                architecture,
+                cancellationToken);
+            if (ubuntu is not null)
+            {
+                images.Add(ubuntu);
+            }
 
-        var amazonLinux = await FindLatestImageAsync(
-            client,
-            owners: ["amazon"],
-            namePattern: "al2023-ami-2023*-kernel-*-x86_64",
-            labelPrefix: "Amazon Linux 2023",
-            cancellationToken);
-        if (amazonLinux is not null)
-        {
-            images.Add(amazonLinux);
+            var ubuntu2404 = await FindLatestImageAsync(
+                client,
+                owners: ["099720109477"],
+                namePattern: $"ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-{ubuntuArch}-server-*",
+                labelPrefix: "Ubuntu 24.04 LTS",
+                architecture,
+                cancellationToken);
+            if (ubuntu2404 is not null)
+            {
+                images.Add(ubuntu2404);
+            }
+
+            var amazonLinux = await FindLatestImageAsync(
+                client,
+                owners: ["amazon"],
+                namePattern: $"al2023-ami-2023*-kernel-*-{amazonArch}",
+                labelPrefix: "Amazon Linux 2023",
+                architecture,
+                cancellationToken);
+            if (amazonLinux is not null)
+            {
+                images.Add(amazonLinux);
+            }
         }
 
         return images;
     }
 
     public async Task<AwsEc2Instance> CreateInstanceAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string name,
         string instanceType,
@@ -431,7 +478,9 @@ public sealed class AwsEc2Client
         string userDataScript,
         string keyPairName,
         string publicKeyMaterial,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? adminSourceCidr = null,
+        bool applyNetworkProfile = true)
     {
         var regionName = (region ?? string.Empty).Trim();
         var amiId = (imageId ?? string.Empty).Trim();
@@ -443,22 +492,110 @@ public sealed class AwsEc2Client
             throw new ArgumentException("AWS region, AMI, and instance type are required.");
         }
 
-        using var client = CreateClient(accessKeyId, secretAccessKey, regionName);
-        await ImportKeyPairAsync(client, keyPairName, publicKeyMaterial, cancellationToken);
-
-        var network = await ResolveDefaultLaunchNetworkAsync(client, regionName, cancellationToken);
-        var userData = Convert.ToBase64String(Encoding.UTF8.GetBytes(userDataScript));
-
-        var runResponse = await client.RunInstancesAsync(new RunInstancesRequest
+        try
         {
-            ImageId = amiId,
-            InstanceType = type,
+            using var client = CreateClient(credentials, regionName);
+            await ImportKeyPairAsync(client, keyPairName, publicKeyMaterial, cancellationToken);
+
+            var network = await ResolveDefaultLaunchNetworkAsync(
+                client,
+                regionName,
+                adminSourceCidr,
+                applyNetworkProfile,
+                cancellationToken);
+            var offeredZones = await ListAvailabilityZonesForInstanceTypeAsync(client, type, cancellationToken);
+            var subnets = network.Subnets
+                .OrderByDescending(subnet => offeredZones.Contains(subnet.AvailabilityZone))
+                .ThenByDescending(subnet => subnet.MapPublicIpOnLaunch)
+                .ThenBy(subnet => subnet.AvailabilityZone, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var userData = Convert.ToBase64String(Encoding.UTF8.GetBytes(userDataScript));
+            AmazonEC2Exception? lastAzError = null;
+
+            for (var index = 0; index < subnets.Count; index += 1)
+            {
+                var subnet = subnets[index];
+                try
+                {
+                    var runResponse = await client.RunInstancesAsync(
+                        BuildRunInstancesRequest(
+                            amiId,
+                            type,
+                            keyPairName,
+                            userData,
+                            name,
+                            subnet.SubnetId,
+                            network.SecurityGroupId),
+                        cancellationToken);
+
+                    var instance = runResponse.Reservation?.Instances.FirstOrDefault()
+                                   ?? throw new InvalidOperationException("AWS did not return a created instance.");
+
+                    var instanceId = instance.InstanceId
+                                     ?? throw new InvalidOperationException("AWS did not return an instance id.");
+
+                    return await WaitForRunningInstanceAsync(
+                        credentials,
+                        regionName,
+                        instanceId,
+                        amiId,
+                        cancellationToken);
+                }
+                catch (AmazonEC2Exception ex) when (
+                    index < subnets.Count - 1 && IsRetryableLaunchPlacementError(ex))
+                {
+                    lastAzError = ex;
+                }
+            }
+
+            if (lastAzError is not null)
+            {
+                throw lastAzError;
+            }
+
+            throw new InvalidOperationException($"Could not launch {type} in the default VPC for {regionName}.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (ArgumentException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is AmazonEC2Exception or AmazonServiceException)
+        {
+            throw new InvalidOperationException(ParseAwsError(ex, "AWS rejected the launch request."), ex);
+        }
+    }
+
+    private static RunInstancesRequest BuildRunInstancesRequest(
+        string imageId,
+        string instanceType,
+        string keyPairName,
+        string userData,
+        string name,
+        string subnetId,
+        string securityGroupId)
+        => new()
+        {
+            ImageId = imageId,
+            InstanceType = instanceType,
             MinCount = 1,
             MaxCount = 1,
             KeyName = keyPairName,
-            SubnetId = network.SubnetId,
-            SecurityGroupIds = [network.SecurityGroupId],
             UserData = userData,
+            NetworkInterfaces =
+            [
+                new InstanceNetworkInterfaceSpecification
+                {
+                    DeviceIndex = 0,
+                    SubnetId = subnetId,
+                    Groups = [securityGroupId],
+                    AssociatePublicIpAddress = true,
+                },
+            ],
             TagSpecifications =
             [
                 new TagSpecification
@@ -471,32 +608,30 @@ public sealed class AwsEc2Client
                     ],
                 },
             ],
-        }, cancellationToken);
+        };
 
-        var instance = runResponse.Reservation?.Instances.FirstOrDefault()
-                       ?? throw new InvalidOperationException("AWS did not return a created instance.");
+    private static bool IsRetryableLaunchPlacementError(AmazonEC2Exception exception)
+    {
+        if (exception.ErrorCode is "Unsupported"
+            or "InsufficientInstanceCapacity"
+            or "InsufficientFreeAddressesInSubnet")
+        {
+            return true;
+        }
 
-        var instanceId = instance.InstanceId
-                         ?? throw new InvalidOperationException("AWS did not return an instance id.");
-
-        return await WaitForRunningInstanceAsync(
-            accessKeyId,
-            secretAccessKey,
-            regionName,
-            instanceId,
-            amiId,
-            cancellationToken);
+        var message = exception.Message ?? string.Empty;
+        return message.Contains("Availability Zone", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("not supported in your requested", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<AwsEc2Instance> WaitForRunningInstanceAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string instanceId,
         string? imageId,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         const int maxAttempts = 60;
 
         for (var attempt = 0; attempt < maxAttempts; attempt += 1)
@@ -517,6 +652,14 @@ public sealed class AwsEc2Client
             }
 
             var state = instance.State?.Name?.Value ?? string.Empty;
+            if (string.Equals(state, "terminated", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(state, "shutting-down", StringComparison.OrdinalIgnoreCase))
+            {
+                var reason = instance.StateReason?.Message ?? state;
+                throw new InvalidOperationException(
+                    $"AWS instance {instanceId} entered {state}: {reason}");
+            }
+
             var publicHost = instance.PublicIpAddress;
             if (string.IsNullOrWhiteSpace(publicHost))
             {
@@ -543,6 +686,12 @@ public sealed class AwsEc2Client
                 };
             }
 
+            if (string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) && attempt >= 12)
+            {
+                throw new InvalidOperationException(
+                    $"AWS instance {instanceId} is running but has no public IP. Enable auto-assign public IPv4 on the default subnet, or pick another region.");
+            }
+
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
         }
 
@@ -555,12 +704,13 @@ public sealed class AwsEc2Client
         string publicKeyMaterial,
         CancellationToken cancellationToken)
     {
+        var encodedPublicKey = SshKeyMaterialHelper.ToAwsImportPublicKeyMaterial(publicKeyMaterial);
         try
         {
             await client.ImportKeyPairAsync(new ImportKeyPairRequest
             {
                 KeyName = keyPairName,
-                PublicKeyMaterial = publicKeyMaterial.Trim(),
+                PublicKeyMaterial = encodedPublicKey,
             }, cancellationToken);
         }
         catch (AmazonEC2Exception ex) when (ex.ErrorCode is "InvalidKeyPair.Duplicate")
@@ -569,21 +719,32 @@ public sealed class AwsEc2Client
             await client.ImportKeyPairAsync(new ImportKeyPairRequest
             {
                 KeyName = keyPairName,
-                PublicKeyMaterial = publicKeyMaterial.Trim(),
+                PublicKeyMaterial = encodedPublicKey,
             }, cancellationToken);
         }
     }
 
     private sealed class AwsLaunchNetwork
     {
+        public required string SecurityGroupId { get; init; }
+
+        public required IReadOnlyList<AwsLaunchSubnet> Subnets { get; init; }
+    }
+
+    private sealed class AwsLaunchSubnet
+    {
         public required string SubnetId { get; init; }
 
-        public required string SecurityGroupId { get; init; }
+        public required string AvailabilityZone { get; init; }
+
+        public required bool MapPublicIpOnLaunch { get; init; }
     }
 
     private static async Task<AwsLaunchNetwork> ResolveDefaultLaunchNetworkAsync(
         IAmazonEC2 client,
         string region,
+        string? adminSourceCidr,
+        bool applyNetworkProfile,
         CancellationToken cancellationToken)
     {
         var vpcResponse = await client.DescribeVpcsAsync(new DescribeVpcsRequest
@@ -607,21 +768,75 @@ public sealed class AwsEc2Client
             ],
         }, cancellationToken);
 
-        var subnet = subnetResponse.Subnets.FirstOrDefault()
-                     ?? throw new InvalidOperationException(
-                         $"No default subnet found in the default VPC for {region}.");
+        var subnets = subnetResponse.Subnets
+            .Where(subnet => !string.IsNullOrWhiteSpace(subnet.SubnetId))
+            .Select(subnet => new AwsLaunchSubnet
+            {
+                SubnetId = subnet.SubnetId,
+                AvailabilityZone = subnet.AvailabilityZone ?? string.Empty,
+                MapPublicIpOnLaunch = subnet.MapPublicIpOnLaunch,
+            })
+            .ToList();
 
-        var securityGroupId = await ResolveLaunchSecurityGroupAsync(client, vpc.VpcId, cancellationToken);
+        if (subnets.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No default subnet found in the default VPC for {region}.");
+        }
+
+        var securityGroupId = await ResolveLaunchSecurityGroupAsync(
+            client,
+            vpc.VpcId,
+            adminSourceCidr,
+            applyNetworkProfile,
+            cancellationToken);
         return new AwsLaunchNetwork
         {
-            SubnetId = subnet.SubnetId,
             SecurityGroupId = securityGroupId,
+            Subnets = subnets,
         };
+    }
+
+    private static async Task<HashSet<string>> ListAvailabilityZonesForInstanceTypeAsync(
+        IAmazonEC2 client,
+        string instanceType,
+        CancellationToken cancellationToken)
+    {
+        var zones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? nextToken = null;
+
+        do
+        {
+            var response = await client.DescribeInstanceTypeOfferingsAsync(new DescribeInstanceTypeOfferingsRequest
+            {
+                LocationType = LocationType.AvailabilityZone,
+                Filters =
+                [
+                    new Filter("instance-type", [instanceType]),
+                ],
+                NextToken = nextToken,
+            }, cancellationToken);
+
+            foreach (var offering in response.InstanceTypeOfferings)
+            {
+                if (!string.IsNullOrWhiteSpace(offering.Location))
+                {
+                    zones.Add(offering.Location);
+                }
+            }
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrWhiteSpace(nextToken));
+
+        return zones;
     }
 
     private static async Task<string> ResolveLaunchSecurityGroupAsync(
         IAmazonEC2 client,
         string vpcId,
+        string? adminSourceCidr,
+        bool applyNetworkProfile,
         CancellationToken cancellationToken)
     {
         const string groupName = "azeroth-platform-launch";
@@ -634,38 +849,207 @@ public sealed class AwsEc2Client
             ],
         }, cancellationToken);
 
-        var group = existing.SecurityGroups.FirstOrDefault();
-        if (group is not null)
+        var groupId = existing.SecurityGroups.FirstOrDefault()?.GroupId;
+        if (string.IsNullOrWhiteSpace(groupId))
         {
-            return group.GroupId;
+            var created = await client.CreateSecurityGroupAsync(new CreateSecurityGroupRequest
+            {
+                GroupName = groupName,
+                Description = ToAwsAscii("Azeroth Platform launch - SSH, game, and web ingress"),
+                VpcId = vpcId,
+            }, cancellationToken);
+            groupId = created.GroupId;
         }
 
-        var created = await client.CreateSecurityGroupAsync(new CreateSecurityGroupRequest
-        {
-            GroupName = groupName,
-            Description = "Azeroth Platform launch — SSH ingress for bootstrap",
-            VpcId = vpcId,
-        }, cancellationToken);
-
-        await client.AuthorizeSecurityGroupIngressAsync(new AuthorizeSecurityGroupIngressRequest
-        {
-            GroupId = created.GroupId,
-            IpPermissions =
+        var rules = applyNetworkProfile
+            ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(adminSourceCidr)
+            :
             [
-                new IpPermission
+                new VpcSecurityRuleDto
                 {
-                    IpProtocol = "tcp",
-                    FromPort = 22,
-                    ToPort = 22,
-                    Ipv4Ranges =
-                    [
-                        new IpRange { CidrIp = "0.0.0.0/0", Description = "SSH for platform bootstrap" },
-                    ],
+                    Port = 22,
+                    Source = string.IsNullOrWhiteSpace(adminSourceCidr) ? "0.0.0.0/0" : adminSourceCidr.Trim(),
+                    Description = "SSH for platform bootstrap",
                 },
-            ],
-        }, cancellationToken);
+            ];
 
-        return created.GroupId;
+        foreach (var rule in rules)
+        {
+            var cidr = string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim();
+            try
+            {
+                await client.AuthorizeSecurityGroupIngressAsync(new AuthorizeSecurityGroupIngressRequest
+                {
+                    GroupId = groupId,
+                    IpPermissions =
+                    [
+                        new IpPermission
+                        {
+                            IpProtocol = "tcp",
+                            FromPort = rule.Port,
+                            ToPort = rule.Port,
+                            Ipv4Ranges =
+                            [
+                                new IpRange
+                                {
+                                    CidrIp = cidr,
+                                    Description = ToAwsAscii(rule.Description),
+                                },
+                            ],
+                        },
+                    ],
+                }, cancellationToken);
+            }
+            catch (AmazonEC2Exception ex) when (ex.ErrorCode is "InvalidPermission.Duplicate")
+            {
+            }
+        }
+
+        return groupId;
+    }
+
+    private static async Task<IReadOnlyList<string>> ListOfferedInstanceTypesAsync(
+        IAmazonEC2 client,
+        string region,
+        string? availabilityZone,
+        CancellationToken cancellationToken)
+    {
+        var location = string.IsNullOrWhiteSpace(availabilityZone) ? region : availabilityZone;
+        var locationType = string.IsNullOrWhiteSpace(availabilityZone)
+            ? LocationType.Region
+            : LocationType.AvailabilityZone;
+        var offerings = new List<string>();
+        string? nextToken = null;
+
+        do
+        {
+            var response = await client.DescribeInstanceTypeOfferingsAsync(new DescribeInstanceTypeOfferingsRequest
+            {
+                LocationType = locationType,
+                Filters =
+                [
+                    new Filter("location", [location]),
+                ],
+                NextToken = nextToken,
+            }, cancellationToken);
+
+            offerings.AddRange(response.InstanceTypeOfferings
+                .Select(offering => offering.InstanceType?.Value ?? string.Empty)
+                .Where(type => !string.IsNullOrWhiteSpace(type)));
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrWhiteSpace(nextToken));
+
+        return offerings
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static async Task<IReadOnlyList<AwsLaunchInstanceTypeCatalog.LaunchType>> ListFreeTierInstanceTypesAsync(
+        IAmazonEC2 client,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var types = new List<AwsLaunchInstanceTypeCatalog.LaunchType>();
+            string? nextToken = null;
+
+            do
+            {
+                var response = await client.DescribeInstanceTypesAsync(new DescribeInstanceTypesRequest
+                {
+                    Filters =
+                    [
+                        new Filter("free-tier-eligible", ["true"]),
+                    ],
+                    NextToken = nextToken,
+                }, cancellationToken);
+
+                types.AddRange(response.InstanceTypes
+                    .Select(ToLaunchType)
+                    .Where(type => type is not null)
+                    .Cast<AwsLaunchInstanceTypeCatalog.LaunchType>());
+
+                nextToken = response.NextToken;
+            }
+            while (!string.IsNullOrWhiteSpace(nextToken));
+
+            return types;
+        }
+        catch (AmazonEC2Exception)
+        {
+            return [];
+        }
+        catch (AmazonServiceException)
+        {
+            return [];
+        }
+    }
+
+    private static AwsLaunchInstanceTypeCatalog.LaunchType? ToLaunchType(InstanceTypeInfo info)
+    {
+        var type = info.InstanceType?.Value ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return null;
+        }
+
+        var architecture = info.ProcessorInfo?.SupportedArchitectures?
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            ?? "x86_64";
+        if (info.ProcessorInfo?.SupportedArchitectures?.Any(entry =>
+                string.Equals(entry, "x86_64", StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            architecture = "x86_64";
+        }
+
+        return new AwsLaunchInstanceTypeCatalog.LaunchType(
+            type,
+            architecture,
+            info.VCpuInfo?.DefaultVCpus ?? 0,
+            (int)Math.Clamp(info.MemoryInfo?.SizeInMiB ?? 0, 0, int.MaxValue));
+    }
+
+    private static async Task<string?> TryGetDefaultSubnetAvailabilityZoneAsync(
+        IAmazonEC2 client,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var vpcResponse = await client.DescribeVpcsAsync(new DescribeVpcsRequest
+            {
+                Filters =
+                [
+                    new Filter("is-default", ["true"]),
+                ],
+            }, cancellationToken);
+
+            var vpcId = vpcResponse.Vpcs.FirstOrDefault()?.VpcId;
+            if (string.IsNullOrWhiteSpace(vpcId))
+            {
+                return null;
+            }
+
+            var subnetResponse = await client.DescribeSubnetsAsync(new DescribeSubnetsRequest
+            {
+                Filters =
+                [
+                    new Filter("vpc-id", [vpcId]),
+                    new Filter("default-for-az", ["true"]),
+                ],
+            }, cancellationToken);
+
+            return subnetResponse.Subnets.FirstOrDefault()?.AvailabilityZone;
+        }
+        catch (AmazonEC2Exception)
+        {
+            return null;
+        }
+        catch (AmazonServiceException)
+        {
+            return null;
+        }
     }
 
     private static async Task<AwsCatalogOption?> FindLatestImageAsync(
@@ -673,8 +1057,10 @@ public sealed class AwsEc2Client
         IReadOnlyList<string> owners,
         string namePattern,
         string labelPrefix,
+        string architecture,
         CancellationToken cancellationToken)
     {
+        var arch = string.IsNullOrWhiteSpace(architecture) ? "x86_64" : architecture.Trim();
         var response = await client.DescribeImagesAsync(new DescribeImagesRequest
         {
             Owners = owners.ToList(),
@@ -682,7 +1068,7 @@ public sealed class AwsEc2Client
             [
                 new Filter("name", [namePattern]),
                 new Filter("state", ["available"]),
-                new Filter("architecture", ["x86_64"]),
+                new Filter("architecture", [arch]),
                 new Filter("virtualization-type", ["hvm"]),
             ],
         }, cancellationToken);
@@ -696,15 +1082,11 @@ public sealed class AwsEc2Client
             return null;
         }
 
-        var label = string.IsNullOrWhiteSpace(image.Name)
-            ? labelPrefix
-            : $"{labelPrefix} ({image.Name})";
-
         return new AwsCatalogOption
         {
             Value = image.ImageId,
-            Label = label,
-            Description = image.Description,
+            Label = $"{labelPrefix} ({arch})",
+            Description = arch,
         };
     }
 
@@ -732,24 +1114,12 @@ public sealed class AwsEc2Client
         return string.IsNullOrWhiteSpace(image.Name) ? imageId : image.Name;
     }
 
-    private static bool IsPreferredLaunchInstanceType(string instanceType)
-    {
-        if (PreferredInstanceTypes.Contains(instanceType))
-        {
-            return true;
-        }
-
-        return PreferredInstanceTypePrefixes.Any(prefix =>
-            instanceType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static async Task<IReadOnlyList<AwsEc2Instance>> ListRunningInstancesInRegionAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         var reservations = new List<Reservation>();
         string? nextToken = null;
 
@@ -883,14 +1253,13 @@ public sealed class AwsEc2Client
         return instance.InstanceId ?? string.Empty;
     }
 
-    private static AmazonEC2Client CreateClient(string accessKeyId, string secretAccessKey, string region)
+    private static AmazonEC2Client CreateClient(AwsRuntimeCredentials credentials, string region)
     {
-        var credentials = new BasicAWSCredentials(accessKeyId.Trim(), secretAccessKey.Trim());
         var config = new AmazonEC2Config
         {
             RegionEndpoint = RegionEndpoint.GetBySystemName(region),
         };
-        return new AmazonEC2Client(credentials, config);
+        return new AmazonEC2Client(credentials.ToSdk(), config);
     }
 
     private static string ParseAwsError(Exception exception, string fallback)

@@ -54,9 +54,23 @@ Template placeholder `your-ip/32` in catalog rules is replaced with operator-sup
 
 ---
 
+## Cloud login Part 2 — contract (all providers)
+
+Login plans **03–08** treat **Part 2** as required work after Connect + Configure instance — not a later optional extra.
+
+| Part | What | Shared spec |
+|------|------|-------------|
+| **2A Cloud firewall** | Create/update SG / NSG / Cloud Firewall / firewall group from `VpcSecurityCatalog`; SSH admin CIDR only; never 3306/7878 | This file |
+| **2B API identity** | Dedicated IAM user / role / scoped token — **never persist cloud-account root keys** for daily API | This file [IAM / token permissions](#iam--token-permissions-link-accounts) + README |
+| **2C Host SSH** | Dedicated operator user; **root and image-default users cannot SSH from the internet**; break-glass only via **that provider’s console** (Instance Connect, Droplet Console, KVM, serial, Bastion) | [`10-wow-vpc-network-security.md`](./10-wow-vpc-network-security.md) |
+
+Provider login plans hold **provider-specific APIs and console break-glass paths**. Do not fork the rule model.
+
+---
+
 ## Part 2 — Automatic cloud firewall (Cloud login)
 
-**This is required for Cloud login Part 2** — not an optional overview-only feature.
+**This is required for Cloud login Part 2A** — not an optional overview-only feature.
 
 When the operator completes **Configure instance** in the cloud login / wizard flow (existing VM or launch new), the platform **automatically**:
 
@@ -367,7 +381,7 @@ Document per provider in README (extend cloud wizard IAM section):
 | Hetzner | Firewalls read/write |
 | Vultr | Firewall read/write scopes on OAuth app or API key |
 
-OAuth login plans (`plans/03-cloud-login-digitalocean.md` … `plans/08-cloud-login-hetzner.md`) should request firewall scopes where applicable.
+OAuth / token login plans (`plans/03` … `plans/08`) **Part 2B** must request firewall scopes. **Part 2C** (root SSH lockout) is specified in [`10-wow-vpc-network-security.md`](./10-wow-vpc-network-security.md).
 
 ---
 
@@ -404,8 +418,9 @@ OAuth login plans (`plans/03-cloud-login-digitalocean.md` … `plans/08-cloud-lo
 ## Related plans
 
 - [`01-cloud-integration-completed.md`](./01-cloud-integration-completed.md) — Phases 1–5 shipped; Phase 5e AWS SG baseline
+- [`../plans/03-cloud-login-digitalocean.md`](../plans/03-cloud-login-digitalocean.md) … [`08-cloud-login-hetzner.md`](../plans/08-cloud-login-hetzner.md) — **Part 2** per provider (2A firewall, 2B IAM, 2C SSH/root lockout)
 - [`10-wow-vpc-network-security.md`](./10-wow-vpc-network-security.md) — defense-in-depth, extra hardening ideas, verification
-- [`../plans/02-cloud-oauth-login-master-plan.md`](../plans/02-cloud-oauth-login-master-plan.md) — OAuth + Part 2 automatic firewall
+- [`../plans/02-cloud-oauth-login-master-plan.md`](../plans/02-cloud-oauth-login-master-plan.md) — OAuth + setup dialog shell
 - [`11-windows-os-support.md`](./11-windows-os-support.md) — Windows Firewall on host + cloud NSG/SG for Windows VMs
 
 ---

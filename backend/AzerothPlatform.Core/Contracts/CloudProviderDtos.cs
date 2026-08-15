@@ -21,6 +21,15 @@ public sealed class CloudProviderConnectionDto
     public string? DefaultRegion { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
+
+    public CloudAuthMethod AuthMethod { get; set; } = CloudAuthMethod.Manual;
+
+    /// <summary>Masked account hint (email, account id, subscription name). Never a secret.</summary>
+    public string? AccountHint { get; set; }
+
+    public DateTime? TokenExpiresAtUtc { get; set; }
+
+    public bool NeedsReauth { get; set; }
 }
 
 public sealed class CreateCloudProviderConnectionRequestDto
@@ -55,6 +64,25 @@ public sealed class CreateCloudProviderConnectionRequestDto
 
     /// <summary>Optional default region/zone filter (AWS region, GCP zone/region prefix, Azure location).</summary>
     public string? DefaultRegion { get; set; }
+}
+
+public sealed class UpsertCloudOAuthConnectionRequestDto
+{
+    public CloudProvider Provider { get; set; }
+
+    public string Label { get; set; } = string.Empty;
+
+    public string AccountHint { get; set; } = string.Empty;
+
+    public string ProtectedCredentials { get; set; } = string.Empty;
+
+    public DateTime? TokenExpiresAtUtc { get; set; }
+
+    public string? ReconnectConnectionId { get; set; }
+
+    public string? DefaultRegion { get; set; }
+
+    public CloudAuthMethod AuthMethod { get; set; } = CloudAuthMethod.OAuth;
 }
 
 public sealed class CloudInstanceDto

@@ -9,7 +9,7 @@ internal static class SshKeyMaterialHelper
 
     internal static SshKeyPair GenerateKeyPair()
     {
-        using var rsa = RSA.Create(4096);
+        using var rsa = RSA.Create(2048);
         var privatePem = rsa.ExportPkcs8PrivateKeyPem();
         var publicKey = ConvertToOpenSshPublicKey(rsa);
         return new SshKeyPair(privatePem, publicKey, ComputeFingerprint(privatePem));
@@ -22,22 +22,66 @@ internal static class SshKeyMaterialHelper
         return ConvertToOpenSshPublicKey(rsa);
     }
 
+    /// <summary>
+    /// EC2 ImportKeyPair expects the OpenSSH public key as UTF-8 bytes, then Base64.
+    /// The AWS SDK does not encode this blob for us.
+    /// </summary>
+    internal static string ToAwsImportPublicKeyMaterial(string openSshPublicKey)
+    {
+        var line = NormalizeOpenSshPublicKey(openSshPublicKey);
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(line));
+    }
+
+    internal static string NormalizeOpenSshPublicKey(string openSshPublicKey)
+    {
+        var line = (openSshPublicKey ?? string.Empty)
+            .Replace("\r", string.Empty)
+            .Replace("\n", " ")
+            .Trim();
+        if (line.Length == 0)
+        {
+            throw new ArgumentException("SSH public key is empty.");
+        }
+
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2 && IsOpenSshKeyType(parts[0]))
+        {
+            line = $"{parts[0]} {parts[1]}";
+        }
+
+        if (line.Any(ch => ch > 127))
+        {
+            throw new ArgumentException(
+                "SSH public key contains non-ASCII characters. Remove the comment or paste an OpenSSH .pub key.");
+        }
+
+        return line;
+    }
+
+    private static bool IsOpenSshKeyType(string value)
+        => value is "ssh-rsa"
+            or "ssh-ed25519"
+            or "ecdsa-sha2-nistp256"
+            or "ecdsa-sha2-nistp384"
+            or "ecdsa-sha2-nistp521";
+
     private static string ConvertToOpenSshPublicKey(RSA rsa)
     {
         var parameters = rsa.ExportParameters(false);
         using var stream = new MemoryStream();
-        using var writer = new BinaryWriter(stream);
-        WriteOpenSshString(writer, "ssh-rsa");
-        WriteOpenSshMpint(writer, parameters.Exponent ?? Array.Empty<byte>());
-        WriteOpenSshMpint(writer, parameters.Modulus ?? Array.Empty<byte>());
-        return $"ssh-rsa {Convert.ToBase64String(stream.ToArray())} azeroth-platform";
+        using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
+        {
+            WriteOpenSshString(writer, "ssh-rsa");
+            WriteOpenSshMpint(writer, parameters.Exponent ?? []);
+            WriteOpenSshMpint(writer, parameters.Modulus ?? []);
+            writer.Flush();
+        }
+
+        return $"ssh-rsa {Convert.ToBase64String(stream.ToArray())}";
     }
 
     private static void WriteOpenSshString(BinaryWriter writer, string value)
-    {
-        var bytes = Encoding.UTF8.GetBytes(value);
-        WriteOpenSshBytes(writer, bytes);
-    }
+        => WriteOpenSshBytes(writer, Encoding.UTF8.GetBytes(value));
 
     private static void WriteOpenSshMpint(BinaryWriter writer, byte[] value)
     {

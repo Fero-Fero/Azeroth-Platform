@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, Cloud, Copy, Loader2, Server, Sparkles, XCircle } from 'lucide-react'
+import { CheckCircle2, Cloud, Copy, Loader2, Server, XCircle } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
-import { CloudTerminalPanel } from '@/components/wizard/common/CloudTerminalPanel'
 import { VpcConnectionMethodTabs } from '@/components/wizard/common/VpcConnectionMethodTabs'
 import { VpcSecurityOverviewSection } from '@/components/wizard/common/VpcSecurityOverviewSection'
 import { SavedSshKeySelector } from '@/components/wizard/common/SavedSshKeySelector'
 import { SshPrivateKeyField } from '@/components/wizard/common/SshPrivateKeyField'
 import type { WizardForm } from '@/components/wizard/types'
 import { DEFAULT_ARMORY_PORT, DEFAULT_CLIENT_PORT } from '@/lib/stack-network-defaults'
-import { CloudSecurityGroupGuideDialog } from '@/components/stacks/CloudSecurityGroupGuideDialog'
 import { cn } from '@/lib/utils'
-import { systemApi } from '@/services/api'
+import { systemApi, cloudApi } from '@/services/api'
 import {
   DeploymentTarget,
   RemoteConnectionTestPhase,
@@ -177,13 +174,13 @@ function ManualVpcDockerSetupPanel({ sshUser }: { sshUser: string }) {
         SSH into the VPS as a user that can run <code className="text-[11px]">sudo</code> (often{' '}
         <code className="text-[11px]">ubuntu</code> on AWS). Paste these commands, then log out and back in
         (or run <code className="text-[11px]">newgrp docker</code>) so group membership applies. Click{' '}
-        <strong>Test connection</strong> again — Setup Now will skip install if Docker is already running.
+        <strong>Test connection</strong> again  -  Setup Now will skip install if Docker is already running.
       </p>
       <pre className="mt-2 overflow-x-auto rounded border border-amber-200 bg-amber-50/80 p-2 font-mono text-[11px] leading-relaxed">
         {lines.join('\n')}
       </pre>
       <p className="mt-2 text-[11px] text-amber-900">
-        Optional — allow the platform to run future setup without a sudo password (replace the username if
+        Optional  -  allow the platform to run future setup without a sudo password (replace the username if
         needed):
       </p>
       <pre className="mt-1 overflow-x-auto rounded border border-amber-200 bg-amber-50/80 p-2 font-mono text-[11px] leading-relaxed">{`echo '${user} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-platform-setup
@@ -211,24 +208,24 @@ function VpcLaunchGuidePanel({
     aws: {
       title: 'Amazon Web Services (EC2)',
       steps: [
-        'EC2 → Launch instance → pick Ubuntu 22.04 or 24.04.',
-        'Expand Advanced details at the bottom of the launch form (easy to miss — scroll down past storage and tags).',
+        'EC2 â†’ Launch instance â†’ pick Ubuntu 22.04 or 24.04.',
+        'Expand Advanced details at the bottom of the launch form (easy to miss  -  scroll down past storage and tags).',
         'Paste the script into User data, allow SSH (port 22) from your IP, create/download the .pem key pair, then Launch.',
       ],
     },
     gcp: {
       title: 'Google Cloud (Compute Engine)',
       steps: [
-        'Compute Engine → Create instance → pick Ubuntu 22.04 or 24.04.',
-        'Open Management → Automation → Startup script (not SSH keys).',
-        'Paste the script, allow TCP:22 in the firewall, add your SSH key under Security → SSH keys, then Create.',
+        'Compute Engine â†’ Create instance â†’ pick Ubuntu 22.04 or 24.04.',
+        'Open Management â†’ Automation â†’ Startup script (not SSH keys).',
+        'Paste the script, allow TCP:22 in the firewall, add your SSH key under Security â†’ SSH keys, then Create.',
       ],
     },
     digitalocean: {
       title: 'DigitalOcean (Droplet)',
       steps: [
-        'Create → Droplets → pick Ubuntu 22.04 or 24.04.',
-        'Expand Advanced Options → check User data.',
+        'Create â†’ Droplets â†’ pick Ubuntu 22.04 or 24.04.',
+        'Expand Advanced Options â†’ check User data.',
         'Paste the script, add your SSH key, then Create Droplet.',
       ],
     },
@@ -237,7 +234,7 @@ function VpcLaunchGuidePanel({
       steps: [
         'Create a new Ubuntu 22.04/24.04 VM (not an existing one).',
         'Look for User data, Custom data, Cloud-init, or Startup script in the create wizard.',
-        'Paste the script there — it runs once on first boot. Allow SSH (port 22) from your IP.',
+        'Paste the script there  -  it runs once on first boot. Allow SSH (port 22) from your IP.',
       ],
     },
   }
@@ -276,14 +273,14 @@ function VpcLaunchGuidePanel({
         {hintsOnly ? (
           <>
             Creating a <span className="font-medium">new</span> VM? Paste the bootstrap script into your
-            provider&apos;s startup / user-data field — it runs once on first boot. For an existing server, use
+            provider&apos;s startup / user-data field  -  it runs once on first boot. For an existing server, use
             the terminal sticky note instead.
           </>
         ) : (
           <>
             The script below works on <span className="font-medium">any</span> cloud that supports Ubuntu and a
             startup/user-data field (AWS, GCP, DigitalOcean, Azure, etc.). It only runs when you{' '}
-            <span className="font-medium">create</span> a new VM — not on a server you already started.
+            <span className="font-medium">create</span> a new VM  -  not on a server you already started.
           </>
         )}
       </p>
@@ -347,7 +344,7 @@ function VpcLaunchGuidePanel({
               {launchData.script}
             </pre>
           ) : (
-            <p className="mt-2 text-xs text-blue-800">Loading launch script…</p>
+            <p className="mt-2 text-xs text-blue-800">Loading launch script...</p>
           )}
         </>
       ) : null}
@@ -579,10 +576,9 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const saveSshKeyToVault = watch('deployment.saveSshKeyToVault') ?? true
   const saveSshKeyLabel = watch('deployment.saveSshKeyLabel') ?? ''
   const connectionVerified = watch('deployment.connectionVerified')
-  const firstTimeSetupCompleted = watch('deployment.firstTimeSetupCompleted')
   const remoteOs = watch('deployment.remoteOs') ?? RemoteHostOs.Linux
   const enableHostFirewall = watch('deployment.enableHostFirewall') ?? true
-  const cloudSecurityGroupAcknowledged = watch('deployment.cloudSecurityGroupAcknowledged')
+  const sshCertificateVerified = watch('deployment.sshCertificateVerified') ?? true
   const authServerPort = watch('ports.authServer') ?? 3724
   const worldServerPort = watch('ports.worldServer') ?? 8085
 
@@ -617,7 +613,6 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const [sshTestResult, setSshTestResult] = useState<RemoteConnectionTestResultDto | null>(null)
   const [settingUp, setSettingUp] = useState(false)
   const [setupResult, setSetupResult] = useState<RemoteSetupResultDto | null>(null)
-  const [sgGuideOpen, setSgGuideOpen] = useState(false)
   const [cloudConnectionId, setCloudConnectionId] = useState('')
 
   const connectionFieldsReady =
@@ -640,42 +635,55 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     setSetupResult(null)
   }, [deploymentTarget, externalHost, externalSshPort, externalSshUser, externalSshPrivateKey, savedSshKeyId, setValue])
 
-  const { data: securityProfile } = useQuery({
-    queryKey: ['vpc-security-profile', externalHost, authServerPort, worldServerPort],
-    queryFn: async () =>
-      (
-        await systemApi.vpcSecurityProfile({
-          host: externalHost.trim(),
-          authPort: authServerPort,
-          worldPort: worldServerPort,
-          armoryPort: DEFAULT_ARMORY_PORT,
-          clientPort: DEFAULT_CLIENT_PORT,
-        })
-      ).data,
-    enabled: deploymentTarget === DeploymentTarget.External && externalHost.trim().length > 0,
-  })
-
-  const { data: launchData } = useQuery({
-    queryKey: ['vpc-launch-user-data', externalSshUser],
-    queryFn: async () => (await systemApi.vpcLaunchUserData(externalSshUser.trim() || 'ubuntu')).data,
-    enabled: deploymentTarget === DeploymentTarget.External,
-  })
-
   const runPrerequisiteCheck = useCallback(
     async (sshData: RemoteConnectionTestResultDto): Promise<RemoteConnectionTestResultDto> => {
       const prereqRes = await systemApi.testRemoteConnection(
         deploymentPayload,
         RemoteConnectionTestPhase.PrerequisitesOnly
       )
+      const hostChecks = [
+        ...(sshData.prerequisites ?? []),
+        ...(prereqRes.data.prerequisites ?? []).filter((check) => check.name !== 'SSH'),
+      ]
+
+      let cloudChecks: RemotePrerequisiteCheckDto[] = []
+      let cloudMessage: string | undefined
+      if (cloudConnectionId.trim() && externalHost.trim()) {
+        try {
+          const probe = (
+            await cloudApi.probeFirewall(cloudConnectionId, {
+              publicHost: externalHost.trim(),
+            })
+          ).data
+          cloudChecks = probe.checks ?? []
+          cloudMessage = probe.message
+          if (!probe.success) {
+            prereqRes.data.success = false
+          }
+        } catch {
+          cloudChecks = [
+            {
+              name: 'Cloud security group',
+              passed: false,
+              message: 'Could not probe the cloud security group for this account.',
+            },
+          ]
+          prereqRes.data.success = false
+        }
+      }
+
+      const prerequisites = [...hostChecks, ...cloudChecks]
+      const success = (prereqRes.data.success ?? false) && cloudChecks.every((check) => check.passed)
       return {
         ...prereqRes.data,
-        prerequisites: [
-          ...(sshData.prerequisites ?? []),
-          ...(prereqRes.data.prerequisites ?? []).filter((check) => check.name !== 'SSH'),
-        ],
+        success,
+        message: success
+          ? prereqRes.data.message
+          : [prereqRes.data.message, cloudMessage].filter(Boolean).join(' '),
+        prerequisites,
       }
     },
-    [deploymentPayload]
+    [cloudConnectionId, deploymentPayload, externalHost]
   )
 
   const runConnectionTest = useCallback(async (): Promise<RemoteConnectionTestResultDto | null> => {
@@ -721,7 +729,6 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
     setTestProgress({ connection: 'active', prerequisites: 'pending' })
     setSetupResult(null)
     setValue('deployment.connectionVerified', false, { shouldDirty: true })
-    setValue('deployment.firstTimeSetupCompleted', false, { shouldDirty: true })
 
     try {
       await runConnectionTest()
@@ -833,29 +840,17 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
       return 'Fix the SSH connection before running first-time setup.'
     }
     if (dockerReady) {
-      return 'Docker is already configured — Setup Now will verify each step and skip what is already in place.'
+      return 'Docker is already configured  -  Setup Now will verify each step and skip what is already in place.'
     }
-    return 'Ready — the platform will install and configure Docker on your VPC.'
+    return 'Ready - the platform will install and configure Docker on your VPC.'
   }, [credentialsReady, dockerReady, sshVerified, testResult])
-
-  const setupSectionStatuses = useMemo(
-    () =>
-      computeSetupSectionStatuses(
-        setupResult?.steps,
-        settingUp,
-        enableHostFirewall,
-        cloudSecurityGroupAcknowledged
-      ),
-    [cloudSecurityGroupAcknowledged, enableHostFirewall, settingUp, setupResult?.steps]
-  )
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-gray-900">Deployment Target</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Choose where this stack&rsquo;s containers will run. Select an external VPC if you have already
-          provisioned a server on AWS, GCP, or another cloud provider.
+          Choose where this stack&rsquo;s containers will run.
         </p>
       </div>
 
@@ -908,7 +903,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
       {deploymentTarget === DeploymentTarget.External && (
         <div className="space-y-4 rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-600">
-            Follow the sections below: review ports, choose how to connect, add your SSH key, then bootstrap over the terminal.
+            Connect to the server, then choose whether to configure the VPC or skip ahead to verification.
           </p>
 
           <DeploymentSubstep
@@ -954,12 +949,10 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
 
           <DeploymentSubstep
             step={2}
-            title="Connection & bootstrap"
-            description="Connect to your server, run the bootstrap script, and prepare Docker on the VM."
+            title="Connect"
+            description="Connect a cloud account to pick or launch a VM, or enter a host you already have."
           >
             <div className="space-y-4">
-              <VpcSecurityOverviewSection />
-
               <VpcConnectionMethodTabs
                 disabled={testing || settingUp || sshTesting}
                 cloudConnectionId={cloudConnectionId}
@@ -967,6 +960,13 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                 externalHost={externalHost}
                 externalSshUser={externalSshUser}
                 savedSshKeyId={savedSshKeyId}
+                sshCertificateVerified={sshCertificateVerified}
+                onSshCertificateVerifiedChange={(verified) =>
+                  setValue('deployment.sshCertificateVerified', verified, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
                 register={register}
                 errors={errors}
                 connectionFieldsReady={connectionFieldsReady}
@@ -1001,13 +1001,16 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                     })
                     setValue('deployment.externalSshPrivateKey', '', { shouldDirty: true, shouldValidate: true })
                   }
+                  setValue('deployment.vpcSetupMode', 'skip', { shouldDirty: true })
+                  setValue('deployment.firstTimeSetupCompleted', true, { shouldDirty: true })
+                  setValue('deployment.cloudSecurityGroupAcknowledged', true, { shouldDirty: true })
                 }}
               >
                 <div className="space-y-3">
                   <div>
                     <p className="text-xs font-semibold text-gray-900">SSH credentials</p>
                     <p className="mt-0.5 text-[11px] text-gray-600">
-                      Required for the connection test and terminal below.
+                      Required for a host you already have. Cloud account setup generates a key for you.
                     </p>
                   </div>
 
@@ -1082,305 +1085,166 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                     </>
                   ) : (
                     <p className="text-xs text-gray-600">
-                      Using saved key — paste a new key by choosing “Paste a new key below…” in the dropdown.
+                      Using saved key - paste a new key by choosing "Paste a new key below..." in the dropdown.
                     </p>
                   )}
                 </div>
               </VpcConnectionMethodTabs>
-
-              {remoteOs === RemoteHostOs.Linux ? (
-                <>
-                  <CloudTerminalPanel
-                    deployment={deploymentPayload}
-                    credentialsReady={credentialsReady}
-                    disabled={remoteOs !== RemoteHostOs.Linux}
-                    bootstrapScript={launchData?.script}
-                    sshUser={externalSshUser}
-                  />
-                  <VpcLaunchGuidePanel
-                    sshUser={externalSshUser}
-                    launchData={launchData}
-                    embedded
-                    hintsOnly
-                  />
-                </>
-              ) : (
-                <p className="text-xs text-gray-600">Windows bootstrap scripts will be added when Windows VPC support ships.</p>
-              )}
             </div>
           </DeploymentSubstep>
 
+          {!sshCertificateVerified ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+              Verify the downloaded SSH certificate in Connect before Verify VPC and the rest of stack creation.
+            </p>
+          ) : (
+          <>
           <DeploymentSubstep
             step={3}
-            title="Verify connection"
-            description="Confirm the platform can reach your server and Docker is available."
+            title="Verify VPC"
+            description="Confirm Docker, host firewall (ufw), OS baselines, and cloud security group rules on both the VM and the provider."
           >
-            <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void handleTestConnection()}
-                disabled={testing || settingUp || !credentialsReady}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
-              >
-                {testing && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                Test connection &amp; verify prerequisites
-              </button>
-            </div>
+            <div className="space-y-4">
+              <ul className="list-disc space-y-1 pl-4 text-[11px] text-gray-600">
+                {PLANNED_SETUP_ITEMS.map((item) => (
+                  <li key={item.id}>
+                    <span className="font-medium text-gray-800">{item.title}.</span> {item.description}
+                  </li>
+                ))}
+              </ul>
 
-            {(testing || testProgress) && (
-              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                <ConnectionTestProgressBar
-                  progress={testProgress ?? { connection: 'active', prerequisites: 'pending' }}
-                />
-              </div>
-            )}
-
-            {testResult && (
-              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                {testResult.prerequisites && testResult.prerequisites.length > 0 ? (
-                  <>
-                    <p className="mb-2 text-xs font-medium text-gray-700">Remote host prerequisites</p>
-                    <ul className="space-y-1.5">
-                      {testResult.prerequisites.map((check) => (
-                        <li key={check.name} className="flex items-start gap-2 text-xs">
-                          {check.passed ? (
-                            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
-                          ) : (
-                            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" aria-hidden="true" />
-                          )}
-                          <span className={check.passed ? 'text-green-800' : 'text-red-800'}>
-                            <span className="font-medium">{check.name}:</span> {check.message}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : null}
-                <p
-                  className={cn(
-                    'text-xs',
-                    testResult.prerequisites?.length ? 'mt-2' : '',
-                    testResult.success ? 'text-green-700' : 'text-red-700'
-                  )}
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleTestConnection()}
+                  disabled={testing || settingUp || !credentialsReady}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
                 >
-                  {testResult.message}
+                  {testing && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                  Verify VPC
+                </button>
+                <p className="text-xs text-gray-500">
+                  Checks SSH, Docker, ufw ports, OS baselines
+                  {cloudConnectionId.trim() ? ', and AWS security groups' : ''}.
                 </p>
               </div>
-            )}
-            </div>
-          </DeploymentSubstep>
 
-          <DeploymentSubstep
-            step={4}
-            title="First Time Setup"
-            description="Optional — install Docker (if you did not bootstrap manually), apply security baselines, configure host firewall, and acknowledge cloud security group rules."
-          >
-          <section className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
-            <div className="flex items-start gap-3">
-              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
-              <div className="flex-1 space-y-3">
-                <div>
-                  <p className="text-xs text-amber-900">
-                    New cloud instances usually need a one-time bootstrap before stacks can deploy. After SSH
-                    is working, run setup here — the platform will configure the remote host for you.
-                  </p>
+              {(testing || testProgress) && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <ConnectionTestProgressBar
+                    progress={testProgress ?? { connection: 'active', prerequisites: 'pending' }}
+                  />
                 </div>
+              )}
 
-                <ul className="space-y-2">
-                  {PLANNED_SETUP_ITEMS.map((item) => {
-                    const status = item.available
-                      ? setupSectionStatuses[item.id]
-                      : ('pending' as SetupSectionStatus)
-                    const detail = getSetupSectionDetail(
-                      item.id,
-                      setupResult?.steps,
-                      cloudSecurityGroupAcknowledged
-                    )
-
-                    return (
-                      <li key={item.id} className="flex items-start gap-2 text-xs">
-                        {item.available ? (
-                          <SetupSectionStatusIcon status={status} />
-                        ) : (
-                          <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-400 text-[9px] font-semibold text-amber-700">
-                            …
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            item.available ? 'text-amber-950' : 'text-amber-800/80',
-                            status === 'failed' && 'text-red-900',
-                            status === 'passed' && item.available && 'text-green-900'
-                          )}
-                        >
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium">{item.title}</span>
-                            {item.available && (
-                              <span
-                                className={cn(
-                                  'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                                  status === 'running' && 'bg-blue-100 text-blue-800',
-                                  status === 'passed' && 'bg-green-100 text-green-800',
-                                  status === 'failed' && 'bg-red-100 text-red-800',
-                                  status === 'skipped' && 'bg-amber-100 text-amber-800',
-                                  status === 'pending' && 'bg-amber-100/80 text-amber-800'
-                                )}
-                              >
-                                {setupSectionStatusLabel(status)}
-                              </span>
+              {testResult && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  {testResult.prerequisites && testResult.prerequisites.length > 0 ? (
+                    <>
+                      <p className="mb-2 text-xs font-medium text-gray-700">Host and cloud checks</p>
+                      <ul className="space-y-1.5">
+                        {testResult.prerequisites.map((check) => (
+                          <li key={check.name} className="flex items-start gap-2 text-xs">
+                            {check.passed ? (
+                              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
+                            ) : (
+                              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" aria-hidden="true" />
                             )}
-                            {!item.available && (
-                              <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900">
-                                Coming soon
-                              </span>
-                            )}
-                          </span>
-                          <span className="mt-0.5 block text-amber-900/90">{item.description}</span>
-                          {item.id === 'cloud-sg' && item.available && (
-                            <button
-                              type="button"
-                              onClick={() => setSgGuideOpen(true)}
-                              className="mt-1.5 inline-flex items-center rounded-md border border-amber-400 bg-white px-2 py-1 text-[11px] font-medium text-amber-950 hover:bg-amber-100"
-                            >
-                              Open setup guide
-                            </button>
-                          )}
-                          {detail && (
-                            <span
-                              className={cn(
-                                'mt-1 block text-[11px]',
-                                status === 'failed' ? 'text-red-800' : 'text-green-800'
-                              )}
-                            >
-                              {detail}
+                            <span className={check.passed ? 'text-green-800' : 'text-red-800'}>
+                              <span className="font-medium">{check.name}:</span> {check.message}
                             </span>
-                          )}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void handleSetupNow()}
-                    disabled={setupButtonDisabled}
-                    className="inline-flex items-center gap-2 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
-                  >
-                    {settingUp && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                    Setup Now
-                  </button>
-                  <p className="text-xs text-amber-900">{setupHint}</p>
-                </div>
-
-                {setupResult && (
-                  <div
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <p
                     className={cn(
-                      'rounded-md border p-3',
-                      setupResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+                      'text-xs',
+                      testResult.prerequisites?.length ? 'mt-2' : '',
+                      testResult.success ? 'text-green-700' : 'text-red-700'
                     )}
                   >
-                    <p
-                      className={cn(
-                        'text-xs font-medium',
-                        setupResult.success ? 'text-green-800' : 'text-red-800'
-                      )}
-                    >
-                      {setupResult.message}
-                    </p>
-                  </div>
-                )}
-
-                {setupResult && !setupResult.success && setupNeedsManualDockerInstall(setupResult.steps) && (
-                  <ManualVpcDockerSetupPanel sshUser={externalSshUser} />
-                )}
-
-                {securityProfile && (
-                  <p className="text-xs text-amber-900">
-                    Ports for this stack: auth <span className="font-mono">{authServerPort}</span>, world{' '}
-                    <span className="font-mono">{worldServerPort}</span>, armory{' '}
-                    <span className="font-mono">{DEFAULT_ARMORY_PORT}</span>, client{' '}
-                    <span className="font-mono">{DEFAULT_CLIENT_PORT}</span>. Open the cloud setup guide for
-                    the full inbound rule list.
+                    {testResult.message}
                   </p>
-                )}
+                </div>
+              )}
 
-                <div className="rounded-md border border-amber-200 bg-white/80 p-3">
-                  <p className="text-xs font-medium text-amber-950">Cloud security group (manual)</p>
-                  <p className="mt-1 text-xs text-amber-900">
-                    Setup Now configures <span className="font-medium">ufw</span> on the Linux host. You must
-                    also add matching inbound rules in your cloud provider&apos;s security group — the platform
-                    does not change AWS/GCP/Azure rules automatically yet.
+              {connectionVerified ? (
+                <p className="flex items-center gap-1.5 text-xs font-medium text-green-800">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  VPC verified on the host and cloud provider.
+                </p>
+              ) : (
+                <p className="text-xs text-amber-800">
+                  Verify VPC must pass before you can continue. If launch user data is still running, wait and
+                  try again. Use Repair host setup only for an existing VM that was not launched from this wizard.
+                </p>
+              )}
+
+              <details className="rounded-md border border-gray-200 bg-white p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-gray-800">
+                  Repair host setup
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-gray-600">
+                    Re-runs Docker, ufw, and OS baselines over SSH. Use this if Verify VPC fails after cloud-init
+                    should have finished, or when you selected an existing VM.
                   </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <VpcSecurityOverviewSection />
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setSgGuideOpen(true)}
-                      className="inline-flex items-center rounded-md bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+                      onClick={() => void handleSetupNow()}
+                      disabled={setupButtonDisabled}
+                      className="inline-flex items-center gap-2 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-60"
                     >
-                      Open setup guide
+                      {settingUp && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                      Repair setup
                     </button>
-                    {cloudSecurityGroupAcknowledged ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-800">
-                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        Cloud rules acknowledged
-                      </span>
-                    ) : (
-                      <span className="text-xs text-amber-900">
-                        Required before continuing — follow the guide, then confirm in the dialog.
-                      </span>
-                    )}
+                    <p className="text-xs text-amber-900">{setupHint}</p>
                   </div>
+                  {setupResult && (
+                    <div
+                      className={cn(
+                        'rounded-md border p-3',
+                        setupResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+                      )}
+                    >
+                      <p
+                        className={cn(
+                          'text-xs font-medium',
+                          setupResult.success ? 'text-green-800' : 'text-red-800'
+                        )}
+                      >
+                        {setupResult.message}
+                      </p>
+                    </div>
+                  )}
                 </div>
-
-                <CloudSecurityGroupGuideDialog
-                  open={sgGuideOpen}
-                  onClose={() => setSgGuideOpen(false)}
-                  host={externalHost}
-                  sshPort={Number(externalSshPort) || 22}
-                  profile={securityProfile}
-                  acknowledged={cloudSecurityGroupAcknowledged}
-                  onAcknowledgedChange={(value) =>
-                    setValue('deployment.cloudSecurityGroupAcknowledged', value, { shouldDirty: true })
-                  }
-                />
-
-                {!connectionVerified && sshVerified && !dockerReady && !firstTimeSetupCompleted && (
-                  <p className="text-xs font-medium text-amber-900">
-                    Run <span className="font-semibold">Setup Now</span> to install Docker before continuing.
-                  </p>
-                )}
-                {connectionVerified && dockerReady && !firstTimeSetupCompleted && (
-                  <p className="text-xs font-medium text-amber-900">
-                    Prerequisites are met. Run <span className="font-semibold">Setup Now</span> to apply
-                    security baselines and host firewall rules, or continue if you have configured those manually.
-                  </p>
-                )}
-                {connectionVerified && cloudSecurityGroupAcknowledged && (
-                  <p className="flex items-center gap-1.5 text-xs font-medium text-green-800">
-                    <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    Remote host is ready — you can continue to the next step.
-                  </p>
-                )}
-                {connectionVerified && !cloudSecurityGroupAcknowledged && (
-                  <p className="text-xs font-medium text-amber-900">
-                    Connection verified — acknowledge the cloud security group checklist before continuing.
-                  </p>
-                )}
-              </div>
+              </details>
             </div>
-          </section>
           </DeploymentSubstep>
 
           {deploymentTarget === DeploymentTarget.External && !connectionVerified && (
             <p className="text-xs text-amber-700">
-              Complete connection verification (and first-time setup if Docker is not installed) before continuing.
+              Verify VPC (host firewall, OS baselines, Docker, and cloud security groups) before continuing.
             </p>
+          )}
+          </>
           )}
         </div>
       )}
     </div>
   )
+}
+
+export {
+  ManualVpcDockerSetupPanel,
+  SetupSectionStatusIcon,
+  VpcLaunchGuidePanel,
+  computeSetupSectionStatuses,
+  getSetupSectionDetail,
+  setupNeedsManualDockerInstall,
+  setupSectionStatusLabel,
 }

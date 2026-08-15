@@ -434,6 +434,8 @@ export const cloudApi = {
     apiClient.get<import('@/types/stack.types').CloudSshKeyDto[]>('/cloud/ssh-keys'),
   createSshKey: (request: import('@/types/stack.types').CreateCloudSshKeyRequestDto) =>
     apiClient.post<import('@/types/stack.types').CloudSshKeyDto>('/cloud/ssh-keys', request),
+  downloadSshKey: (id: string) =>
+    apiClient.get<import('@/types/stack.types').CloudSshKeyExportDto>(`/cloud/ssh-keys/${id}/download`),
   deleteSshKey: (id: string) => apiClient.delete(`/cloud/ssh-keys/${id}`),
   listConnections: () =>
     apiClient.get<import('@/types/stack.types').CloudProviderConnectionDto[]>('/cloud/connections'),
@@ -459,10 +461,50 @@ export const cloudApi = {
       `/cloud/connections/${connectionId}/launch`,
       request
     ),
+  probeFirewall: (
+    connectionId: string,
+    request: {
+      publicHost: string
+      region?: string
+      instanceId?: string
+      adminSourceCidr?: string
+    }
+  ) =>
+    apiClient.post<import('@/types/stack.types').CloudFirewallProbeResultDto>(
+      `/cloud/connections/${connectionId}/firewall-probe`,
+      request
+    ),
   listAuditLogs: (limit = 100) =>
     apiClient.get<import('@/types/stack.types').CloudAuditLogDto[]>('/cloud/audit-logs', {
       params: { limit },
     }),
+  listAuthProviders: () =>
+    apiClient.get<import('@/types/stack.types').CloudAuthProviderStatusDto[]>('/cloud/auth/providers'),
+  startCloudAuth: (
+    provider: import('@/types/stack.types').CloudProvider,
+    request?: import('@/types/stack.types').CloudAuthStartRequestDto
+  ) =>
+    apiClient.post<import('@/types/stack.types').CloudAuthStartResultDto>(
+      `/cloud/auth/${provider}/start`,
+      request ?? {}
+    ),
+  completeCloudAuth: (
+    provider: import('@/types/stack.types').CloudProvider,
+    request: import('@/types/stack.types').CloudAuthCompleteRequestDto
+  ) =>
+    apiClient.post<import('@/types/stack.types').CloudProviderConnectionDto>(
+      `/cloud/auth/${provider}/complete`,
+      request
+    ),
+  refreshCloudAuth: (
+    provider: import('@/types/stack.types').CloudProvider,
+    connectionId: string
+  ) => apiClient.post(`/cloud/auth/${provider}/refresh/${connectionId}`),
+  revokeCloudAuth: (connectionId: string) => apiClient.delete(`/cloud/auth/${connectionId}/revoke`),
+  getSetupDialog: (connectionId: string) =>
+    apiClient.get<import('@/types/stack.types').CloudInstanceSetupDialogDto>(
+      `/cloud/connections/${connectionId}/setup-dialog`
+    ),
 }
 
 

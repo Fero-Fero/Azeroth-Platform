@@ -79,6 +79,8 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(connection => connection.Label).HasMaxLength(100).IsRequired();
             entity.Property(connection => connection.ProtectedCredentials).IsRequired();
             entity.Property(connection => connection.DefaultRegion).HasMaxLength(64).IsRequired();
+            entity.Property(connection => connection.AuthMethod).HasMaxLength(32).IsRequired();
+            entity.Property(connection => connection.AccountHint).HasMaxLength(256).IsRequired();
         });
 
         modelBuilder.Entity<CloudAuditLogEntity>(entity =>

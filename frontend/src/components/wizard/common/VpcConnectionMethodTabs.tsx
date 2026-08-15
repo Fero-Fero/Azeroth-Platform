@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Cloud, Server } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
-import { CloudInstancePicker } from '@/components/wizard/common/CloudInstancePicker'
-import { CloudLaunchPanel } from '@/components/wizard/common/CloudLaunchPanel'
+import { CloudAccountStep } from '@/components/wizard/common/CloudAccountStep'
 import { VpcConnectionTestFooter } from '@/components/wizard/common/VpcConnectionTestFooter'
 import type { CloudLaunchResultDto, CloudInstanceDto, RemoteConnectionTestResultDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
@@ -21,6 +20,8 @@ interface VpcConnectionMethodTabsProps {
   savedSshKeyId: string
   register: UseFormRegister<WizardFormData>
   errors: FieldErrors<WizardFormData>
+  sshCertificateVerified: boolean
+  onSshCertificateVerifiedChange: (verified: boolean) => void
   onSelectInstance: (instance: CloudInstanceDto) => void
   onLaunched: (result: CloudLaunchResultDto) => void
   connectionFieldsReady: boolean
@@ -38,6 +39,8 @@ export function VpcConnectionMethodTabs({
   externalHost,
   externalSshUser,
   savedSshKeyId,
+  sshCertificateVerified,
+  onSshCertificateVerifiedChange,
   register,
   errors,
   onSelectInstance,
@@ -49,14 +52,14 @@ export function VpcConnectionMethodTabs({
   sshTestResult,
   children,
 }: VpcConnectionMethodTabsProps) {
-  const [method, setMethod] = useState<ConnectionMethod>('manual')
+  const [method, setMethod] = useState<ConnectionMethod>('cloud')
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50/80">
       <div className="border-b border-gray-200 px-3 pt-3">
         <p className="text-xs font-semibold text-gray-900">How will you reach this server?</p>
         <p className="mt-0.5 text-[11px] text-gray-600">
-          Enter a host you already have, or link a cloud account to pick or launch a VM.
+          Connect a cloud account to pick or launch a VM, or enter a host you already have.
         </p>
         <div
           role="tablist"
@@ -65,8 +68,8 @@ export function VpcConnectionMethodTabs({
         >
           {(
             [
-              { id: 'manual' as const, label: 'Remote host', icon: Server },
               { id: 'cloud' as const, label: 'Cloud account', icon: Cloud },
+              { id: 'manual' as const, label: 'Remote host', icon: Server },
             ] as const
           ).map((tab) => (
             <button
@@ -74,7 +77,12 @@ export function VpcConnectionMethodTabs({
               type="button"
               role="tab"
               aria-selected={method === tab.id}
-              onClick={() => setMethod(tab.id)}
+              onClick={() => {
+                setMethod(tab.id)
+                if (tab.id === 'manual') {
+                  onSshCertificateVerifiedChange(true)
+                }
+              }}
               disabled={disabled}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
@@ -155,52 +163,35 @@ export function VpcConnectionMethodTabs({
             </FormField>
           </div>
         ) : (
-          <div role="tabpanel" className="space-y-3">
-            {externalHost.trim() ? (
-              <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
-                Selected host:{' '}
-                <span className="font-mono font-medium">{externalHost.trim()}</span>
-                {externalSshUser.trim() ? (
-                  <>
-                    {' '}
-                    · SSH user <span className="font-mono">{externalSshUser.trim()}</span>
-                  </>
-                ) : null}
-              </p>
-            ) : (
-              <p className="text-xs text-gray-600">
-                Link an account, pick a running server, or launch a new one — host and SSH user fill in
-                automatically.
-              </p>
-            )}
-            <CloudInstancePicker
-              disabled={disabled}
-              connectionId={cloudConnectionId}
-              onConnectionIdChange={onCloudConnectionIdChange}
-              onSelectInstance={onSelectInstance}
-            />
-            <CloudLaunchPanel
-              disabled={disabled}
-              connectionId={cloudConnectionId}
-              onConnectionIdChange={onCloudConnectionIdChange}
-              sshUser={externalSshUser}
-              savedSshKeyId={savedSshKeyId}
-              onLaunched={onLaunched}
-            />
-          </div>
+          <CloudAccountStep
+            disabled={disabled}
+            connectionId={cloudConnectionId}
+            onConnectionIdChange={onCloudConnectionIdChange}
+            externalHost={externalHost}
+            externalSshUser={externalSshUser}
+            savedSshKeyId={savedSshKeyId}
+            sshCertificateVerified={sshCertificateVerified}
+            onSshCertificateVerifiedChange={onSshCertificateVerifiedChange}
+            onSelectInstance={onSelectInstance}
+            onLaunched={onLaunched}
+          />
         )}
 
-        {children ? <div className="mt-4 border-t border-gray-200 pt-4">{children}</div> : null}
+        {children && method === 'manual' ? (
+          <div className="mt-4 border-t border-gray-200 pt-4">{children}</div>
+        ) : null}
 
-        <VpcConnectionTestFooter
-          method={method}
-          connectionFieldsReady={connectionFieldsReady}
-          credentialsReady={credentialsReady}
-          testing={sshTesting}
-          disabled={disabled}
-          onTestConnection={onTestConnection}
-          testResult={sshTestResult}
-        />
+        {method === 'manual' ? (
+          <VpcConnectionTestFooter
+            method={method}
+            connectionFieldsReady={connectionFieldsReady}
+            credentialsReady={credentialsReady}
+            testing={sshTesting}
+            disabled={disabled}
+            onTestConnection={onTestConnection}
+            testResult={sshTestResult}
+          />
+        ) : null}
       </div>
     </div>
   )

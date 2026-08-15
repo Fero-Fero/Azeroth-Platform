@@ -19,6 +19,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
     private readonly HetznerCloudClient _hetznerCloudClient;
     private readonly VultrClient _vultrClient;
     private readonly ICloudAuditService _cloudAuditService;
+    private readonly IAwsCredentialResolver _awsCredentialResolver;
 
     public CloudProviderConnectionService(
         AzerothCoreDbContext dbContext,
@@ -29,7 +30,8 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         AzureComputeClient azureComputeClient,
         HetznerCloudClient hetznerCloudClient,
         VultrClient vultrClient,
-        ICloudAuditService cloudAuditService)
+        ICloudAuditService cloudAuditService,
+        IAwsCredentialResolver awsCredentialResolver)
     {
         _dbContext = dbContext;
         _secretProtector = secretProtector;
@@ -40,14 +42,17 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         _hetznerCloudClient = hetznerCloudClient;
         _vultrClient = vultrClient;
         _cloudAuditService = cloudAuditService;
+        _awsCredentialResolver = awsCredentialResolver;
     }
 
     public async Task<IReadOnlyList<CloudProviderConnectionDto>> ListAsync(CancellationToken cancellationToken = default)
-        => await _dbContext.CloudProviderConnections
+    {
+        var entities = await _dbContext.CloudProviderConnections
             .AsNoTracking()
             .OrderByDescending(connection => connection.CreatedAtUtc)
-            .Select(connection => ToDto(connection))
             .ToListAsync(cancellationToken);
+        return entities.Select(ToDto).ToList();
+    }
 
     public async Task<CloudProviderConnectionDto> CreateAsync(
         CreateCloudProviderConnectionRequestDto request,
@@ -99,7 +104,13 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                     throw new ArgumentException("AWS access key ID and secret access key are required.");
                 }
 
-                await _awsEc2Client.ValidateCredentialsAsync(accessKeyId, secretAccessKey, cancellationToken);
+                await _awsEc2Client.ValidateCredentialsAsync(
+                    new AwsRuntimeCredentials
+                    {
+                        AccessKeyId = accessKeyId,
+                        SecretAccessKey = secretAccessKey,
+                    },
+                    cancellationToken);
                 protectedCredentials = CloudProviderCredentialStore.ProtectAwsCredentials(
                     _secretProtector,
                     new CloudProviderCredentialStore.AwsCredentials(accessKeyId, secretAccessKey));
@@ -184,6 +195,9 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
             ProtectedCredentials = protectedCredentials,
             DefaultRegion = defaultRegion,
             CreatedAtUtc = DateTime.UtcNow,
+            AuthMethod = CloudAuthMethod.Manual.ToString(),
+            AccountHint = string.Empty,
+            NeedsReauth = false,
         };
 
         _dbContext.CloudProviderConnections.Add(entity);
@@ -201,6 +215,96 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                     provider = entity.Provider,
                     label = entity.Label,
                     defaultRegion = entity.DefaultRegion,
+                }),
+            },
+            cancellationToken);
+
+        return ToDto(entity);
+    }
+
+    public async Task<CloudProviderConnectionDto> UpsertOAuthConnectionAsync(
+        UpsertCloudOAuthConnectionRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.ProtectedCredentials))
+        {
+            throw new ArgumentException("OAuth credentials are required.");
+        }
+
+        var label = string.IsNullOrWhiteSpace(request.Label)
+            ? request.Provider.ToString()
+            : request.Label.Trim();
+        if (label.Length > 100)
+        {
+            throw new ArgumentException("Label must be 100 characters or fewer.");
+        }
+
+        var accountHint = (request.AccountHint ?? string.Empty).Trim();
+        if (accountHint.Length > 256)
+        {
+            accountHint = accountHint[..256];
+        }
+
+        CloudProviderConnectionEntity entity;
+        var reconnectId = (request.ReconnectConnectionId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(reconnectId))
+        {
+            entity = await _dbContext.CloudProviderConnections
+                         .FirstOrDefaultAsync(connection => connection.Id == reconnectId, cancellationToken)
+                     ?? throw new KeyNotFoundException("Cloud connection not found.");
+            if (!string.Equals(entity.Provider, request.Provider.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Reconnect target belongs to a different cloud provider.");
+            }
+
+            entity.Label = label;
+            entity.ProtectedCredentials = request.ProtectedCredentials;
+            entity.AccountHint = accountHint;
+            entity.TokenExpiresAtUtc = request.TokenExpiresAtUtc;
+            entity.NeedsReauth = false;
+            entity.AuthMethod = request.AuthMethod.ToString();
+            if (!string.IsNullOrWhiteSpace(request.DefaultRegion))
+            {
+                entity.DefaultRegion = request.DefaultRegion.Trim();
+            }
+        }
+        else
+        {
+            entity = new CloudProviderConnectionEntity
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Provider = request.Provider.ToString(),
+                Label = label,
+                ProtectedCredentials = request.ProtectedCredentials,
+                DefaultRegion = (request.DefaultRegion ?? string.Empty).Trim(),
+                CreatedAtUtc = DateTime.UtcNow,
+                AuthMethod = request.AuthMethod.ToString(),
+                AccountHint = accountHint,
+                TokenExpiresAtUtc = request.TokenExpiresAtUtc,
+                NeedsReauth = false,
+            };
+            _dbContext.CloudProviderConnections.Add(entity);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _cloudAuditService.WriteAsync(
+            new WriteCloudAuditLogRequestDto
+            {
+                EventType = request.AuthMethod == CloudAuthMethod.AssumedRole
+                    ? CloudAuditEventTypes.ConnectionAssumedRoleLinked
+                    : CloudAuditEventTypes.ConnectionOAuthLinked,
+                ResourceType = "connection",
+                ResourceId = entity.Id,
+                Summary = request.AuthMethod == CloudAuthMethod.AssumedRole
+                    ? $"Connected {entity.Provider} account \"{entity.Label}\" with an IAM role."
+                    : $"Signed in to {entity.Provider} as \"{entity.Label}\".",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    provider = entity.Provider,
+                    label = entity.Label,
+                    accountHint,
+                    reconnect = !string.IsNullOrWhiteSpace(reconnectId),
                 }),
             },
             cancellationToken);
@@ -321,13 +425,10 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         string regionFilter,
         CancellationToken cancellationToken)
     {
-        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var instances = await _awsEc2Client.ListRunningInstancesAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             string.IsNullOrWhiteSpace(regionFilter) ? null : regionFilter,
             cancellationToken);
 
@@ -516,6 +617,9 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
     private static CloudProviderConnectionDto ToDto(CloudProviderConnectionEntity entity)
     {
         Enum.TryParse<CloudProvider>(entity.Provider, ignoreCase: true, out var provider);
+        var authMethod = Enum.TryParse<CloudAuthMethod>(entity.AuthMethod, ignoreCase: true, out var parsedMethod)
+            ? parsedMethod
+            : CloudAuthMethod.Manual;
         return new CloudProviderConnectionDto
         {
             Id = entity.Id,
@@ -523,6 +627,10 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
             Label = entity.Label,
             DefaultRegion = string.IsNullOrWhiteSpace(entity.DefaultRegion) ? null : entity.DefaultRegion,
             CreatedAtUtc = entity.CreatedAtUtc,
+            AuthMethod = authMethod,
+            AccountHint = string.IsNullOrWhiteSpace(entity.AccountHint) ? null : entity.AccountHint,
+            TokenExpiresAtUtc = entity.TokenExpiresAtUtc,
+            NeedsReauth = entity.NeedsReauth,
         };
     }
 }

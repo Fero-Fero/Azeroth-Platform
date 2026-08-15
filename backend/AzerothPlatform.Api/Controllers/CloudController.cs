@@ -15,17 +15,23 @@ public class CloudController : ControllerBase
     private readonly ICloudProviderConnectionService _cloudProviderConnectionService;
     private readonly ICloudLaunchService _cloudLaunchService;
     private readonly ICloudAuditService _cloudAuditService;
+    private readonly ICloudSetupDialogService _cloudSetupDialogService;
+    private readonly ICloudFirewallService _cloudFirewallService;
 
     public CloudController(
         ICloudSshKeyService cloudSshKeyService,
         ICloudProviderConnectionService cloudProviderConnectionService,
         ICloudLaunchService cloudLaunchService,
-        ICloudAuditService cloudAuditService)
+        ICloudAuditService cloudAuditService,
+        ICloudSetupDialogService cloudSetupDialogService,
+        ICloudFirewallService cloudFirewallService)
     {
         _cloudSshKeyService = cloudSshKeyService;
         _cloudProviderConnectionService = cloudProviderConnectionService;
         _cloudLaunchService = cloudLaunchService;
         _cloudAuditService = cloudAuditService;
+        _cloudSetupDialogService = cloudSetupDialogService;
+        _cloudFirewallService = cloudFirewallService;
     }
 
     /// <summary>Lists saved SSH keys (metadata only — private key material is never returned).</summary>
@@ -62,6 +68,26 @@ public class CloudController : ControllerBase
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+    }
+
+    /// <summary>Downloads a saved SSH private key as PEM for the admin who owns this manager.</summary>
+    [HttpGet("ssh-keys/{id}/download")]
+    public async Task<ActionResult<CloudSshKeyExportDto>> DownloadSshKey(
+        string id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cloudSshKeyService.ExportAsync(id, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 
@@ -117,6 +143,26 @@ public class CloudController : ControllerBase
         try
         {
             return Ok(await _cloudProviderConnectionService.ListInstancesAsync(id, region, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>Returns capabilities for the Configure instance dialog (list/create/firewall).</summary>
+    [HttpGet("connections/{id}/setup-dialog")]
+    public async Task<ActionResult<CloudInstanceSetupDialogDto>> GetSetupDialog(
+        string id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cloudSetupDialogService.GetAsync(id, cancellationToken));
         }
         catch (KeyNotFoundException)
         {
@@ -190,6 +236,31 @@ public class CloudController : ControllerBase
         try
         {
             return Ok(await _cloudLaunchService.LaunchAsync(id, request, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>Checks that the instance security group matches the launch network profile.</summary>
+    [HttpPost("connections/{id}/firewall-probe")]
+    public async Task<ActionResult<CloudFirewallProbeResultDto>> ProbeFirewall(
+        string id,
+        [FromBody] CloudFirewallProbeRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cloudFirewallService.ProbeLaunchSecurityGroupAsync(id, request, cancellationToken));
         }
         catch (KeyNotFoundException)
         {

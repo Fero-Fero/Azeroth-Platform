@@ -5,8 +5,13 @@ public static class CloudAuditEventTypes
     public const string SshKeyCreated = "ssh_key.created";
     public const string SshKeyDeleted = "ssh_key.deleted";
     public const string SshKeyUsed = "ssh_key.used";
+    public const string SshKeyDownloaded = "ssh_key.downloaded";
     public const string ConnectionCreated = "connection.created";
     public const string ConnectionDeleted = "connection.deleted";
+    public const string ConnectionOAuthLinked = "connection.oauth.linked";
+    public const string ConnectionOAuthRefreshed = "connection.oauth.refreshed";
+    public const string ConnectionOAuthRevoked = "connection.oauth.revoked";
+    public const string ConnectionAssumedRoleLinked = "connection.assumed_role.linked";
     public const string TerminalStarted = "terminal.started";
     public const string TerminalEnded = "terminal.ended";
     public const string LaunchCompleted = "launch.completed";

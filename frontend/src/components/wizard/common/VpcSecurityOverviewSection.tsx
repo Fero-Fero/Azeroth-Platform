@@ -3,8 +3,8 @@ import { ChevronDown, ChevronUp, Shield } from 'lucide-react'
 import { VpcSecurityRolesCard } from '@/components/stacks/VpcSecurityRolesCard'
 import { cn } from '@/lib/utils'
 
-export function VpcSecurityOverviewSection() {
-  const [expanded, setExpanded] = useState(true)
+export function VpcSecurityOverviewSection({ defaultExpanded = false }: { defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
     <div className="rounded-lg border border-indigo-200 bg-indigo-50/50">

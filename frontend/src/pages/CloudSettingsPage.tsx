@@ -2,28 +2,12 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Cloud, ClipboardList, KeyRound, Loader2, Trash2 } from 'lucide-react'
 import { cloudApi } from '@/services/api'
-import { CloudProvider } from '@/types/stack.types'
+import { CloudAuthMethod } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 import { CloudConnectionLinkForm } from '@/components/wizard/common/CloudConnectionLinkForm'
-
-function providerLabel(provider: CloudProvider): string {
-  switch (provider) {
-    case CloudProvider.DigitalOcean:
-      return 'DigitalOcean'
-    case CloudProvider.Aws:
-      return 'AWS'
-    case CloudProvider.Gcp:
-      return 'GCP'
-    case CloudProvider.Azure:
-      return 'Azure'
-    case CloudProvider.Hetzner:
-      return 'Hetzner'
-    case CloudProvider.Vultr:
-      return 'Vultr'
-    default:
-      return provider
-  }
-}
+import { CloudProviderLoginButton } from '@/components/wizard/common/CloudProviderLoginButton'
+import { SshKeyDownloadButton } from '@/components/wizard/common/SshKeyDownloadButton'
+import { connectionStatusLine, providerDisplayName } from '@/lib/cloud-auth'
 
 function eventLabel(eventType: string): string {
   switch (eventType) {
@@ -33,6 +17,8 @@ function eventLabel(eventType: string): string {
       return 'SSH key deleted'
     case 'ssh_key.used':
       return 'SSH key used'
+    case 'ssh_key.downloaded':
+      return 'SSH key downloaded'
     case 'connection.created':
       return 'Account linked'
     case 'connection.deleted':
@@ -43,6 +29,14 @@ function eventLabel(eventType: string): string {
       return 'Terminal ended'
     case 'launch.completed':
       return 'Launch completed'
+    case 'connection.oauth.linked':
+      return 'OAuth linked'
+    case 'connection.oauth.refreshed':
+      return 'OAuth refreshed'
+    case 'connection.oauth.revoked':
+      return 'OAuth revoked'
+    case 'connection.assumed_role.linked':
+      return 'AWS IAM role connected'
     default:
       return eventType
   }
@@ -68,6 +62,11 @@ export default function CloudSettingsPage() {
   const { data: auditLogs, isLoading: loadingAuditLogs } = useQuery({
     queryKey: ['cloud-audit-logs'],
     queryFn: async () => (await cloudApi.listAuditLogs(100)).data,
+  })
+
+  const { data: authProviders } = useQuery({
+    queryKey: ['cloud-auth-providers'],
+    queryFn: async () => (await cloudApi.listAuthProviders()).data,
   })
 
   const refreshAuditLogs = async () => {
@@ -100,7 +99,7 @@ export default function CloudSettingsPage() {
   }
 
   const handleDeleteConnection = async (id: string) => {
-    await cloudApi.deleteConnection(id)
+    await cloudApi.revokeCloudAuth(id)
     await queryClient.invalidateQueries({ queryKey: ['cloud-connections'] })
     await refreshAuditLogs()
   }
@@ -111,7 +110,8 @@ export default function CloudSettingsPage() {
         <h1 className="text-2xl font-semibold text-gray-900">Cloud</h1>
         <p className="mt-1 text-sm text-gray-600">
           Manage saved SSH keys and linked cloud accounts used by the Create Stack wizard. Secrets are
-          encrypted at rest and never shown again after saving.
+          encrypted at rest. You can download a .pem copy of a saved key when you need to SSH from your
+          own machine.
         </p>
       </div>
 
@@ -142,14 +142,21 @@ export default function CloudSettingsPage() {
                     <span className="font-mono">{key.fingerprint}</span>
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteKey(key.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Delete
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <SshKeyDownloadButton
+                    label={key.label}
+                    keyId={key.id}
+                    className="border-gray-300 text-gray-800 hover:bg-gray-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteKey(key.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -221,23 +228,40 @@ export default function CloudSettingsPage() {
                 <div>
                   <p className="text-sm font-medium text-gray-900">{connection.label}</p>
                   <p className="text-xs text-gray-500">
-                    {providerLabel(connection.provider)}
+                    {providerDisplayName(connection.provider)}
                     {connection.defaultRegion ? (
                       <>
                         {' '}
                         · Default: <span className="font-mono">{connection.defaultRegion}</span>
                       </>
                     ) : null}
+                    {' '}
+                    · {connectionStatusLine(connection)}
+                    {connection.needsReauth ? (
+                      <span className="ml-1 font-medium text-amber-700">Needs reconnect</span>
+                    ) : null}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteConnection(connection.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Unlink
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {connection.authMethod === CloudAuthMethod.OAuth
+                  || connection.authMethod === CloudAuthMethod.AssumedRole ? (
+                    <CloudProviderLoginButton
+                      provider={connection.provider}
+                      status={authProviders?.find((item) => item.provider === connection.provider)}
+                      reconnectConnectionId={connection.id}
+                      label={connection.label}
+                      onLinked={() => void refreshAuditLogs()}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteConnection(connection.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    Unlink
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -172,9 +172,35 @@ public static class VpcSecurityCatalog
             RoleId = RoleManagement,
             Port = soapPort,
             Action = "deny",
-            Description = "SOAP — manager/VPC only (Docker bind)"
+            Description = "SOAP - manager/VPC only (Docker bind)"
         });
 
         return profile;
+    }
+
+    /// <summary>
+    /// Default ingress used when launching a new VM, before stack ports are chosen.
+    /// SSH uses <paramref name="adminSourceCidr"/> when provided; otherwise 0.0.0.0/0.
+    /// </summary>
+    public static IReadOnlyList<VpcSecurityRuleDto> BuildLaunchCloudIngressRules(string? adminSourceCidr)
+    {
+        var sshCidr = string.IsNullOrWhiteSpace(adminSourceCidr) ? "0.0.0.0/0" : adminSourceCidr.Trim();
+        var profile = BuildProfile(
+            host: string.Empty,
+            authPort: 3724,
+            worldPort: 8085,
+            armoryPort: StackNetworkDefaults.DefaultArmoryPort,
+            clientPort: StackNetworkDefaults.DefaultClientPort,
+            databasePort: 3306,
+            soapPort: 7878);
+        foreach (var rule in profile.CloudSecurityGroupRules)
+        {
+            if (string.Equals(rule.Source, "your-ip/32", StringComparison.OrdinalIgnoreCase))
+            {
+                rule.Source = sshCidr;
+            }
+        }
+
+        return profile.CloudSecurityGroupRules;
     }
 }

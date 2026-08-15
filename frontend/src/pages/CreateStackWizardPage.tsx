@@ -215,12 +215,17 @@ export default function CreateStackWizardPage() {
       targetStep > currentStep
       && activeStep?.id === 'deployment'
       && form.getValues('deployment.target') === DeploymentTarget.External
-      && (!form.getValues('deployment.connectionVerified') || !form.getValues('deployment.cloudSecurityGroupAcknowledged'))
     ) {
-      setDeploymentStepError(
-        'Complete first-time setup, verify remote prerequisites, and acknowledge the cloud security group checklist before continuing.'
-      )
-      return
+      if (form.getValues('deployment.sshCertificateVerified') === false) {
+        setDeploymentStepError('Verify the downloaded SSH certificate before continuing.')
+        return
+      }
+      if (!form.getValues('deployment.connectionVerified')) {
+        setDeploymentStepError(
+          'Verify VPC (host firewall, Docker, OS baselines, and cloud security groups) before continuing.'
+        )
+        return
+      }
     }
 
     const values = form.getValues()

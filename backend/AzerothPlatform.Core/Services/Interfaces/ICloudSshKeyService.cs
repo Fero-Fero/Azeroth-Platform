@@ -15,4 +15,7 @@ public interface ICloudSshKeyService
         string id,
         string? usageContext = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Decrypts a saved key for an explicit admin download. Audited separately from SSH use.</summary>
+    Task<CloudSshKeyExportDto> ExportAsync(string id, CancellationToken cancellationToken = default);
 }

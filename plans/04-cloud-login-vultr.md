@@ -84,7 +84,17 @@ OAuth tokens **cannot manage API keys** (by Vultr design) — appropriate for en
 
 ---
 
-## Part 2 — Automatic firewall group setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**. Shared specs: [`09`](../plans_support/09-cloud-security-group-providers.md) (2A/2B), [`10`](../plans_support/10-wow-vpc-network-security.md) (2C).
+
+| Part | Goal |
+|------|------|
+| **2A Cloud firewall** | Firewall group from profile; SSH admin CIDR only |
+| **2B API identity** | OAuth scoped token — **not** the account root API key for daily use |
+| **2C Host SSH** | Operator user; root/default users internet-SSH ❌; Vultr **View Console** for break-glass |
+
+### 2A — Automatic firewall group setup
 
 | Step | Action |
 |------|--------|
@@ -95,9 +105,13 @@ OAuth tokens **cannot manage API keys** (by Vultr design) — appropriate for en
 
 ---
 
-## SSH hardening (operator user + final lockdown)
+### 2B — API identity (not the Vultr account root)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+- End-user login uses OAuth JWTs with firewall write scope
+- **Root user API key** is only for one-time **platform OAuth app registration**, not stored as a stack connection
+- Manual API key fallback: dedicated key, not the account root key
+
+### 2C — SSH: root locked out of the public internet
 
 ### During setup
 

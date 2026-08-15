@@ -77,7 +77,17 @@ Hetzner Firewalls are separate resources — Part 2 creates `azeroth-platform-{s
 
 ---
 
-## Part 2 — Automatic Cloud Firewall setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**. Shared specs: [`09`](../plans_support/09-cloud-security-group-providers.md) (2A/2B), [`10`](../plans_support/10-wow-vpc-network-security.md) (2C).
+
+| Part | Goal |
+|------|------|
+| **2A Cloud Firewall** | Create/bind firewall; SSH admin CIDR only |
+| **2B API identity** | Project API token (Read & Write) — **not** the Hetzner account password; no OAuth exists |
+| **2C Host SSH** | Operator user; root/default internet-SSH ❌; **Hetzner KVM Console** for break-glass |
+
+### 2A — Automatic Cloud Firewall setup
 
 | Step | Action |
 |------|--------|
@@ -88,9 +98,13 @@ Hetzner Firewalls are separate resources — Part 2 creates `azeroth-platform-{s
 
 ---
 
-## SSH hardening (operator user + final lockdown)
+### 2B — API identity (project token, not account root login)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+- Hetzner has no OAuth — a **project** Read & Write token is the least-privilege option they offer
+- Do not store the Hetzner Console account password
+- Token must include Firewalls write for 2A
+
+### 2C — SSH: root locked out of the public internet
 
 ### During setup
 

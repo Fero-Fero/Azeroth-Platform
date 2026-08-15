@@ -3,7 +3,15 @@
 **Status:** Planning (Aug 2026)  
 **Implementation order:** **#10** — after **#09**. See [00-implementation-order.md](./00-implementation-order.md).
 
-**Related:** [`09-cloud-security-group-providers.md`](./09-cloud-security-group-providers.md) (provider firewall automation), [`../plans/02-cloud-oauth-login-master-plan.md`](../plans/02-cloud-oauth-login-master-plan.md) (Part 2 automatic setup), SSH hardening in master plan Phase F.
+**Related:** [`09-cloud-security-group-providers.md`](./09-cloud-security-group-providers.md) (Part 2A/2B — firewall + IAM), provider login plans **03–08** (Part 2C console break-glass per cloud).
+
+**Cloud login Part 2** (required with each provider login):
+
+| Part | This plan |
+|------|-----------|
+| **2A** | Layer 1 — automatic cloud edge firewall |
+| **2B** | Least-privilege API identity (no root keys) — details in 09 |
+| **2C** | Layer 4 — operator SSH user; **root / default AMI users locked out of remote SSH**; recovery only through the **provider console** |
 
 ---
 

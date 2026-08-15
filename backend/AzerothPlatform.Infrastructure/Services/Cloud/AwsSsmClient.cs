@@ -1,5 +1,4 @@
 using Amazon;
-using Amazon.Runtime;
 using Amazon.SimpleSystemsManagement;
 using Amazon.SimpleSystemsManagement.Model;
 
@@ -8,14 +7,13 @@ namespace AzerothPlatform.Infrastructure.Services.Cloud;
 public sealed class AwsSsmClient
 {
     public async Task<string> SendBootstrapScriptAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string instanceId,
         string script,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         var response = await client.SendCommandAsync(new SendCommandRequest
         {
             DocumentName = "AWS-RunShellScript",
@@ -32,14 +30,13 @@ public sealed class AwsSsmClient
     }
 
     public async Task WaitForCommandSuccessAsync(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region,
         string instanceId,
         string commandId,
         CancellationToken cancellationToken)
     {
-        using var client = CreateClient(accessKeyId, secretAccessKey, region);
+        using var client = CreateClient(credentials, region);
         const int maxAttempts = 60;
 
         for (var attempt = 0; attempt < maxAttempts; attempt += 1)
@@ -78,15 +75,13 @@ public sealed class AwsSsmClient
     }
 
     private static AmazonSimpleSystemsManagementClient CreateClient(
-        string accessKeyId,
-        string secretAccessKey,
+        AwsRuntimeCredentials credentials,
         string region)
     {
-        var credentials = new BasicAWSCredentials(accessKeyId.Trim(), secretAccessKey.Trim());
         var config = new AmazonSimpleSystemsManagementConfig
         {
             RegionEndpoint = RegionEndpoint.GetBySystemName(region),
         };
-        return new AmazonSimpleSystemsManagementClient(credentials, config);
+        return new AmazonSimpleSystemsManagementClient(credentials.ToSdk(), config);
     }
 }

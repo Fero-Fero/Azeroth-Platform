@@ -32,6 +32,12 @@ public sealed class CloudLaunchRequestDto
 
     /// <summary>When true and no saved key is selected, generate a new key pair and store it in the vault.</summary>
     public bool GenerateSshKey { get; set; } = true;
+
+    /// <summary>Apply the default cloud security group profile (SSH + player/web; not MySQL/SOAP).</summary>
+    public bool ApplyNetworkProfile { get; set; } = true;
+
+    /// <summary>Admin SSH source CIDR (for example 203.0.113.10/32). Empty allows SSH from anywhere.</summary>
+    public string? AdminSourceCidr { get; set; }
 }
 
 public sealed class CloudLaunchResultDto
@@ -40,9 +46,32 @@ public sealed class CloudLaunchResultDto
 
     public string? SavedSshKeyId { get; set; }
 
+    /// <summary>PEM private key, only when this launch generated a new key. Download it immediately.</summary>
+    public string? PrivateKeyPem { get; set; }
+
     public string Message { get; set; } = string.Empty;
 
     public string? BootstrapCommandId { get; set; }
+}
+
+public sealed class CloudFirewallProbeRequestDto
+{
+    public string PublicHost { get; set; } = string.Empty;
+
+    public string? Region { get; set; }
+
+    public string? InstanceId { get; set; }
+
+    public string? AdminSourceCidr { get; set; }
+}
+
+public sealed class CloudFirewallProbeResultDto
+{
+    public bool Success { get; set; }
+
+    public string Message { get; set; } = string.Empty;
+
+    public List<RemotePrerequisiteCheckDto> Checks { get; set; } = [];
 }
 
 public sealed class CloudLaunchDefaultsDto

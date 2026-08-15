@@ -32,23 +32,57 @@ public static class VpcBootstrapUserData
               exit 1
             fi
 
-            echo "==> Updating package lists…"
+            echo "==> Updating package lists..."
             $SUDO apt-get update -qq
-            echo "==> Installing Docker Engine and Compose…"
-            $SUDO apt-get install -y docker.io docker-compose-v2
-            echo "==> Starting Docker…"
+            echo "==> Installing Docker, Compose, ufw, and unattended-upgrades..."
+            $SUDO apt-get install -y docker.io docker-compose-v2 ufw unattended-upgrades
+            echo "==> Starting Docker..."
             $SUDO systemctl enable --now docker
-            echo "==> Granting Docker access to {{user}}…"
+            echo "==> Enabling automatic security updates..."
+            $SUDO systemctl enable unattended-upgrades || true
+            echo "==> Granting Docker access to {{user}}..."
             $SUDO usermod -aG docker {{user}}
 
-            echo '{{user}} ALL=(ALL) NOPASSWD:ALL' | $SUDO tee /etc/sudoers.d/90-azeroth-platform >/dev/null
-            $SUDO chmod 440 /etc/sudoers.d/90-azeroth-platform
+            echo "==> Configuring non-interactive sudo (NOPASSWD, disable use_pty)..."
+            $SUDO tee /etc/sudoers.d/99-azeroth-platform >/dev/null <<EOF
+            Defaults !use_pty
+            Defaults:{{user}} !use_pty
+            Defaults !requiretty
+            Defaults:{{user}} !requiretty
+            {{user}} ALL=(ALL) NOPASSWD:ALL
+            EOF
+            $SUDO chmod 440 /etc/sudoers.d/99-azeroth-platform
+            $SUDO /usr/sbin/visudo -c -f /etc/sudoers.d/99-azeroth-platform
+
+            echo "==> Configuring host firewall (ufw)..."
+            $SUDO ufw --force reset || true
+            $SUDO ufw default deny incoming
+            $SUDO ufw default allow outgoing
+            $SUDO ufw allow 22/tcp comment 'SSH'
+            $SUDO ufw allow 3724/tcp comment 'Authserver'
+            $SUDO ufw allow 8085/tcp comment 'Worldserver'
+            $SUDO ufw allow {{StackNetworkDefaults.DefaultArmoryPort}}/tcp comment 'Armory'
+            $SUDO ufw allow {{StackNetworkDefaults.DefaultClientPort}}/tcp comment 'Client files'
+            $SUDO ufw --force enable
 
             $SUDO mkdir -p /var/lib/azeroth-platform
             date -u +%Y-%m-%dT%H:%M:%SZ | $SUDO tee /var/lib/azeroth-platform/bootstrap-ready >/dev/null
-            echo "==> Bootstrap complete. Docker is installed — run Test connection in the wizard."
+            echo "==> Bootstrap complete. Docker, ufw, and OS baselines are installed."
             $SUDO docker --version 2>/dev/null || true
+            $SUDO ufw status verbose 2>/dev/null || true
             """;
+    }
+
+    /// <summary>
+    /// Ubuntu 24.04 sudo enables <c>Defaults use_pty</c>, which makes <c>sudo -n</c> fail over SSH
+    /// with "a password is required" even when NOPASSWD is set. First Time Setup and launch user-data
+    /// must write the same file.
+    /// </summary>
+    public static string BuildPasswordlessSudoers(string sshUser)
+    {
+        var user = SanitizeSshUser(sshUser);
+        return
+            $"Defaults !use_pty\nDefaults:{user} !use_pty\nDefaults !requiretty\nDefaults:{user} !requiretty\n{user} ALL=(ALL) NOPASSWD:ALL\n";
     }
 
     public static VpcLaunchUserDataDto CreateDto(string sshUser = "ubuntu")

@@ -124,6 +124,14 @@ export interface CloudSshKeyDto {
   createdAtUtc: string
 }
 
+export interface CloudSshKeyExportDto {
+  id: string
+  label: string
+  fingerprint: string
+  defaultSshUser: string
+  privateKey: string
+}
+
 export interface CreateCloudSshKeyRequestDto {
   label: string
   privateKey: string
@@ -139,12 +147,92 @@ export enum CloudProvider {
   Vultr = 'Vultr',
 }
 
+export enum CloudAuthMethod {
+  Manual = 'Manual',
+  OAuth = 'OAuth',
+  AssumedRole = 'AssumedRole',
+}
+
+export enum CloudLoginMode {
+  OAuth = 'OAuth',
+  DeviceCode = 'DeviceCode',
+  GuidedToken = 'GuidedToken',
+  ManualOnly = 'ManualOnly',
+  AssumedRole = 'AssumedRole',
+}
+
 export interface CloudProviderConnectionDto {
   id: string
   provider: CloudProvider
   label: string
   defaultRegion?: string
   createdAtUtc: string
+  authMethod?: CloudAuthMethod
+  accountHint?: string
+  tokenExpiresAtUtc?: string
+  needsReauth?: boolean
+}
+
+export interface CloudAuthProviderStatusDto {
+  provider: CloudProvider
+  loginMode: CloudLoginMode
+  isConfigured: boolean
+  isImplemented: boolean
+  supportsPkce: boolean
+  signInLabel: string
+  unavailableReason: string
+}
+
+export interface CloudAuthStartRequestDto {
+  returnUrl?: string
+  reconnectConnectionId?: string
+  label?: string
+  policyTier?: string
+  externalId?: string
+}
+
+export interface CloudAuthAwsTemplateDto {
+  policyTier: string
+  label: string
+  description: string
+  cloudFormationYaml: string
+}
+
+export interface CloudAuthStartResultDto {
+  authorizationUrl?: string
+  state?: string
+  deviceCode?: string
+  verificationUri?: string
+  userCode?: string
+  intervalSeconds?: number
+  requiresManualCredentials?: boolean
+  message?: string
+  externalId?: string
+  cloudFormationConsoleUrl?: string
+  awsTemplates?: CloudAuthAwsTemplateDto[]
+}
+
+export interface CloudAuthCompleteRequestDto {
+  roleArn?: string
+  externalId?: string
+  label?: string
+  reconnectConnectionId?: string
+  defaultRegion?: string
+}
+
+export interface CloudInstanceSetupDialogDto {
+  connectionId: string
+  provider: CloudProvider
+  label: string
+  authMethod: CloudAuthMethod
+  accountHint?: string
+  canList: boolean
+  canCreate: boolean
+  canBootstrapExisting: boolean
+  canSyncFirewall: boolean
+  autoFirewallDefault: boolean
+  suggestedAdminCidr?: string
+  launchDefaults?: CloudLaunchDefaultsDto
 }
 
 export interface CreateCloudProviderConnectionRequestDto {
@@ -187,13 +275,22 @@ export interface CloudLaunchRequestDto {
   image?: string
   savedSshKeyId?: string
   generateSshKey?: boolean
+  applyNetworkProfile?: boolean
+  adminSourceCidr?: string
 }
 
 export interface CloudLaunchResultDto {
   instance: CloudInstanceDto
   savedSshKeyId?: string
+  privateKeyPem?: string
   message: string
   bootstrapCommandId?: string
+}
+
+export interface CloudFirewallProbeResultDto {
+  success: boolean
+  message: string
+  checks: RemotePrerequisiteCheckDto[]
 }
 
 export interface CloudLaunchDefaultsDto {

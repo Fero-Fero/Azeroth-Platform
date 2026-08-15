@@ -1,9 +1,16 @@
-import { useEffect, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ExternalLink, Loader2 } from 'lucide-react'
 import { cloudApi } from '@/services/api'
-import { CloudProvider, type CloudProviderConnectionDto } from '@/types/stack.types'
+import { CloudLoginMode, CloudProvider, type CloudProviderConnectionDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
+import { CloudProviderLoginButton } from '@/components/wizard/common/CloudProviderLoginButton'
+
+/** Opens the signed-in user's IAM security credentials page (Access keys → Create access key). */
+const AWS_CREATE_ACCESS_KEY_URL = 'https://console.aws.amazon.com/iam/home#/security_credentials'
+
+/** Opens the IAM create-user wizard if they want a dedicated user instead of root keys. */
+const AWS_CREATE_IAM_USER_URL = 'https://console.aws.amazon.com/iamv2/home#/users/create'
 
 type LinkProvider =
   | CloudProvider.DigitalOcean
@@ -61,16 +68,23 @@ interface CloudConnectionLinkFormProps {
   /** When set, hides provider tabs and locks to this provider. */
   provider?: LinkProvider
   onLinked?: (connection: CloudProviderConnectionDto) => void
+  onDisconnected?: () => void
   className?: string
   idPrefix?: string
+  linkedConnection?: CloudProviderConnectionDto | null
+  /** Wizard connect step: login first, hide label and credential paste until Advanced. */
+  simple?: boolean
 }
 
 export function CloudConnectionLinkForm({
   disabled = false,
   provider: fixedProvider,
   onLinked,
+  onDisconnected,
   className,
   idPrefix = 'cloud-link',
+  linkedConnection = null,
+  simple = false,
 }: CloudConnectionLinkFormProps) {
   const queryClient = useQueryClient()
   const [provider, setProvider] = useState<LinkProvider>(fixedProvider ?? CloudProvider.DigitalOcean)
@@ -85,6 +99,17 @@ export function CloudConnectionLinkForm({
   const [linkAzureSubscriptionId, setLinkAzureSubscriptionId] = useState('')
   const [linkDefaultRegion, setLinkDefaultRegion] = useState('')
   const [linkError, setLinkError] = useState<string | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
+  const { data: authProviders } = useQuery({
+    queryKey: ['cloud-auth-providers'],
+    queryFn: async () => (await cloudApi.listAuthProviders()).data,
+  })
+
+  const providerStatus = useMemo(
+    () => authProviders?.find((item) => item.provider === provider),
+    [authProviders, provider]
+  )
 
   useEffect(() => {
     if (fixedProvider) {
@@ -95,6 +120,7 @@ export function CloudConnectionLinkForm({
   useEffect(() => {
     setLinkLabel(defaultLinkLabel(provider))
     setLinkError(null)
+    setShowAdvanced(false)
   }, [provider])
 
   const linkMutation = useMutation({
@@ -241,7 +267,8 @@ export function CloudConnectionLinkForm({
         </div>
       ) : null}
 
-      {provider === CloudProvider.DigitalOcean ? (
+      {!simple ? (
+        provider === CloudProvider.DigitalOcean ? (
         <p className="text-xs text-gray-700">
           Personal access token from DigitalOcean → API → Tokens/Keys. Read scope lists droplets; write
           scope is required for Launch via platform.
@@ -258,9 +285,7 @@ export function CloudConnectionLinkForm({
         </p>
       ) : provider === CloudProvider.Aws ? (
         <p className="text-xs text-gray-700">
-          IAM user with EC2 read permissions to list instances. For launch, add{' '}
-          <span className="font-mono">ec2:RunInstances</span> and related permissions, or{' '}
-          <span className="font-mono">ssm:SendCommand</span> for bootstrap on existing instances.
+          Paste an IAM access key. AWS has no one-click login that grants EC2 access to a third-party app.
         </p>
       ) : provider === CloudProvider.Azure ? (
         <p className="text-xs text-gray-700">
@@ -273,8 +298,63 @@ export function CloudConnectionLinkForm({
           Service account JSON with Compute Engine access. Read scope lists VMs; create scope is required
           for Launch via platform.
         </p>
+      )
+      ) : provider === CloudProvider.Aws ? (
+        <p className="text-xs text-gray-700">
+          Log in to AWS, create an access key, then paste it below. Nothing is stored in appsettings.
+        </p>
+      ) : (
+        <p className="text-xs text-gray-700">
+          Click the button below to connect this provider. Credentials are stored encrypted on the platform.
+        </p>
       )}
 
+      {provider !== CloudProvider.Aws || linkedConnection ? (
+      <CloudProviderLoginButton
+        provider={provider}
+        status={providerStatus}
+        disabled={disabled}
+        label={linkLabel}
+        linkedConnection={linkedConnection}
+        onLinked={onLinked}
+        onDisconnected={onDisconnected}
+        onRequiresManualCredentials={() => setShowAdvanced(true)}
+      />
+      ) : null}
+
+      {provider === CloudProvider.Aws && !linkedConnection ? (
+        <div className="space-y-3 rounded-md border border-gray-200 bg-white p-3">
+          <p className="text-[11px] text-gray-600">
+            Sign in to AWS first, then open one of these pages to create the key pair:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={AWS_CREATE_ACCESS_KEY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-medium text-blue-900 hover:bg-blue-100"
+            >
+              Create access key
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+            <a
+              href={AWS_CREATE_IAM_USER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-gray-800 hover:bg-gray-50"
+            >
+              Create IAM user
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          </div>
+          <p className="text-[11px] text-gray-500">
+            Grant at least EC2 read (<span className="font-mono">ec2:Describe*</span>). Add launch and SSM
+            permissions if you will create a VM from the wizard.
+          </p>
+        </div>
+      ) : null}
+
+      {!simple ? (
       <div>
         <label htmlFor={`${idPrefix}-label`} className="block text-xs font-medium text-gray-800">
           Label
@@ -288,7 +368,76 @@ export function CloudConnectionLinkForm({
           className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
+      ) : null}
 
+      {provider === CloudProvider.Aws && !linkedConnection ? (
+        <>
+          <div>
+            <label htmlFor={`${idPrefix}-access-key-id`} className="block text-xs font-medium text-gray-800">
+              Access key ID
+            </label>
+            <input
+              id={`${idPrefix}-access-key-id`}
+              type="text"
+              autoComplete="off"
+              value={linkAccessKeyId}
+              disabled={disabled || linkMutation.isPending}
+              placeholder="AKIA…"
+              onChange={(event) => setLinkAccessKeyId(event.target.value)}
+              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label htmlFor={`${idPrefix}-secret-access-key`} className="block text-xs font-medium text-gray-800">
+              Secret access key
+            </label>
+            <input
+              id={`${idPrefix}-secret-access-key`}
+              type="password"
+              autoComplete="off"
+              value={linkSecretAccessKey}
+              disabled={disabled || linkMutation.isPending}
+              onChange={(event) => setLinkSecretAccessKey(event.target.value)}
+              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          {linkError ? <p className="text-xs text-red-700">{linkError}</p> : null}
+          <button
+            type="button"
+            disabled={disabled || linkMutation.isPending || !canSaveLink}
+            onClick={() => void linkMutation.mutate()}
+            className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {linkMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : null}
+            Connect AWS account
+          </button>
+          {providerStatus?.loginMode === CloudLoginMode.AssumedRole && providerStatus.isConfigured ? (
+            <CloudProviderLoginButton
+              provider={provider}
+              status={providerStatus}
+              disabled={disabled}
+              label={linkLabel}
+              onLinked={onLinked}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {!(simple && linkedConnection) && provider !== CloudProvider.Aws ? (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setShowAdvanced((value) => !value)}
+        className="text-left text-xs font-medium text-gray-700 underline-offset-2 hover:underline"
+      >
+        {showAdvanced ? 'Hide advanced credentials' : 'Advanced: paste credentials'}
+      </button>
+      ) : null}
+
+      {showAdvanced && provider !== CloudProvider.Aws ? (
+        <>
       {isApiTokenProvider(provider) ? (
         <>
           <div>
@@ -322,52 +471,6 @@ export function CloudConnectionLinkForm({
               <p className="mt-1 text-[11px] text-gray-500">{regionFilterHint}</p>
             </div>
           )}
-        </>
-      ) : provider === CloudProvider.Aws ? (
-        <>
-          <div>
-            <label htmlFor={`${idPrefix}-access-key-id`} className="block text-xs font-medium text-gray-800">
-              Access key ID
-            </label>
-            <input
-              id={`${idPrefix}-access-key-id`}
-              type="text"
-              autoComplete="off"
-              value={linkAccessKeyId}
-              disabled={disabled || linkMutation.isPending}
-              onChange={(event) => setLinkAccessKeyId(event.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label htmlFor={`${idPrefix}-secret-access-key`} className="block text-xs font-medium text-gray-800">
-              Secret access key
-            </label>
-            <input
-              id={`${idPrefix}-secret-access-key`}
-              type="password"
-              autoComplete="off"
-              value={linkSecretAccessKey}
-              disabled={disabled || linkMutation.isPending}
-              onChange={(event) => setLinkSecretAccessKey(event.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label htmlFor={`${idPrefix}-default-region`} className="block text-xs font-medium text-gray-800">
-              {regionFilterLabel}
-            </label>
-            <input
-              id={`${idPrefix}-default-region`}
-              type="text"
-              placeholder={regionFilterPlaceholder}
-              value={linkDefaultRegion}
-              disabled={disabled || linkMutation.isPending}
-              onChange={(event) => setLinkDefaultRegion(event.target.value)}
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-[11px] text-gray-500">{regionFilterHint}</p>
-          </div>
         </>
       ) : provider === CloudProvider.Azure ? (
         <>
@@ -491,6 +594,8 @@ export function CloudConnectionLinkForm({
         ) : null}
         Link account
       </button>
+        </>
+      ) : null}
     </div>
   )
 }

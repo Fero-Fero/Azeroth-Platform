@@ -3,6 +3,7 @@ import { Loader2, Trash2 } from 'lucide-react'
 import { cloudApi } from '@/services/api'
 import type { CloudSshKeyDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
+import { SshKeyDownloadButton } from '@/components/wizard/common/SshKeyDownloadButton'
 
 interface SavedSshKeySelectorProps {
   selectedKeyId: string
@@ -68,20 +69,28 @@ export function SavedSshKeySelector({
         </select>
         {isLoading && <Loader2 className="h-4 w-4 animate-spin text-gray-500" aria-hidden="true" />}
         {selectedKeyId ? (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void handleDelete(selectedKeyId)}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-            title="Remove saved key from platform"
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Delete
-          </button>
+          <>
+            <SshKeyDownloadButton
+              label={savedKeys?.find((key) => key.id === selectedKeyId)?.label ?? 'azeroth-ssh'}
+              keyId={selectedKeyId}
+              disabled={disabled}
+              className="border-gray-300 text-gray-800 hover:bg-gray-50"
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => void handleDelete(selectedKeyId)}
+              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              title="Remove saved key from platform"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Delete
+            </button>
+          </>
         ) : null}
       </div>
       <p className="text-xs text-gray-500">
-        Saved keys are encrypted on the platform. The private key is never shown again after saving.
+        Saved keys are encrypted on the platform. Download a .pem copy if you need to SSH from your own computer.
       </p>
     </div>
   )

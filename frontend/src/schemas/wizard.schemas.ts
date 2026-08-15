@@ -77,6 +77,8 @@ export const deploymentSchema = z.object({
       saveSshKeyLabel: z.string().max(100).optional().default(''),
       connectionVerified: z.boolean().optional().default(false),
       firstTimeSetupCompleted: z.boolean().optional().default(false),
+      sshCertificateVerified: z.boolean().optional().default(true),
+      vpcSetupMode: z.enum(['configure', 'skip']).optional(),
       remoteOs: z.nativeEnum(RemoteHostOs).optional().default(RemoteHostOs.Linux),
       enableHostFirewall: z.boolean().optional().default(true),
       cloudSecurityGroupAcknowledged: z.boolean().optional().default(false),
@@ -94,6 +96,13 @@ export const deploymentSchema = z.object({
             code: z.ZodIssueCode.custom,
             message: 'SSH private key is required (paste a key or select a saved key)',
             path: ['externalSshPrivateKey'],
+          })
+        }
+        if (deployment.sshCertificateVerified === false) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Verify the downloaded SSH certificate before continuing',
+            path: ['sshCertificateVerified'],
           })
         }
       }
@@ -206,6 +215,8 @@ export const WIZARD_DEFAULTS: WizardFormData = {
     saveSshKeyLabel: '',
     connectionVerified: false,
     firstTimeSetupCompleted: false,
+    vpcSetupMode: 'skip',
+    sshCertificateVerified: true,
     remoteOs: RemoteHostOs.Linux,
     enableHostFirewall: true,
     cloudSecurityGroupAcknowledged: false,

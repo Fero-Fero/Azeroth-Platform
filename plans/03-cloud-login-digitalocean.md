@@ -82,7 +82,20 @@ After login, **Configure instance** dialog:
 
 ---
 
-## Part 2 — Automatic Cloud Firewall setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**, apply all three layers where this provider allows it. Shared specs — do not fork:
+
+- **2A/2B** [`09-cloud-security-group-providers.md`](../plans_support/09-cloud-security-group-providers.md)
+- **2C** [`10-wow-vpc-network-security.md`](../plans_support/10-wow-vpc-network-security.md)
+
+| Part | Goal |
+|------|------|
+| **2A Cloud firewall** | Profile ingress; SSH admin CIDR only; never 3306/7878 |
+| **2B API identity** | Least-privilege token/role — **no cloud-account root keys** for daily API |
+| **2C Host SSH** | Operator user; **root / image-default cannot SSH from the internet**; break-glass only via **this provider’s console** |
+
+### 2A — Automatic Cloud Firewall setup
 
 When operator selects or launches a droplet with **Apply network profile automatically** (default **on**):
 
@@ -98,13 +111,15 @@ When operator selects or launches a droplet with **Apply network profile automat
 
 **Fallback:** Uncheck auto → operator uses guide dialog + manual DO console steps.
 
-See [`../plans_support/10-wow-vpc-network-security.md`](../plans_support/10-wow-vpc-network-security.md).
+See [`../plans_support/09-cloud-security-group-providers.md`](../plans_support/09-cloud-security-group-providers.md).
 
----
+### 2B — API identity (not the DO account root)
 
-## SSH hardening (operator user + final lockdown)
+- Prefer OAuth with `firewall:*` scopes over a **root-team** personal access token
+- Manual PAT fallback is allowed but document: create a **dedicated token**, not the account owner’s unrestricted key
+- Platform never stores DO account password; break-glass for the droplet OS is console-only (2C)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+### 2C — SSH: root locked out of the public internet
 
 ### During setup
 

@@ -104,7 +104,17 @@ Works identically regardless of auth method once credentials/session exist.
 
 ---
 
-## Part 2 — Automatic security group setup
+## Part 2 — Instance security (required with login)
+
+After Connect + **Configure instance**. Shared specs: [`09`](../plans_support/09-cloud-security-group-providers.md) (2A/2B), [`10`](../plans_support/10-wow-vpc-network-security.md) (2C).
+
+| Part | Goal |
+|------|------|
+| **2A Security group** | Profile ingress; SSH admin CIDR only (fix launch `0.0.0.0/0`) |
+| **2B API identity** | Dedicated IAM user **or** assumed role — **never AWS account root access keys** |
+| **2C Host SSH** | Operator user; root/`ubuntu` internet-SSH ❌; **EC2 Instance Connect** / serial for break-glass |
+
+### 2A — Automatic security group setup
 
 **Default-on** when configuring an EC2 instance (pick existing or launch new).
 
@@ -122,11 +132,14 @@ Works identically regardless of auth method once credentials/session exist.
 
 See [`../plans_support/09-cloud-security-group-providers.md`](../plans_support/09-cloud-security-group-providers.md).
 
----
+### 2B — IAM identity (not the AWS account root)
 
-## SSH hardening (operator user + final lockdown)
+- **Connect:** paste a **dedicated IAM user** access key, or (when the platform AWS account is configured) AssumeRole
+- **Never** create or store **root user** access keys. Root console login stays in the customer’s AWS account only
+- IAM policy: README JSON / CloudFormation tiers (ReadOnly / Standard / Full) — include SG actions for 2A
+- Console to create the IAM user (not root): [Create IAM user](https://console.aws.amazon.com/iamv2/home#/users/create) · [Access keys](https://console.aws.amazon.com/iam/home#/security_credentials) (IAM user, not root)
 
-See master plan: [SSH access model](./02-cloud-oauth-login-master-plan.md#ssh-access-model--dedicated-operator-user--final-hardening).
+### 2C — SSH: root locked out of the public internet
 
 ### During setup — always create operator user
 

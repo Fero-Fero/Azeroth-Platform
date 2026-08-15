@@ -10,6 +10,10 @@ public interface ICloudProviderConnectionService
         CreateCloudProviderConnectionRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<CloudProviderConnectionDto> UpsertOAuthConnectionAsync(
+        UpsertCloudOAuthConnectionRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task DeleteAsync(string id, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<CloudInstanceDto>> ListInstancesAsync(

@@ -21,6 +21,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
     private readonly HetznerCloudClient _hetznerCloudClient;
     private readonly VultrClient _vultrClient;
     private readonly ICloudAuditService _cloudAuditService;
+    private readonly IAwsCredentialResolver _awsCredentialResolver;
 
     public CloudLaunchService(
         AzerothCoreDbContext dbContext,
@@ -33,7 +34,8 @@ public sealed class CloudLaunchService : ICloudLaunchService
         AzureComputeClient azureComputeClient,
         HetznerCloudClient hetznerCloudClient,
         VultrClient vultrClient,
-        ICloudAuditService cloudAuditService)
+        ICloudAuditService cloudAuditService,
+        IAwsCredentialResolver awsCredentialResolver)
     {
         _dbContext = dbContext;
         _secretProtector = secretProtector;
@@ -46,6 +48,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         _hetznerCloudClient = hetznerCloudClient;
         _vultrClient = vultrClient;
         _cloudAuditService = cloudAuditService;
+        _awsCredentialResolver = awsCredentialResolver;
     }
 
     public async Task<CloudLaunchDefaultsDto> GetDefaultsAsync(
@@ -75,7 +78,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
             {
                 Provider = provider,
                 Region = defaultRegion ?? "us-east-1",
-                Size = "t3.medium",
+                Size = "t3.micro",
                 Image = string.Empty,
                 SshUser = "ubuntu",
                 SupportsCreate = true,
@@ -194,7 +197,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         var sshUser = SanitizeSshUser(request.SshUser);
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
 
-        var (savedKeyId, publicKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
         var doKeyId = await _digitalOceanClient.UploadAccountSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -240,6 +243,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     Image = string.IsNullOrWhiteSpace(imageSlug) ? image : imageSlug,
                 },
                 SavedSshKeyId = savedKeyId,
+                PrivateKeyPem = generatedPrivateKey,
                 Message = "DigitalOcean droplet created and bootstrap script injected via user data.",
             },
             cancellationToken);
@@ -266,7 +270,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         var sshUser = SanitizeSshUser(request.SshUser);
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
 
-        var (savedKeyId, publicKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
         var sshKeyId = await _hetznerCloudClient.UploadSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -306,6 +310,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     Image = imageName,
                 },
                 SavedSshKeyId = savedKeyId,
+                PrivateKeyPem = generatedPrivateKey,
                 Message = "Hetzner Cloud server created and bootstrap script injected via user data.",
             },
             cancellationToken);
@@ -337,7 +342,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         var sshUser = SanitizeSshUser(request.SshUser);
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
 
-        var (savedKeyId, publicKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
         var sshKeyId = await _vultrClient.UploadSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -376,6 +381,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     Image = active.Os,
                 },
                 SavedSshKeyId = savedKeyId,
+                PrivateKeyPem = generatedPrivateKey,
                 Message = "Vultr instance created and bootstrap script injected via user data.",
             },
             cancellationToken);
@@ -432,13 +438,10 @@ public sealed class CloudLaunchService : ICloudLaunchService
         string? regionFilter,
         CancellationToken cancellationToken)
     {
-        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var regions = await _awsEc2Client.ListRegionsAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             cancellationToken);
 
         var selectedRegion = (regionFilter ?? string.Empty).Trim();
@@ -448,15 +451,21 @@ public sealed class CloudLaunchService : ICloudLaunchService
         }
 
         var instanceTypes = await _awsEc2Client.ListLaunchInstanceTypesAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             selectedRegion,
             cancellationToken);
 
+        var architectures = instanceTypes
+            .Select(instanceType => instanceType.Description)
+            .Where(architecture => !string.IsNullOrWhiteSpace(architecture))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var images = await _awsEc2Client.ListLaunchImagesAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             selectedRegion,
+            architectures,
             cancellationToken);
 
         return new CloudLaunchCatalogDto
@@ -553,7 +562,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CancellationToken cancellationToken)
     {
         var region = (request.Region ?? entity.DefaultRegion ?? "us-east-1").Trim();
-        var instanceType = (request.Size ?? "t3.medium").Trim();
+        var instanceType = (request.Size ?? "t3.micro").Trim();
         var imageId = (request.Image ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(imageId))
         {
@@ -563,16 +572,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
         var name = SanitizeResourceName(request.Name, "azeroth-vpc");
         var sshUser = SanitizeSshUser(request.SshUser);
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
-        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
-        var (savedKeyId, publicKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
         var keyPairName = $"azeroth-{savedKeyId[..8]}";
 
         var instance = await _awsEc2Client.CreateInstanceAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             region,
             name,
             instanceType,
@@ -580,7 +586,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
             script,
             keyPairName,
             publicKey,
-            cancellationToken);
+            cancellationToken,
+            request.AdminSourceCidr,
+            request.ApplyNetworkProfile);
 
         return await CompleteLaunchAsync(
             entity,
@@ -599,7 +607,10 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     Image = instance.Image,
                 },
                 SavedSshKeyId = savedKeyId,
-                Message = "AWS EC2 instance created and bootstrap script injected via user data.",
+                PrivateKeyPem = generatedPrivateKey,
+                Message = request.ApplyNetworkProfile
+                    ? "AWS EC2 instance created. User data installs Docker, ufw, and OS baselines; the security group allows SSH, game, and web ports."
+                    : "AWS EC2 instance created and bootstrap script injected via user data.",
             },
             cancellationToken);
     }
@@ -617,30 +628,25 @@ public sealed class CloudLaunchService : ICloudLaunchService
 
         var region = (request.Region ?? entity.DefaultRegion ?? "us-east-1").Trim();
         var sshUser = SanitizeSshUser(request.SshUser);
-        var credentials = CloudProviderCredentialStore.UnprotectAwsCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
         var commandId = await _awsSsmClient.SendBootstrapScriptAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             region,
             instanceId,
             script,
             cancellationToken);
 
         await _awsSsmClient.WaitForCommandSuccessAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             region,
             instanceId,
             commandId,
             cancellationToken);
 
         var instances = await _awsEc2Client.ListRunningInstancesAsync(
-            credentials.AccessKeyId,
-            credentials.SecretAccessKey,
+            credentials,
             region,
             cancellationToken);
 
@@ -901,7 +907,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         var sshUser = SanitizeSshUser(request.SshUser);
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
 
-        var (savedKeyId, publicKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
         var metadataPublicKey = $"{sshUser}:{publicKey}";
 
         await _gcpComputeClient.CreateInstanceAsync(
@@ -937,12 +943,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     Image = running.Image,
                 },
                 SavedSshKeyId = savedKeyId,
+                PrivateKeyPem = generatedPrivateKey,
                 Message = "GCP VM created and bootstrap script injected via startup-script metadata.",
             },
             cancellationToken);
     }
 
-    private async Task<(string SavedKeyId, string OpenSshPublicKey)> ResolveLaunchSshKeyAsync(
+    private async Task<(string SavedKeyId, string OpenSshPublicKey, string? GeneratedPrivateKeyPem)> ResolveLaunchSshKeyAsync(
         CloudLaunchRequestDto request,
         string sshUser,
         CancellationToken cancellationToken)
@@ -951,7 +958,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         if (!string.IsNullOrWhiteSpace(savedKeyId))
         {
             var privateKey = await _cloudSshKeyService.ResolvePrivateKeyAsync(savedKeyId, "launch", cancellationToken);
-            return (savedKeyId, SshKeyMaterialHelper.ExtractOpenSshPublicKey(privateKey));
+            return (savedKeyId, SshKeyMaterialHelper.ExtractOpenSshPublicKey(privateKey), null);
         }
 
         if (!request.GenerateSshKey)
@@ -969,7 +976,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
             },
             cancellationToken);
 
-        return (created.Id, generated.OpenSshPublicKey);
+        return (created.Id, generated.OpenSshPublicKey, generated.PrivateKeyPem);
     }
 
     private async Task<CloudLaunchResultDto> CompleteLaunchAsync(

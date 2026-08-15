@@ -14,22 +14,30 @@ export function cn(...inputs: ClassValue[]) {
 export function apiErrorMessage(err: unknown, networkContext?: string): string {
   const anyErr = err as {
     response?: {
-      data?: {
-        error?: string
-        title?: string
-        errors?: Record<string, string[]>
-      }
+      data?: unknown
     }
     message?: string
   }
-  const data = anyErr?.response?.data as { error?: string; message?: string; title?: string; errors?: Record<string, string[]> } | undefined
-  if (data?.message) return data.message
-  if (data?.error) return data.error
-  if (data?.errors) {
-    const first = Object.values(data.errors).flat()[0]
+  const data = anyErr?.response?.data
+  if (typeof data === 'string' && data.trim().length > 0) {
+    return data
+  }
+
+  const payload = data as {
+    error?: string
+    message?: string
+    detail?: string
+    title?: string
+    errors?: Record<string, string[]>
+  } | undefined
+  if (payload?.detail) return payload.detail
+  if (payload?.message) return payload.message
+  if (payload?.error) return payload.error
+  if (payload?.errors) {
+    const first = Object.values(payload.errors).flat()[0]
     if (first) return first
   }
-  if (data?.title) return data.title
+  if (payload?.title) return payload.title
   if (anyErr?.message === 'Network Error' && !anyErr?.response) {
     const base =
       'Could not reach the manager API (connection failed or timed out). Ensure the manager is running and retry.'

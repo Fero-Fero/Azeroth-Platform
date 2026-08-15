@@ -62,6 +62,16 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AccountHint")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthMethod")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
@@ -75,6 +85,9 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("NeedsReauth")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -82,6 +95,9 @@ namespace AzerothPlatform.Infrastructure.Migrations
 
                     b.Property<string>("ProtectedCredentials")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("TokenExpiresAtUtc")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

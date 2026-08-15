@@ -148,6 +148,44 @@ public sealed class CloudSshKeyService : ICloudSshKeyService
         return pem;
     }
 
+    public async Task<CloudSshKeyExportDto> ExportAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.CloudSshKeys.AsNoTracking()
+                         .FirstOrDefaultAsync(key => key.Id == id, cancellationToken)
+                     ?? throw new KeyNotFoundException("SSH key not found.");
+
+        var pem = _secretProtector.Unprotect(entity.ProtectedPrivateKey);
+        if (string.IsNullOrWhiteSpace(pem))
+        {
+            throw new InvalidOperationException(
+                "The saved SSH key could not be decrypted. Re-import the key (often after the manager encryption key was reset).");
+        }
+
+        await _cloudAuditService.WriteAsync(
+            new WriteCloudAuditLogRequestDto
+            {
+                EventType = CloudAuditEventTypes.SshKeyDownloaded,
+                ResourceType = "ssh_key",
+                ResourceId = entity.Id,
+                Summary = $"Downloaded SSH key \"{entity.Label}\" (fingerprint {entity.Fingerprint}).",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    label = entity.Label,
+                    fingerprint = entity.Fingerprint,
+                }),
+            },
+            cancellationToken);
+
+        return new CloudSshKeyExportDto
+        {
+            Id = entity.Id,
+            Label = entity.Label,
+            Fingerprint = entity.Fingerprint,
+            DefaultSshUser = entity.DefaultSshUser,
+            PrivateKey = pem,
+        };
+    }
+
     internal static string ComputeFingerprint(string pem)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(pem));

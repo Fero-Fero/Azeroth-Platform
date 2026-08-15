@@ -8,4 +8,9 @@ public interface ICloudFirewallService
         string stackId,
         SyncCloudSecurityGroupRequestDto request,
         CancellationToken cancellationToken = default);
+
+    Task<CloudFirewallProbeResultDto> ProbeLaunchSecurityGroupAsync(
+        string connectionId,
+        CloudFirewallProbeRequestDto request,
+        CancellationToken cancellationToken = default);
 }

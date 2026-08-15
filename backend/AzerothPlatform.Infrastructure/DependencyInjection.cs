@@ -4,6 +4,7 @@ using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Services;
 using AzerothPlatform.Infrastructure.Services.Cloud;
+using AzerothPlatform.Infrastructure.Services.Cloud.Auth;
 using AzerothPlatform.Infrastructure.Services.Parsers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -68,6 +69,10 @@ public static class DependencyInjection
             .AddOptions<ServerTypeCatalogOptions>()
             .Bind(configuration.GetSection(ServerTypeCatalogOptions.SectionName));
 
+        services
+            .AddOptions<CloudOAuthOptions>()
+            .Bind(configuration.GetSection(CloudOAuthOptions.SectionName));
+
         services.AddDbContext<AzerothCoreDbContext>(options => options.UseSqlite(connectionString));
         services.AddHttpClient();
         services.AddHttpClient("GitHubApi"); // Dedicated client for GitHub API
@@ -129,11 +134,22 @@ public static class DependencyInjection
         });
         services.AddSingleton<AwsEc2Client>();
         services.AddSingleton<AwsSsmClient>();
+        services.AddSingleton<AwsStsClient>();
+        services.AddSingleton<IAwsCredentialResolver, AwsCredentialResolver>();
         services.AddSingleton<GcpComputeClient>();
         services.AddSingleton<AzureComputeClient>();
         services.AddScoped<ICloudProviderConnectionService, CloudProviderConnectionService>();
         services.AddScoped<ICloudLaunchService, CloudLaunchService>();
         services.AddScoped<ICloudFirewallService, CloudFirewallService>();
+        services.AddSingleton<ICloudOAuthStateStore, MemoryCloudOAuthStateStore>();
+        services.AddScoped<ICloudProviderAuthStrategy, DigitalOceanAuthStrategy>();
+        services.AddScoped<ICloudProviderAuthStrategy, VultrAuthStrategy>();
+        services.AddScoped<ICloudProviderAuthStrategy, GcpUserAuthStrategy>();
+        services.AddScoped<ICloudProviderAuthStrategy, AzureEntraAuthStrategy>();
+        services.AddScoped<ICloudProviderAuthStrategy, AwsAuthStrategy>();
+        services.AddScoped<ICloudProviderAuthStrategy, HetznerTokenAuthStrategy>();
+        services.AddScoped<ICloudAuthOrchestrator, CloudAuthOrchestrator>();
+        services.AddScoped<ICloudSetupDialogService, CloudSetupDialogService>();
         services.AddSingleton<ILauncherBuildService, LauncherBuildService>();
         services.AddSingleton<IArmoryImageService, ArmoryImageService>();
         services.AddSingleton<IArmoryAssetsService, ArmoryAssetsService>();
