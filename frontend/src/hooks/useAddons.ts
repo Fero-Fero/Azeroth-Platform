@@ -1,22 +1,22 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { addonApi } from '@/services/api'
 
-const scopeKey = (stackId?: string) => stackId ?? '__global__'
+const scopeKey = (stackId: string) => stackId
 
 export const addonKeys = {
   all: ['addons'] as const,
-  list: (stackId?: string) => [...addonKeys.all, scopeKey(stackId)] as const,
-  catalog: (stackId?: string) => [...addonKeys.all, 'catalog', scopeKey(stackId)] as const,
+  list: (stackId: string) => [...addonKeys.all, scopeKey(stackId)] as const,
+  catalog: (stackId: string) => [...addonKeys.all, 'catalog', scopeKey(stackId)] as const,
 }
 
-export function useAddons(stackId?: string) {
+export function useAddons(stackId: string) {
   return useQuery({
     queryKey: addonKeys.list(stackId),
     queryFn: async () => (await addonApi.list(stackId)).data,
   })
 }
 
-export function useUploadAddon(stackId?: string) {
+export function useUploadAddon(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (file: File) => addonApi.upload(stackId, file),
@@ -24,7 +24,7 @@ export function useUploadAddon(stackId?: string) {
   })
 }
 
-export function useDeleteAddon(stackId?: string) {
+export function useDeleteAddon(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (name: string) => addonApi.remove(stackId, name),
@@ -32,14 +32,14 @@ export function useDeleteAddon(stackId?: string) {
   })
 }
 
-export function useAddonCatalog(stackId?: string) {
+export function useAddonCatalog(stackId: string) {
   return useQuery({
     queryKey: addonKeys.catalog(stackId),
     queryFn: async () => (await addonApi.catalog(stackId)).data,
   })
 }
 
-export function useInstallCatalogAddon(stackId?: string) {
+export function useInstallCatalogAddon(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (addonId: string) => addonApi.install(stackId, addonId),

@@ -45,9 +45,5 @@ public interface IStackDockerService
 
     Task<StackDockerDeleteResultDto> DeleteManagerFileAsync(string relativePath, CancellationToken cancellationToken = default);
 
-    Task<DockerManagerMirrorCleanupResultDto> CleanupManagerMirrorsAsync(CancellationToken cancellationToken = default);
-
-    Task<DockerManagerMirrorCleanupResultDto> MigrateClientMirrorsToVolumesAsync(CancellationToken cancellationToken = default);
-
     Task<DockerPlatformKeysDto> GetPlatformKeysStatusAsync(CancellationToken cancellationToken = default);
 }

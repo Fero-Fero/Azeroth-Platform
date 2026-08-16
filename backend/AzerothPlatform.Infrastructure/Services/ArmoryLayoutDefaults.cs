@@ -3,7 +3,7 @@ using AzerothPlatform.Core.Contracts;
 
 namespace AzerothPlatform.Infrastructure.Services;
 
-/// <summary>Built-in per-page layout templates, V2 normalization, and V1 migration.</summary>
+/// <summary>Built-in per-page layout templates and V2 normalization.</summary>
 internal static class ArmoryLayoutDefaults
 {
     public static ArmoryLayoutDto Default() => BuildSite();
@@ -44,12 +44,21 @@ internal static class ArmoryLayoutDefaults
 
     public static ArmoryLayoutDto Normalize(ArmoryLayoutDto? layout)
     {
-        var site = MigrateToV2(layout);
+        if (layout is null)
+        {
+            return Default();
+        }
+
+        if (layout.Version < 2 || layout.Pages.Count == 0)
+        {
+            throw new InvalidOperationException("Armory layout must be V2 with per-page widgets.");
+        }
+
         var pages = new Dictionary<string, ArmoryPageLayoutDto>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var pageId in ArmoryPageIds.All)
         {
-            if (site.Pages.TryGetValue(pageId, out var page) && page.Widgets.Count > 0)
+            if (layout.Pages.TryGetValue(pageId, out var page) && page.Widgets.Count > 0)
             {
                 pages[pageId] = NormalizePage(page, pageId);
             }
@@ -62,7 +71,7 @@ internal static class ArmoryLayoutDefaults
         return new ArmoryLayoutDto
         {
             Version = 2,
-            Navbar = NormalizeNavbar(site.Navbar),
+            Navbar = NormalizeNavbar(layout.Navbar),
             Pages = pages,
         };
     }
@@ -70,8 +79,8 @@ internal static class ArmoryLayoutDefaults
     public static ArmoryPageLayoutDto NormalizePage(ArmoryPageLayoutDto? page, string pageId)
     {
         page ??= DefaultPage(pageId);
-        page = MaybeRefreshLegacyCharacterTemplate(page, pageId);
-        page = MaybeRefreshLegacyCharacterSubpage(page, pageId);
+        page = MaybeRefreshCharacterTemplate(page, pageId);
+        page = MaybeRefreshCharacterSubpage(page, pageId);
         page = MaybeRefreshCharacterSubnavHeight(page);
         var columns = page.Grid.Columns is > 0 and <= 24 ? page.Grid.Columns : 12;
         var rowHeight = page.Grid.RowHeight is > 0 and <= 200 ? page.Grid.RowHeight : 48;
@@ -123,7 +132,7 @@ internal static class ArmoryLayoutDefaults
         };
     }
 
-    private static ArmoryPageLayoutDto MaybeRefreshLegacyCharacterTemplate(ArmoryPageLayoutDto page, string pageId)
+    private static ArmoryPageLayoutDto MaybeRefreshCharacterTemplate(ArmoryPageLayoutDto page, string pageId)
     {
         if (!string.Equals(pageId, ArmoryPageIds.Character, StringComparison.OrdinalIgnoreCase)
             || page.Mode == ArmoryLayoutMode.Custom)
@@ -170,7 +179,7 @@ internal static class ArmoryLayoutDefaults
             : page;
     }
 
-    private static ArmoryPageLayoutDto MaybeRefreshLegacyCharacterSubpage(ArmoryPageLayoutDto page, string pageId)
+    private static ArmoryPageLayoutDto MaybeRefreshCharacterSubpage(ArmoryPageLayoutDto page, string pageId)
     {
         if (page.Mode == ArmoryLayoutMode.Custom)
         {
@@ -184,8 +193,8 @@ internal static class ArmoryLayoutDefaults
             return page;
         }
 
-        var hasLegacySpacer = page.Widgets.Any(w => w.Type == ArmoryWidgetType.Spacer);
-        if (!hasLegacySpacer)
+        var hasSpacer = page.Widgets.Any(w => w.Type == ArmoryWidgetType.Spacer);
+        if (!hasSpacer)
         {
             return page;
         }
@@ -197,42 +206,6 @@ internal static class ArmoryLayoutDefaults
             Mode = page.Mode,
             Grid = page.Grid,
             Widgets = page.Widgets.Where(w => w.Type != ArmoryWidgetType.Spacer).ToList(),
-        };
-    }
-
-    public static ArmoryLayoutDto MigrateToV2(ArmoryLayoutDto? layout)
-    {
-        if (layout is null)
-        {
-            return Default();
-        }
-
-        if (layout.Version >= 2 && layout.Pages.Count > 0)
-        {
-            return layout;
-        }
-
-        var home = new ArmoryPageLayoutDto
-        {
-            Mode = layout.Mode ?? ArmoryLayoutMode.Template,
-            TemplateId = layout.TemplateId?.ToString() ?? ArmoryLayoutTemplateId.Default.ToString(),
-            Grid = layout.Grid ?? new ArmoryLayoutGridDto(),
-            Widgets = layout.Widgets?.ToList() ?? [],
-        };
-
-        if (home.Widgets.Count == 0)
-        {
-            return Default();
-        }
-
-        return new ArmoryLayoutDto
-        {
-            Version = 2,
-            Navbar = layout.Navbar,
-            Pages = new Dictionary<string, ArmoryPageLayoutDto>(StringComparer.OrdinalIgnoreCase)
-            {
-                [ArmoryPageIds.Home] = home,
-            },
         };
     }
 

@@ -64,8 +64,6 @@ export interface AdvancedConfigDto {
   maxPlayers: number
   realmName: string
   realmlistHost?: string
-  /** Legacy flat env vars (mirrors the worldserver bucket). Prefer serviceEnvVars. */
-  customEnvVars?: Record<string, string>
   /** Per-service env vars: serviceId -> (envVarName -> value). */
   serviceEnvVars?: Record<string, Record<string, string>>
 }

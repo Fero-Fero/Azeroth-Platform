@@ -852,9 +852,8 @@ public sealed class LauncherBuildService : ILauncherBuildService
 
     /// <summary>
     /// Increments the requested segment of a <c>Release.Update.Minor.Patch</c> version and resets all
-    /// less-significant segments to zero. A missing or non-semantic previous version (e.g. an older
-    /// <c>yyyyMMddHHmmss</c> timestamp build) is treated as <c>0.0.0.0</c>, so the first semantic build
-    /// starts a fresh scheme (patch -> 0.0.0.1, release -> 1.0.0.0).
+    /// less-significant segments to zero. A missing or non-semantic previous version is treated as
+    /// <c>0.0.0.0</c>, so the first semantic build starts a fresh scheme (patch -> 0.0.0.1, release -> 1.0.0.0).
     /// </summary>
     internal static string BumpVersion(string? previous, LauncherVersionPart part)
     {
@@ -872,7 +871,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
 
     /// <summary>
     /// Parses a <c>Release.Update.Minor.Patch</c> version into four segments. A missing or non-semantic
-    /// value (e.g. an older timestamp build) parses to <c>0.0.0.0</c>.
+    /// value parses to <c>0.0.0.0</c>.
     /// </summary>
     private static int[] ParseVersion(string? version)
     {

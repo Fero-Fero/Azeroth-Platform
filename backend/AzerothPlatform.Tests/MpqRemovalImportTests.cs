@@ -18,28 +18,8 @@ namespace AzerothPlatform.Tests;
 
 public sealed class MpqRemovalImportTests
 {
-    [Theory]
-    [InlineData("""{"remove": "Patch-L.MPQ"}""", "Patch-L.MPQ")]
-    [InlineData("""{"REMOVE": "patch-l.mpq"}""", "patch-l.mpq")]
-    [InlineData("""{"remove": ["Patch-L.MPQ", "patch-B.MPQ"]}""", "Patch-L.MPQ", "patch-B.MPQ")]
-    [InlineData("""["patch-a.MPQ", "patch-b.MPQ"]""", "patch-a.MPQ", "patch-b.MPQ")]
-    public void TryParseMpqRemovalJson_parses_supported_instruction_formats(
-        string json,
-        params string[] expected)
-    {
-        MigrationService.TryParseMpqRemovalJson(json, out var removals).Should().BeTrue();
-        removals.Should().BeEquivalentTo(expected, options => options.WithStrictOrdering());
-    }
-
     [Fact]
-    public void TryParseMpqRemovalJson_rejects_invalid_documents()
-    {
-        MigrationService.TryParseMpqRemovalJson("""{"other": "patch-a.MPQ"}""", out _).Should().BeFalse();
-        MigrationService.TryParseMpqRemovalJson("not json", out _).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task ImportPatchCollectionAsync_imports_mpq_remove_json_into_remove_sidecar()
+    public async Task ImportPatchCollectionAsync_imports_mpq_json_remove_array()
     {
         var stackId = "import-remove";
         var buildsPath = Path.Combine(Path.GetTempPath(), "azp-import-remove-" + Guid.NewGuid().ToString("N"));
@@ -57,15 +37,54 @@ public sealed class MpqRemovalImportTests
             var service = CreateMigrationService(db, buildsPath);
 
             await using var archive = CreateZip(
-                ("classic/patch 1.1 TEST/mpq/remove.json", """{"remove": "Patch-L.MPQ"}"""));
+                ("classic/patch 1.1 TEST/mpq/mpq.json", """{"remove": ["Patch-L.MPQ"]}"""));
 
             var result = await service.ImportPatchCollectionAsync(stackId, archive, "append");
 
             result.ImportedCount.Should().Be(1);
             var patchKey = result.ImportedPatches[0].TargetKey;
-            MigrationService.ReadMpqRemovals(stackRoot, patchKey)
+            MigrationService.CollectMpqRemovals(stackRoot, patchKey)
                 .Should().ContainSingle(name => name.Equals("Patch-L.MPQ", StringComparison.OrdinalIgnoreCase));
+            File.Exists(Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "mpq.json")).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(buildsPath))
+            {
+                Directory.Delete(buildsPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ImportPatchCollectionAsync_skips_remove_json_sidecars()
+    {
+        var stackId = "import-skip-remove";
+        var buildsPath = Path.Combine(Path.GetTempPath(), "azp-import-skip-remove-" + Guid.NewGuid().ToString("N"));
+        var stackRoot = Path.Combine(buildsPath, stackId);
+        try
+        {
+            var stack = new ManagedStackEntity
+            {
+                Id = stackId,
+                StackName = stackId,
+                AppliedPatchLevel = 0,
+            };
+
+            await using var db = CreateDbContext(stack);
+            var service = CreateMigrationService(db, buildsPath);
+
+            await using var archive = CreateZip(
+                ("classic/patch 1.1 TEST/mpq/remove.json", """["Patch-L.MPQ"]"""),
+                ("classic/patch 1.1 TEST/mpq/Patch-Z.MPQ", "mpq"));
+
+            var result = await service.ImportPatchCollectionAsync(stackId, archive, "append");
+
+            result.ImportedCount.Should().Be(1);
+            var patchKey = result.ImportedPatches[0].TargetKey;
+            MigrationService.CollectMpqRemovals(stackRoot, patchKey).Should().BeEmpty();
             File.Exists(Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "remove.json")).Should().BeFalse();
+            File.Exists(Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "Patch-Z.MPQ")).Should().BeTrue();
         }
         finally
         {
@@ -193,7 +212,7 @@ public sealed class MpqManifestReaderTests
     }
 
     [Fact]
-    public void CollectMpqRemovals_merges_manifest_and_legacy_remove_json()
+    public void CollectMpqRemovals_reads_manifest_remove_only()
     {
         var stackRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var patchKey = "patch 1.2 TEST";
@@ -204,11 +223,11 @@ public sealed class MpqManifestReaderTests
                 Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "mpq.json"),
                 """{"remove":["patch-w.mpq"]}""");
             File.WriteAllText(
-                Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), MigrationService.MpqRemovalsFileName),
+                Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), "remove.json"),
                 """["patch-x.mpq"]""");
 
             var removals = MigrationService.CollectMpqRemovals(stackRoot, patchKey);
-            removals.Should().BeEquivalentTo(["patch-w.mpq", "patch-x.mpq"]);
+            removals.Should().BeEquivalentTo(["patch-w.mpq"]);
         }
         finally
         {

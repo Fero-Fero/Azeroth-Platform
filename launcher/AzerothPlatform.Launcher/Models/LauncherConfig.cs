@@ -20,9 +20,8 @@ public sealed class LauncherConfig
     public string ManifestVersion { get; set; } = string.Empty;
 
     /// <summary>
-    /// Absolute base URL of this stack's client-server container (manifest + files). When set, the
-    /// launcher fetches the single merged manifest and all files from here; when blank it falls back to
-    /// the manager's legacy per-stack file endpoints.
+    /// Absolute base URL of this stack's client-server container (manifest + files). Required for
+    /// player download; empty means the client container is not published.
     /// </summary>
     public string ClientContentBaseUrl { get; set; } = string.Empty;
 

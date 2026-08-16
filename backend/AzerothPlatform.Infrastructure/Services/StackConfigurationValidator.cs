@@ -124,9 +124,10 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
             AddError(result, "advanced.maxPlayers", "Max players must be between 1 and 1000.");
         }
 
-        if (configuration.Advanced.CustomEnvVars.Any(entry => string.IsNullOrWhiteSpace(entry.Key)))
+        if (configuration.Advanced.ServiceEnvVars.Values
+            .Any(bucket => bucket.Any(entry => string.IsNullOrWhiteSpace(entry.Key))))
         {
-            AddError(result, "advanced.customEnvVars", "Custom environment variable keys cannot be empty.");
+            AddError(result, "advanced.serviceEnvVars", "Environment variable keys cannot be empty.");
         }
     }
 

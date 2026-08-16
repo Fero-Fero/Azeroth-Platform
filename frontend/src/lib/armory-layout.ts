@@ -23,7 +23,7 @@ import {
   getPageLayout,
   getPageTemplates,
   isPageCustomized,
-  migrateLayoutToV2,
+  ensureSiteLayout,
   resolveEditorTemplateId,
   setPageLayout,
 } from './armory-layout-pages'
@@ -39,7 +39,7 @@ export {
   getPageLayout,
   getPageTemplates,
   isPageCustomized,
-  migrateLayoutToV2,
+  ensureSiteLayout,
   resolveEditorTemplateId,
   setPageLayout,
 }
@@ -320,7 +320,7 @@ export function navbarLinkDisplayLabel(link: ArmoryNavbarLinkDto, siteName: stri
 }
 
 export function cloneLayout(layout: ArmoryLayoutDto): ArmoryLayoutDto {
-  const cloned = migrateLayoutToV2(JSON.parse(JSON.stringify(layout)) as ArmoryLayoutDto)
+  const cloned = ensureSiteLayout(JSON.parse(JSON.stringify(layout)) as ArmoryLayoutDto)
   cloned.navbar = normalizeNavbar(cloned.navbar)
   return cloned
 }
@@ -515,14 +515,14 @@ export function compactPageLayout(page: ArmoryPageLayoutDto): ArmoryPageLayoutDt
 }
 
 export function compactLayout(layout: ArmoryLayoutDto): ArmoryLayoutDto {
-  const migrated = migrateLayoutToV2(layout)
+  const ensured = ensureSiteLayout(layout)
   const pages = Object.fromEntries(
     ALL_ARMORY_PAGE_IDS.map((pageId) => [
       pageId,
-      compactPageLayout(getPageLayout(migrated, pageId)),
+      compactPageLayout(getPageLayout(ensured, pageId)),
     ]),
   ) as ArmoryLayoutDto['pages']
-  return { ...migrated, version: 2, pages }
+  return { ...ensured, version: 2, pages }
 }
 
 export function gridContentHeight(

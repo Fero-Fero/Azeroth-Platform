@@ -60,8 +60,7 @@ public sealed class StackLauncherService : IStackLauncherService
     /// <summary>
     /// Absolute base URL of this stack's client-server container as reached by players: the same
     /// public host they use for realmlist, on the stack's published client port. Blank when the stack
-    /// has no client container (no port allocated / client disabled), so the launcher falls back to the
-    /// manager's legacy per-stack file endpoints.
+    /// has no client container (no port allocated / client disabled).
     /// </summary>
     private string BuildClientContentBaseUrl(Data.Entities.ManagedStackEntity stack)
     {

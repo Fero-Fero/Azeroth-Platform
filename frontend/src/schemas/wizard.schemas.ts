@@ -59,7 +59,6 @@ export const advancedSchema = z.object({
       .max(10000, 'Maximum 10,000 players'),
     realmName: z.string().min(1, 'Realm name is required').max(64),
     realmlistHost: z.string().max(255).optional(),
-    customEnvVars: z.record(z.string(), z.string()).optional(),
     serviceEnvVars: z.record(z.string(), z.record(z.string(), z.string())).optional(),
   }),
 })
@@ -221,7 +220,7 @@ export const WIZARD_DEFAULTS: WizardFormData = {
   moduleIds: [],
   database: { rootPassword: '', port: 3306 },
   ports: { authServer: 3724, worldServer: 8085, soapPort: 7878 },
-  advanced: { maxPlayers: 100, realmName: 'AzerothCore', realmlistHost: '', customEnvVars: {}, serviceEnvVars: {} },
+  advanced: { maxPlayers: 100, realmName: 'AzerothCore', realmlistHost: '', serviceEnvVars: {} },
   deployment: {
     target: DeploymentTarget.Local,
     externalHost: '',

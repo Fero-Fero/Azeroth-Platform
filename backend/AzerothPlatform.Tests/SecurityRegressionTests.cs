@@ -49,15 +49,15 @@ public sealed class SecurityRegressionTests : IClassFixture<AzerothPlatformWebAp
     }
 
     [Fact]
-    public async Task LauncherProfiles_WithoutAuthentication_IsNotUnauthorized()
+    public async Task LauncherPreviewAsset_WithoutAuthentication_IsNotUnauthorized()
     {
         var client = _factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/launcher/profiles");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/launcher/templates/wotlk/logo");
         request.Headers.Add(TestAuthHandler.AnonymousHeader, "1");
 
         var response = await client.SendAsync(request);
 
-        // The launcher profiles endpoint is explicitly [AllowAnonymous]; it must not be gated by auth.
+        // Admin launcher preview assets are [AllowAnonymous]; they must not be gated by auth.
         Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

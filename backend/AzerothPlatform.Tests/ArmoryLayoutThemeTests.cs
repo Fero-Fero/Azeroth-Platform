@@ -12,33 +12,6 @@ public sealed class ArmoryLayoutThemeTests
     {
         var layout = new ArmoryLayoutDto
         {
-            Widgets =
-            [
-                new ArmoryLayoutWidgetDto
-                {
-                    Id = "w-test",
-                    Type = ArmoryWidgetType.News,
-                    X = 0,
-                    Y = 1,
-                    W = 6,
-                    H = 4,
-                    Visible = true,
-                },
-            ],
-        };
-
-        var css = ArmoryLayoutTheme.BuildCss(layout);
-
-        css.Should().Contain("[data-armory-page=\"home\"]");
-        css.Should().Contain("grid-template-columns: repeat(12, minmax(0, 1fr));");
-        css.Should().Contain("grid-auto-rows: minmax(48px, auto);");
-    }
-
-    [Fact]
-    public void BuildCss_generates_grid_config_for_v2_layout()
-    {
-        var layout = new ArmoryLayoutDto
-        {
             Version = 2,
             Pages = new Dictionary<string, ArmoryPageLayoutDto>(StringComparer.OrdinalIgnoreCase)
             {

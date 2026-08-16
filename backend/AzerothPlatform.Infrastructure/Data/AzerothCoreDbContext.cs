@@ -44,7 +44,7 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.ModuleIdsJson).IsRequired();
             entity.Property(stack => stack.DatabaseRootPassword).HasMaxLength(256).IsRequired();
             entity.Property(stack => stack.RealmName).HasMaxLength(50).IsRequired();
-            entity.Property(stack => stack.CustomEnvVarsJson).IsRequired();
+            entity.Property(stack => stack.ServiceEnvVarsJson).IsRequired();
             entity.Property(stack => stack.AppliedPatchesJson).IsRequired();
             entity.Property(stack => stack.ApplyingPatchKey).HasMaxLength(128);
             entity.Property(stack => stack.ApplyRunId).HasMaxLength(64);

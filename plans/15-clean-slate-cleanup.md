@@ -1,6 +1,6 @@
 # Clean-slate cleanup — drop legacy and pre-existing compat
 
-**Status:** Open  
+**Status:** Implemented (see `plans/16-clean-slate-cleanup-changelog.md`)  
 **Folder:** `plans/`  
 **Policy:** As of this moment the platform is a **clean slate**. Do not keep, migrate, or document support for older stacks, pre-1.0 manager layouts, dual schemas, or “imported leftover” rows. Current create/update paths are the only supported shape.
 

@@ -251,32 +251,17 @@ export function buildDefaultSiteLayout(): ArmoryLayoutDto {
   return { version: 2, navbar: DEFAULT_NAVBAR, pages }
 }
 
-export function migrateLayoutToV2(layout: ArmoryLayoutDto): ArmoryLayoutDto {
+export function ensureSiteLayout(layout: ArmoryLayoutDto): ArmoryLayoutDto {
   if (layout.version >= 2 && layout.pages && Object.keys(layout.pages).length > 0) {
     return layout
-  }
-
-  if (layout.widgets?.length) {
-    const homeWidgets = layout.widgets.map((w) => ({
-        ...w,
-        visible: w.visible ?? true,
-        settings: w.settings ?? null,
-        chrome: w.chrome ?? null,
-      }))
-    const home = page(resolvePageTemplateId('home', layout.templateId ?? 'Default'), homeWidgets)
-    return {
-      version: 2,
-      navbar: layout.navbar,
-      pages: { home, ...buildDefaultSiteLayout().pages },
-    }
   }
 
   return buildDefaultSiteLayout()
 }
 
 export function getPageLayout(layout: ArmoryLayoutDto, pageId: ArmoryPageId): ArmoryPageLayoutDto {
-  const migrated = migrateLayoutToV2(layout)
-  return migrated.pages?.[pageId] ?? buildPageTemplate(pageId, 'Default')
+  const ensured = ensureSiteLayout(layout)
+  return ensured.pages?.[pageId] ?? buildPageTemplate(pageId, 'Default')
 }
 
 export function setPageLayout(
@@ -284,10 +269,10 @@ export function setPageLayout(
   pageId: ArmoryPageId,
   page: ArmoryPageLayoutDto,
 ): ArmoryLayoutDto {
-  const migrated = migrateLayoutToV2(layout)
+  const ensured = ensureSiteLayout(layout)
   return {
-    ...migrated,
-    pages: { ...migrated.pages, [pageId]: page },
+    ...ensured,
+    pages: { ...ensured.pages, [pageId]: page },
   }
 }
 

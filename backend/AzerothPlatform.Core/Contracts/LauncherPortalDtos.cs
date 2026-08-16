@@ -230,7 +230,7 @@ public sealed class LauncherProfilesDto
     public string ClientVersion { get; set; } = "3.3.5a (12340)";
 
     /// <summary>Relative backend path to the shared base client manifest.</summary>
-    public string BaseManifestUrl { get; set; } = "/api/launcher/manifest";
+    public string BaseManifestUrl { get; set; } = "/manifest";
 
     /// <summary>Relative backend path for the default background asset, or null.</summary>
     public string? DefaultBackgroundUrl { get; set; }

@@ -53,31 +53,16 @@ public sealed class ArmoryLayoutDefaultsTests
     }
 
     [Fact]
-    public void Normalize_migrates_v1_root_widgets_to_home_page()
+    public void Normalize_rejects_v1_root_widgets()
     {
         var layout = new ArmoryLayoutDto
         {
             Version = 1,
-            Grid = new ArmoryLayoutGridDto { Columns = 12 },
-            Widgets =
-            [
-                new ArmoryLayoutWidgetDto
-                {
-                    Id = "only",
-                    Type = ArmoryWidgetType.PageTitle,
-                    X = 0,
-                    Y = 0,
-                    W = 12,
-                    H = 1,
-                    Visible = true,
-                },
-            ],
         };
 
-        var normalized = ArmoryLayoutDefaults.Normalize(layout);
+        var act = () => ArmoryLayoutDefaults.Normalize(layout);
 
-        normalized.Version.Should().Be(2);
-        normalized.Pages[ArmoryPageIds.Home].Widgets.Should().ContainSingle(w => w.Id == "only");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*V2*");
     }
 
     [Fact]

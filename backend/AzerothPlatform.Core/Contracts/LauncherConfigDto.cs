@@ -67,8 +67,7 @@ public sealed class LauncherConfigDto
     /// <summary>
     /// Absolute base URL of this stack's self-contained client-server container (e.g.
     /// <c>http://play.example:8123</c>). The launcher fetches the merged manifest (<c>/manifest</c>)
-    /// and files (<c>/files/{path}</c>) from here instead of the manager. Blank falls back to the
-    /// manager's per-stack file endpoints (legacy).
+    /// and files (<c>/files/{path}</c>) from here. Empty when the client container is not published.
     /// </summary>
     public string ClientContentBaseUrl { get; set; } = string.Empty;
 

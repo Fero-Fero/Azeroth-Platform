@@ -199,8 +199,7 @@ internal static class ProgressionRepoAlignment
     }
 
     /// <summary>
-    /// Removes managed progression patch folders that no longer exist in the repository layout
-    /// (for example legacy catalog slug folders after switching to repo folder names).
+    /// Removes managed progression patch folders that no longer exist in the repository layout.
     /// </summary>
     public static int RemoveOrphanedManagedPatches(
         string repoDir,

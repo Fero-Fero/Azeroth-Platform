@@ -2,7 +2,7 @@ namespace AzerothPlatform.Launcher.Services;
 
 /// <summary>
 /// Abstracts where the launcher fetches its self-update artifact from, so <see cref="SelfUpdateService"/>
-/// works identically against the manager's build endpoints (legacy/local preview) and a stack's own
+/// works identically against the manager's admin build endpoints and a stack's own
 /// <c>/launcher/*</c> endpoints (the default now that portals are stack-hosted).
 /// </summary>
 public interface ILauncherArtifactSource

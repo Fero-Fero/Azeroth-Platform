@@ -974,8 +974,8 @@ A **stack** is one complete game server: authentication + world + database, buil
 - **Global vs. per-stack:** the root `.env` configures the **platform**; the tab configures a **single
   server's containers** — different scopes, not duplicates.
 - **Beginner:** search for a variable, set its value, **Save** (applied on the next restart).
-- **Advanced:** edit per container (worldserver, authserver, database, armory, …); the worldserver
-  bucket doubles as the legacy flat override the backend reads.
+- **Advanced:** edit per container (worldserver, authserver, database, armory, …). Each container has
+  its own env bucket; there is no flat override.
 
 ### Keeping it running
 

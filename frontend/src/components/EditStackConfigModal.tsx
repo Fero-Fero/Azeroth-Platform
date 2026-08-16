@@ -8,9 +8,6 @@ import { useServiceEnvTemplates } from '@/hooks/useModules'
 import { ServiceEnvVarsEditor } from './wizard/ServiceEnvVarsEditor'
 import type { ServiceEnvVars } from '@/types/serviceEnv'
 
-// Module env vars are AC_* worldserver overrides, so they live in the worldserver bucket.
-const WORLDSERVER = 'worldserver'
-
 interface EditStackConfigModalProps {
   stack: StackDetailsDto
   onClose: () => void
@@ -42,12 +39,10 @@ export default function EditStackConfigModal({ stack, onClose }: EditStackConfig
   }, [])
 
   const updateMutation = useMutation({
-    // Keep the legacy flat mirror in sync with the worldserver bucket so the backend never re-seeds
-    // cleared worldserver vars from a stale customEnvVars value.
     mutationFn: () =>
       stackApi.updateConfig(stack.stackId, {
         ...config,
-        advanced: { ...config.advanced, customEnvVars: config.advanced.serviceEnvVars?.[WORLDSERVER] ?? {} },
+        advanced: { ...config.advanced },
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: stackKeys.detail(stack.stackId) })

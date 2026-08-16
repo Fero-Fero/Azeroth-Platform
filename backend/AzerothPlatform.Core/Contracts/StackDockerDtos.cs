@@ -344,12 +344,3 @@ public sealed class DockerPlatformKeysDto
     public List<DockerPlatformKeyStatusDto> Keys { get; set; } = [];
     public string Detail { get; set; } = string.Empty;
 }
-
-public sealed class DockerManagerMirrorCleanupResultDto
-{
-    public bool Success { get; set; }
-    public string Message { get; set; } = string.Empty;
-    public long FreedBytes { get; set; }
-    public int RemovedPaths { get; set; }
-    public List<string> RemovedLabels { get; set; } = [];
-}

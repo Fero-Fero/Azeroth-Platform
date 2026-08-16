@@ -63,7 +63,6 @@ const VALIDATION_FIELD_PATHS = [
   'ports.soapPort',
   'advanced.realmName',
   'advanced.maxPlayers',
-  'advanced.customEnvVars',
   'advanced.serviceEnvVars',
   'armoryAccounts.useEmailConfirmation',
   'armoryAccounts.email.smtpHost',
@@ -612,7 +611,6 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
       maxPlayers: values.advanced.maxPlayers,
       realmName: values.advanced.realmName,
       realmlistHost: values.advanced.realmlistHost ?? '',
-      customEnvVars: values.advanced.customEnvVars ?? {},
       serviceEnvVars: values.advanced.serviceEnvVars ?? {},
     },
     deployment: values.deployment

@@ -186,7 +186,7 @@ export default function StackOverviewStatusPanel({
   const showClientUploadPrompt = clientDataMissing && clientContainerRunning
   const showArmoryUploadPrompt = armoryDataMissing && armoryContainerRunning
 
-  const ahBotGuids = stack.configuration.advanced?.customEnvVars?.AC_AUCTION_HOUSE_BOT_GUIDS
+  const ahBotGuids = stack.configuration.advanced?.serviceEnvVars?.worldserver?.AC_AUCTION_HOUSE_BOT_GUIDS
   const hasAhBotNeedsSetup =
     stack.configuration.moduleIds?.includes('mod-ah-bot') && !ahBotGuids
   const soapNeedsSetup = !stack.isAdminAccountInitialized

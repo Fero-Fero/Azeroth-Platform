@@ -220,7 +220,7 @@ public sealed partial class MigrationService : IMigrationService
             Description = MigrationLayout.ReadPatchDescription(stackRoot, patch.Key),
             DescriptionFile = MigrationLayout.FindPatchDescriptionFileName(stackRoot, patch.Key),
             Files = ListFiles(stackRoot, patch.Key),
-            MpqRemovals = ReadMpqRemovals(stackRoot, patch.Key),
+            MpqRemovals = CollectMpqRemovals(stackRoot, patch.Key),
             Progression = metadata,
             ConfigOverrides = PatchConfigOverrideReader.ReadOverrides(stackRoot, patch.Key),
             HasPatchNews = patchNews is not null,
@@ -717,18 +717,21 @@ public sealed partial class MigrationService : IMigrationService
                 continue;
             }
 
+            var fileName = Path.GetFileName(relativePath);
             if (category.Equals("mpq", StringComparison.OrdinalIgnoreCase)
-                && Path.GetExtension(relativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))
+                && (fileName.Equals("remove.json", StringComparison.OrdinalIgnoreCase)
+                    || fileName.Equals(".remove.json", StringComparison.OrdinalIgnoreCase)))
             {
-                var json = await File.ReadAllTextAsync(sourcePath, cancellationToken);
-                if (TryParseMpqRemovalJson(json, out var removals))
-                {
-                    AppendMpqRemovals(destinationStackRoot, targetKey, removals);
-                    copiedFiles++;
-                    continue;
-                }
+                continue;
+            }
 
-                // Ignore other JSON files in mpq/ that are not valid removal instructions.
+            if (category.Equals("mpq", StringComparison.OrdinalIgnoreCase)
+                && fileName.Equals(MpqPackFilter.MpqManifestFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                var manifestDestination = Path.Combine(MigrationLayout.MpqDir(destinationStackRoot, targetKey), MpqPackFilter.MpqManifestFileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(manifestDestination)!);
+                File.Copy(sourcePath, manifestDestination, overwrite: true);
+                copiedFiles++;
                 continue;
             }
 
@@ -1477,26 +1480,6 @@ public sealed partial class MigrationService : IMigrationService
 
     // ===== MPQ removals =====
 
-    /// <summary>File (inside a patch's mpq folder) listing published MPQs the patch removes on apply.</summary>
-    internal const string MpqRemovalsFileName = ".remove.json";
-
-    private static string MpqRemovalsPath(string stackRoot, string patchKey) =>
-        Path.Combine(MigrationLayout.MpqDir(stackRoot, patchKey), MpqRemovalsFileName);
-
-    /// <summary>Reads a patch's MPQ removal list (base file names), or an empty list if none/invalid.</summary>
-    internal static List<string> ReadMpqRemovals(string stackRoot, string patchKey)
-    {
-        var path = MpqRemovalsPath(stackRoot, patchKey);
-        if (!File.Exists(path))
-        {
-            return new List<string>();
-        }
-
-        return TryParseMpqRemovalJson(File.ReadAllText(path), out var removals)
-            ? removals
-            : new List<string>();
-    }
-
     /// <summary>Reads and parses an mpq.json manifest from a patch's mpq directory, or null if none exists.</summary>
     internal static MpqManifestDto? ReadMpqManifest(string stackRoot, string patchKey)
     {
@@ -1507,19 +1490,13 @@ public sealed partial class MigrationService : IMigrationService
         return MpqManifestReader.Parse(File.ReadAllText(path));
     }
 
-    /// <summary>Merges legacy remove.json entries with <c>remove</c> names from mpq.json.</summary>
+    /// <summary>Reads <c>remove</c> names from <c>mpq.json</c>.</summary>
     internal static List<string> CollectMpqRemovals(string stackRoot, string patchKey)
     {
-        var removals = ReadMpqRemovals(stackRoot, patchKey);
         var manifest = ReadMpqManifest(stackRoot, patchKey);
-        if (manifest is null || manifest.Remove.Count == 0)
-        {
-            return removals;
-        }
-
-        return removals.Concat(manifest.Remove)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return manifest is null
+            ? new List<string>()
+            : NormalizeMpqRemovals(manifest.Remove);
     }
 
     private static string? ResolveMpqFileDescription(string stackRoot, string patchKey, string mpqFilePath)
@@ -1575,7 +1552,7 @@ public sealed partial class MigrationService : IMigrationService
 
         foreach (var patch in appliedPatches.OrderBy(p => p.Level))
         {
-            foreach (var removal in ReadMpqRemovals(stackRoot, patch.Key))
+            foreach (var removal in CollectMpqRemovals(stackRoot, patch.Key))
             {
                 removals.Add(removal);
             }
@@ -1599,7 +1576,7 @@ public sealed partial class MigrationService : IMigrationService
                     .Any(p =>
                     {
                         var m = ReadMpqManifest(stackRoot, p.Key);
-                        var r = ReadMpqRemovals(stackRoot, p.Key);
+                        var r = CollectMpqRemovals(stackRoot, p.Key);
                         return (m?.Remove.Contains(name, StringComparer.OrdinalIgnoreCase) ?? false)
                             || r.Contains(name, StringComparer.OrdinalIgnoreCase);
                     });
@@ -1624,86 +1601,20 @@ public sealed partial class MigrationService : IMigrationService
         return plan;
     }
 
-    /// <summary>
-    /// Parses MPQ removal instructions from JSON. Supports a string array, or an object with a
-    /// case-insensitive <c>remove</c> property holding one file name or an array of names.
-    /// </summary>
-    internal static bool TryParseMpqRemovalJson(string json, out List<string> removals)
+    private static readonly JsonSerializerOptions MpqManifestWriteOptions = new()
     {
-        removals = new List<string>();
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Array)
-            {
-                var names = root.EnumerateArray()
-                    .Where(item => item.ValueKind == JsonValueKind.String)
-                    .Select(item => item.GetString() ?? string.Empty);
-                removals = NormalizeMpqRemovals(names);
-                return removals.Count > 0;
-            }
-
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var property in root.EnumerateObject())
-                {
-                    if (!property.Name.Equals("remove", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    removals = NormalizeMpqRemovals(ExtractMpqRemovalNames(property.Value));
-                    return removals.Count > 0;
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            // Not a removal instruction document.
-        }
-
-        removals = new List<string>();
-        return false;
-    }
-
-    private static IEnumerable<string> ExtractMpqRemovalNames(JsonElement value) =>
-        value.ValueKind switch
-        {
-            JsonValueKind.String => new[] { value.GetString() ?? string.Empty },
-            JsonValueKind.Array => value.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.String)
-                .Select(item => item.GetString() ?? string.Empty),
-            _ => Enumerable.Empty<string>()
-        };
-
-    private static void AppendMpqRemovals(string stackRoot, string patchKey, IEnumerable<string> additional)
-    {
-        var merged = NormalizeMpqRemovals(ReadMpqRemovals(stackRoot, patchKey).Concat(additional));
-        WriteMpqRemovals(stackRoot, patchKey, merged);
-    }
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = true,
+    };
 
     private static void WriteMpqRemovals(string stackRoot, string patchKey, IReadOnlyList<string> names)
     {
-        var path = MpqRemovalsPath(stackRoot, patchKey);
-        if (names.Count == 0)
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            return;
-        }
-
-        Directory.CreateDirectory(MigrationLayout.MpqDir(stackRoot, patchKey));
-        File.WriteAllText(path, JsonSerializer.Serialize(names, JsonOptions));
+        var mpqDir = MigrationLayout.MpqDir(stackRoot, patchKey);
+        Directory.CreateDirectory(mpqDir);
+        var path = Path.Combine(mpqDir, "mpq.json");
+        var manifest = ReadMpqManifest(stackRoot, patchKey) ?? new MpqManifestDto();
+        manifest.Remove = names.ToList();
+        File.WriteAllText(path, JsonSerializer.Serialize(manifest, MpqManifestWriteOptions));
     }
 
     /// <summary>Sanitizes removal entries to distinct base ".mpq" file names (drops any path/traversal).</summary>

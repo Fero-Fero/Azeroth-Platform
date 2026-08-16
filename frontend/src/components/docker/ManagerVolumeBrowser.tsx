@@ -2,10 +2,8 @@ import { useState } from 'react'
 import { ChevronRight, Folder, Loader2, Trash2 } from 'lucide-react'
 import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import {
-  useCleanupManagerMirrors,
   useDeleteManagerFile,
   useManagerFiles,
-  useMigrateClientMirrors,
   usePlatformKeys,
 } from '@/hooks/useStackDocker'
 import { apiErrorMessage } from '@/lib/utils'
@@ -20,8 +18,6 @@ export function ManagerVolumeBrowser() {
   const { data: files, isLoading, refetch } = useManagerFiles(path)
   const { data: platformKeys } = usePlatformKeys()
   const deleteFile = useDeleteManagerFile()
-  const cleanupMirrors = useCleanupManagerMirrors()
-  const migrateClients = useMigrateClientMirrors()
 
   const crumbs = path ? path.split('/') : []
 
@@ -48,30 +44,6 @@ export function ManagerVolumeBrowser() {
     try {
       const res = await deleteFile.mutateAsync(target.relativePath)
       setNotice(res.data.message + (res.data.freedBytes ? ` Freed ${formatBytes(res.data.freedBytes)}.` : ''))
-      await refetch()
-    } catch (err) {
-      setError(apiErrorMessage(err))
-    }
-  }
-
-  const handleCleanupMirrors = async () => {
-    setNotice(null)
-    setError(null)
-    try {
-      const res = await cleanupMirrors.mutateAsync()
-      setNotice(res.data.message)
-      await refetch()
-    } catch (err) {
-      setError(apiErrorMessage(err))
-    }
-  }
-
-  const handleMigrateClients = async () => {
-    setNotice(null)
-    setError(null)
-    try {
-      const res = await migrateClients.mutateAsync()
-      setNotice(res.data.message)
       await refetch()
     } catch (err) {
       setError(apiErrorMessage(err))
@@ -109,24 +81,6 @@ export function ManagerVolumeBrowser() {
               </button>
             </span>
           ))}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void handleMigrateClients()}
-            disabled={migrateClients.isPending}
-            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50"
-          >
-            {migrateClients.isPending ? 'Migrating…' : 'Migrate legacy client mirrors'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleCleanupMirrors()}
-            disabled={cleanupMirrors.isPending}
-            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-          >
-            {cleanupMirrors.isPending ? 'Cleaning…' : 'Remove legacy stack mirrors'}
-          </button>
         </div>
       </div>
 

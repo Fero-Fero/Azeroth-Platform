@@ -291,16 +291,6 @@ export const dockerApi = {
       params: { path },
     }),
 
-  cleanupManagerMirrors: () =>
-    apiClient.post<import('@/types/docker.types').DockerManagerMirrorCleanupResultDto>(
-      '/docker/manager/cleanup-mirrors',
-    ),
-
-  migrateClientMirrors: () =>
-    apiClient.post<import('@/types/docker.types').DockerManagerMirrorCleanupResultDto>(
-      '/docker/manager/migrate-client-mirrors',
-    ),
-
   getPlatformKeys: () =>
     apiClient.get<import('@/types/docker.types').DockerPlatformKeysDto>('/docker/platform-keys'),
 }
@@ -778,14 +768,13 @@ function encodePathSegments(path: string): string {
     .join('/')
 }
 
-// Addons API (global client when stackId is undefined, otherwise a specific stack's client)
-const addonBase = (stackId?: string) => (stackId ? `/stacks/${stackId}/addons` : '/addons')
+const addonBase = (stackId: string) => `/stacks/${stackId}/addons`
 
 export const addonApi = {
-  list: (stackId?: string) =>
+  list: (stackId: string) =>
     apiClient.get<import('@/types/addon.types').AddonListDto>(addonBase(stackId)),
 
-  upload: (stackId: string | undefined, file: File) => {
+  upload: (stackId: string, file: File) => {
     const form = new FormData()
     form.append('file', file)
     return apiClient.post<import('@/types/addon.types').AddonListDto>(addonBase(stackId), form, {
@@ -793,17 +782,17 @@ export const addonApi = {
     })
   },
 
-  remove: (stackId: string | undefined, name: string) =>
+  remove: (stackId: string, name: string) =>
     apiClient.delete<import('@/types/addon.types').AddonListDto>(
       `${addonBase(stackId)}/${encodeURIComponent(name)}`
     ),
 
-  catalog: (stackId?: string) =>
+  catalog: (stackId: string) =>
     apiClient.get<import('@/types/addon.types').AddonCatalogEntryDto[]>(
       `${addonBase(stackId)}/catalog`
     ),
 
-  install: (stackId: string | undefined, addonId: string) =>
+  install: (stackId: string, addonId: string) =>
     apiClient.post<import('@/types/addon.types').AddonListDto>(
       `${addonBase(stackId)}/catalog/${encodeURIComponent(addonId)}/install`
     ),

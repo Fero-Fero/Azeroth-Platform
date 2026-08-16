@@ -38,22 +38,17 @@ public sealed class SelfUpdateService
     }
 
     /// <summary>
-    /// Decides whether <paramref name="available"/> is newer than <paramref name="current"/>. Handles
-    /// the four-part Release.Update.Minor.Patch scheme numerically (so 1.2.10.0 &gt; 1.2.9.0) and the
-    /// migration from older yyyyMMddHHmmss timestamp builds: a semantic version always supersedes a
-    /// legacy timestamp, while two timestamps fall back to an ordinal (chronological) compare.
+    /// Decides whether <paramref name="available"/> is newer than <paramref name="current"/> using the
+    /// four-part Release.Update.Minor.Patch scheme numerically (so 1.2.10.0 &gt; 1.2.9.0). Non-semantic
+    /// version strings are treated as 0.0.0.0.
     /// </summary>
     private static bool IsNewer(string available, string current)
     {
-        var availableSemantic = available.Contains('.');
-        var currentSemantic = current.Contains('.');
-
-        if (availableSemantic && !currentSemantic) { return true; }
-        if (!availableSemantic && currentSemantic) { return false; }
-        if (availableSemantic && currentSemantic) { return CompareSemantic(available, current) > 0; }
-
-        return string.CompareOrdinal(available, current) > 0;
+        return CompareSemantic(NormalizeSemantic(available), NormalizeSemantic(current)) > 0;
     }
+
+    private static string NormalizeSemantic(string version) =>
+        version.Contains('.') ? version : "0.0.0.0";
 
     private static int CompareSemantic(string a, string b)
     {

@@ -22,12 +22,6 @@ public class AdvancedConfigDto
     /// external host.
     /// </summary>
     public string RealmlistHost { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// Legacy flat environment variables. Kept for back-compat; mirrors the <c>worldserver</c> bucket of
-    /// <see cref="ServiceEnvVars"/>. Prefer <see cref="ServiceEnvVars"/> for new code.
-    /// </summary>
-    public Dictionary<string, string> CustomEnvVars { get; set; } = new();
 
     /// <summary>
     /// Per-service environment variables: <c>serviceId → (envVarName → value)</c>. Environment variables

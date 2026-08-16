@@ -147,26 +147,3 @@ export function useDeleteManagerFile() {
     },
   })
 }
-
-export function useCleanupManagerMirrors() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => dockerApi.cleanupManagerMirrors(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: dockerKeys.engineOverview })
-      queryClient.invalidateQueries({ queryKey: ['docker', 'manager-files'] })
-    },
-  })
-}
-
-export function useMigrateClientMirrors() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => dockerApi.migrateClientMirrors(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: dockerKeys.engineOverview })
-      queryClient.invalidateQueries({ queryKey: ['docker', 'manager-files'] })
-      queryClient.invalidateQueries({ queryKey: ['client'] })
-    },
-  })
-}

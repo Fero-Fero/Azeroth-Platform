@@ -82,7 +82,6 @@ export default function ArmoryEmailTab({ stack }: { stack: StackDetailsDto }) {
         armoryAccounts: nextAccounts,
         advanced: {
           ...stack.configuration.advanced,
-          customEnvVars: stack.configuration.advanced.serviceEnvVars?.worldserver ?? {},
         },
       }
 

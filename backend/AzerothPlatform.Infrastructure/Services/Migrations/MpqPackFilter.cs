@@ -22,7 +22,7 @@ internal static class MpqPackFilter
         }
 
         if (fileName.Equals("remove.json", StringComparison.OrdinalIgnoreCase)
-            || fileName.Equals(MigrationService.MpqRemovalsFileName, StringComparison.OrdinalIgnoreCase))
+            || fileName.Equals(".remove.json", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

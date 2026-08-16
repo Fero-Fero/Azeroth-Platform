@@ -15,8 +15,6 @@ import {
   StackTabSideCard,
 } from '@/components/layout/StackTabChrome'
 
-const WORLDSERVER = 'worldserver'
-
 interface EnvironmentVariablesTabProps {
   stack: StackDetailsDto
 }
@@ -55,7 +53,6 @@ export default function EnvironmentVariablesTab({ stack }: EnvironmentVariablesT
         advanced: {
           ...stack.configuration.advanced,
           serviceEnvVars,
-          customEnvVars: serviceEnvVars[WORLDSERVER] ?? {},
         },
       }),
     onSuccess: () => {

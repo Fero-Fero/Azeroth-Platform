@@ -1049,8 +1049,8 @@ public sealed class StackDockerService : IStackDockerService
                     Name = name,
                     RelativePath = name,
                     SizeBytes = sizeBytes,
-                    IsDeletable = await IsManagerPathDeletableAsync(name, cancellationToken),
-                    Detail = await DescribeManagerDataDirectoryAsync(name, cancellationToken),
+                    IsDeletable = IsManagerPathDeletableCandidate(name),
+                    Detail = DescribeManagerDataDirectory(name),
                 });
             }
         }
@@ -1061,32 +1061,15 @@ public sealed class StackDockerService : IStackDockerService
             Name = _managerDataVolumeName,
             TotalBytes = usage.SizeBytes ?? directories.Sum(d => d.SizeBytes),
             IsProtected = true,
-            Detail = "Platform database, build checkouts (/stacks), launcher builds, and optional legacy upload mirrors. New client/armory data uploads go directly to stack Docker volumes.",
+            Detail = "Platform database, build checkouts (/stacks), and launcher builds. Client and armory data live in per-stack Docker volumes.",
             Directories = directories,
         };
     }
 
-    private async Task<string?> DescribeManagerDataDirectoryAsync(string name, CancellationToken cancellationToken)
-    {
-        if (name.Equals("client", StringComparison.OrdinalIgnoreCase))
-        {
-            var (ready, blockers) = await EvaluateClientMirrorDeletionAsync("client", cancellationToken);
-            if (!ready)
-            {
-                return "Legacy WoW client mirror on the manager. Do NOT delete until each stack's client-base Docker volume has the full client — use Migrate legacy client mirrors first. "
-                    + string.Join("; ", blockers);
-            }
-
-            return "Legacy WoW client mirror (duplicate). Each stack's client-base volume is verified — safe to remove via Remove legacy stack mirrors.";
-        }
-
-        return DescribeManagerDataDirectory(name);
-    }
-
     private static string? DescribeManagerDataDirectory(string name) => name switch
     {
-        "client" => "Legacy WoW client mirror (duplicate). Safe to delete only when every stack's client-base Docker volume is verified.",
-        "armory-assets" => "Armory files on manager: small styling/config plus optional legacy data mirrors under stacks/*/static/data.",
+        "client" => "Leftover manager client files. Client data lives in per-stack Docker volumes.",
+        "armory-assets" => "Armory styling/config used for image rebuilds.",
         "stacks" => "AzerothCore source checkouts for compiling (NOT Docker stack data). Required — do not delete.",
         "azeroth-platform.db" => "Platform SQLite database.",
         "launcher-dist" => "Built desktop launcher binaries staged for stacks.",
@@ -1408,7 +1391,7 @@ public sealed class StackDockerService : IStackDockerService
                 RelativePath = rel,
                 IsDirectory = true,
                 SizeBytes = 0,
-                IsDeletable = await IsManagerPathDeletableAsync(rel, cancellationToken),
+                IsDeletable = IsManagerPathDeletableCandidate(rel),
                 Detail = DescribeManagerEntry(rel, isDirectory: true),
             });
         }
@@ -1425,7 +1408,7 @@ public sealed class StackDockerService : IStackDockerService
                 RelativePath = rel,
                 IsDirectory = false,
                 SizeBytes = size,
-                IsDeletable = await IsManagerPathDeletableAsync(rel, cancellationToken),
+                IsDeletable = IsManagerPathDeletableCandidate(rel),
                 Detail = DescribeManagerEntry(rel, isDirectory: false),
             });
         }
@@ -1449,21 +1432,6 @@ public sealed class StackDockerService : IStackDockerService
                 Success = false,
                 Message = "This manager data path is protected and cannot be deleted.",
             };
-        }
-
-        if (IsClientLegacyMirrorPath(normalized))
-        {
-            var (allowed, blockers) = await EvaluateClientMirrorDeletionAsync(normalized, cancellationToken);
-            if (!allowed)
-            {
-                return new StackDockerDeleteResultDto
-                {
-                    Success = false,
-                    Message = "Refusing to delete legacy client data on the manager: "
-                        + string.Join("; ", blockers)
-                        + " Upload the client on each stack's Client tab (or use Migrate legacy client mirrors) before removing the manager copy.",
-                };
-            }
         }
 
         var target = ResolveManagerPath(normalized);
@@ -1508,139 +1476,6 @@ public sealed class StackDockerService : IStackDockerService
         };
     }
 
-    public async Task<DockerManagerMirrorCleanupResultDto> MigrateClientMirrorsToVolumesAsync(CancellationToken cancellationToken = default)
-    {
-        var result = new DockerManagerMirrorCleanupResultDto();
-        var stacks = await _dbContext.ManagedStacks.AsNoTracking().Where(s => s.ClientEnabled).ToListAsync(cancellationToken);
-
-        foreach (var stack in stacks)
-        {
-            var volumeName = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
-            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
-            if (ClientBaseVolumeLooksPopulated(summary))
-            {
-                continue;
-            }
-
-            var mirror = _clientOptions.StackGameDir(stack.Id);
-            if (!Directory.Exists(mirror) || !LooksLikeWoWClientRoot(mirror))
-            {
-                result.RemovedLabels.Add($"No manager mirror to migrate ({stack.StackName})");
-                continue;
-            }
-
-            try
-            {
-                await _remoteEngine.EnsureVolumeExistsAsync(stack, volumeName, cancellationToken);
-                await _remoteEngine.ClearVolumeContentsAsync(stack, volumeName, cancellationToken);
-                await _remoteEngine.SeedVolumeAsync(stack, volumeName, mirror, cancellationToken);
-                result.RemovedPaths++;
-                result.RemovedLabels.Add($"Migrated client mirror → {volumeName} ({stack.StackName})");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to migrate client mirror for stack {StackId}.", stack.Id);
-                result.RemovedLabels.Add($"Migration failed ({stack.StackName}): {ex.Message}");
-            }
-        }
-
-        result.Success = true;
-        result.Message = result.RemovedPaths > 0
-            ? $"Migrated {result.RemovedPaths} legacy client mirror(s) into stack Docker volumes. You can remove the manager client/ tree once every stack is verified."
-            : result.RemovedLabels.Count > 0
-                ? "No client mirrors were migrated. " + string.Join("; ", result.RemovedLabels)
-                : "Every client-enabled stack already has a populated client-base volume.";
-        return result;
-    }
-
-    public async Task<DockerManagerMirrorCleanupResultDto> CleanupManagerMirrorsAsync(CancellationToken cancellationToken = default)
-    {
-        var result = new DockerManagerMirrorCleanupResultDto();
-        var stacks = await _dbContext.ManagedStacks.AsNoTracking().ToListAsync(cancellationToken);
-
-        foreach (var stack in stacks)
-        {
-            if (stack.ClientEnabled)
-            {
-                var mirror = Path.Combine(_clientOptions.RootPath, "stacks", stack.Id, "game");
-                if (Directory.Exists(mirror))
-                {
-                    var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(
-                        stack,
-                        DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id),
-                        cancellationToken);
-                    if (ClientBaseVolumeLooksPopulated(summary))
-                    {
-                        var freed = DirectorySize(mirror);
-                        Directory.Delete(mirror, recursive: true);
-                        result.FreedBytes += freed;
-                        result.RemovedPaths++;
-                        result.RemovedLabels.Add($"Client mirror ({stack.StackName})");
-                    }
-                }
-            }
-
-            if (stack.ArmoryEnabled)
-            {
-                var dataMirror = _armoryAssetsOptions.DataPathFor(stack.Id);
-                if (Directory.Exists(dataMirror))
-                {
-                    var volumeName = DockerComposeOverrideGenerator.ArmoryAssetsVolumeName(stack.Id);
-                    if (await _remoteEngine.VolumeExistsAsync(stack, volumeName, cancellationToken))
-                    {
-                        var files = await _remoteEngine.ListVolumeFilesAsync(stack, volumeName, cancellationToken);
-                        if (files.Count > 0)
-                        {
-                            var freed = DirectorySize(dataMirror);
-                            Directory.Delete(dataMirror, recursive: true);
-                            result.FreedBytes += freed;
-                            result.RemovedPaths++;
-                            result.RemovedLabels.Add($"Armory data mirror ({stack.StackName})");
-                        }
-                    }
-                }
-            }
-        }
-
-        // Remove entire legacy client/ tree when every client-enabled stack has files in its client-base volume.
-        var clientRoot = _clientOptions.RootPath;
-        if (Directory.Exists(clientRoot))
-        {
-            var clientStacks = stacks.Where(s => s.ClientEnabled).ToList();
-            var allVolumesReady = clientStacks.Count == 0;
-            if (clientStacks.Count > 0)
-            {
-                allVolumesReady = true;
-                foreach (var stack in clientStacks)
-                {
-                    var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(
-                        stack,
-                        DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id),
-                        cancellationToken);
-                    if (!ClientBaseVolumeLooksPopulated(summary))
-                    {
-                        allVolumesReady = false;
-                        break;
-                    }
-                }
-            }
-
-            if (allVolumesReady && Directory.EnumerateFileSystemEntries(clientRoot).Any())
-            {
-                var freed = DirectorySize(clientRoot);
-                Directory.Delete(clientRoot, recursive: true);
-                result.FreedBytes += freed;
-                result.RemovedPaths++;
-                result.RemovedLabels.Add("Legacy client mirror (entire client/ tree)");
-            }
-        }
-
-        result.Success = true;
-        result.Message = result.RemovedPaths > 0
-            ? $"Removed {result.RemovedPaths} legacy manager mirror(s). Freed about {FormatBytesShort(result.FreedBytes)}."
-            : "No legacy manager mirrors were found (or stack volumes were not verified).";
-        return result;
-    }
 
     public Task<DockerPlatformKeysDto> GetPlatformKeysStatusAsync(CancellationToken cancellationToken = default)
     {
@@ -1711,22 +1546,6 @@ public sealed class StackDockerService : IStackDockerService
         return full[prefix.Length..].Replace(Path.DirectorySeparatorChar, '/');
     }
 
-    private async Task<bool> IsManagerPathDeletableAsync(string normalizedRelative, CancellationToken cancellationToken)
-    {
-        if (!IsManagerPathDeletableCandidate(normalizedRelative))
-        {
-            return false;
-        }
-
-        if (IsClientLegacyMirrorPath(normalizedRelative))
-        {
-            var (allowed, _) = await EvaluateClientMirrorDeletionAsync(normalizedRelative, cancellationToken);
-            return allowed;
-        }
-
-        return true;
-    }
-
     private static bool IsManagerPathDeletableCandidate(string normalizedRelative)
     {
         if (string.IsNullOrEmpty(normalizedRelative))
@@ -1751,12 +1570,14 @@ public sealed class StackDockerService : IStackDockerService
             return false;
         }
 
-        if (IsClientLegacyMirrorPath(rel))
+        if (rel.Equals("client", StringComparison.OrdinalIgnoreCase)
+            || rel.StartsWith("client/", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        if (IsArmoryLegacyDataMirrorPath(rel))
+        if (rel.StartsWith("armory-assets/stacks/", StringComparison.OrdinalIgnoreCase)
+            && rel.Contains("/static/data", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -1771,107 +1592,21 @@ public sealed class StackDockerService : IStackDockerService
         return false;
     }
 
-    private static bool IsClientLegacyMirrorPath(string rel)
-        => rel.Equals("client", StringComparison.OrdinalIgnoreCase)
-            || rel.StartsWith("client/", StringComparison.OrdinalIgnoreCase);
-
-    private async Task<(bool Allowed, List<string> Blockers)> EvaluateClientMirrorDeletionAsync(
-        string normalizedRelative,
-        CancellationToken cancellationToken)
-    {
-        var blockers = new List<string>();
-        var stacks = await _dbContext.ManagedStacks.AsNoTracking().Where(s => s.ClientEnabled).ToListAsync(cancellationToken);
-        if (stacks.Count == 0)
-        {
-            return (true, blockers);
-        }
-
-        IEnumerable<ManagedStackEntity> affected = stacks;
-        if (TryParseClientMirrorStackId(normalizedRelative, out var stackId))
-        {
-            affected = stacks.Where(s => s.Id.Equals(stackId, StringComparison.OrdinalIgnoreCase));
-            if (!affected.Any())
-            {
-                return (true, blockers);
-            }
-        }
-
-        foreach (var stack in affected)
-        {
-            var volumeName = DockerComposeOverrideGenerator.ClientBaseVolumeName(stack.Id);
-            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
-            if (ClientBaseVolumeLooksPopulated(summary))
-            {
-                continue;
-            }
-
-            blockers.Add(
-                $"{stack.StackName}: acore-{stack.Id}-client-base is missing Wow.exe/Data MPQs ({summary.FileCount} files, {FormatBytesShort(summary.TotalBytes)})");
-        }
-
-        return (blockers.Count == 0, blockers);
-    }
-
-    private static bool TryParseClientMirrorStackId(string normalizedRelative, out string stackId)
-    {
-        stackId = string.Empty;
-        var rel = normalizedRelative.Replace('\\', '/').Trim('/');
-        const string prefix = "client/stacks/";
-        if (!rel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var rest = rel[prefix.Length..];
-        var slash = rest.IndexOf('/');
-        stackId = slash >= 0 ? rest[..slash] : rest;
-        return !string.IsNullOrWhiteSpace(stackId);
-    }
-
-    private static bool ClientBaseVolumeLooksPopulated(VolumeTreeSummary summary)
-        => summary.HasWowExe || summary.HasDataMpq;
-
-    private static bool LooksLikeWoWClientRoot(string dir)
-        => Directory.EnumerateFiles(dir, "Wow.exe").Any()
-            || Directory.EnumerateFiles(dir, "WoW.exe").Any()
-            || (Directory.Exists(Path.Combine(dir, "Data"))
-                && Directory.EnumerateFiles(Path.Combine(dir, "Data"), "*.MPQ").Any());
-
-    /// <summary>
-    /// Legacy armory 3D dataset mirror paths. Styling/config under static/ (outside data/) stays protected.
-    /// </summary>
-    private static bool IsArmoryLegacyDataMirrorPath(string rel)
-    {
-        if (!rel.StartsWith("armory-assets/", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // armory-assets/stacks/{id}/static/data/...
-        const string prefix = "armory-assets/stacks/";
-        if (!rel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var rest = rel[prefix.Length..];
-        var staticDataIdx = rest.IndexOf("/static/data", StringComparison.OrdinalIgnoreCase);
-        return staticDataIdx >= 0;
-    }
-
     private static string? DescribeManagerEntry(string relativePath, bool isDirectory)
     {
         if (relativePath.StartsWith("client/", StringComparison.OrdinalIgnoreCase)
             || relativePath.Equals("client", StringComparison.OrdinalIgnoreCase))
         {
             return isDirectory
-                ? "Legacy client upload mirror on the manager. Only removable when that stack's client-base Docker volume is verified."
-                : "Legacy client mirror file.";
+                ? "Leftover manager client files. Client data lives in per-stack Docker volumes."
+                : "Leftover manager client file.";
         }
 
-        if (IsArmoryLegacyDataMirrorPath(relativePath.Replace('\\', '/').Trim('/')))
+        var rel = relativePath.Replace('\\', '/').Trim('/');
+        if (rel.StartsWith("armory-assets/stacks/", StringComparison.OrdinalIgnoreCase)
+            && rel.Contains("/static/data", StringComparison.OrdinalIgnoreCase))
         {
-            return "Legacy armory 3D data mirror (safe to remove when the armory-assets volume has the dataset).";
+            return "Leftover armory 3D data on the manager. Live data is on the stack volume.";
         }
 
         if (relativePath.StartsWith("armory-assets/", StringComparison.OrdinalIgnoreCase))

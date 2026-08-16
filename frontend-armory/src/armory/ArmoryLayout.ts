@@ -5,7 +5,7 @@ import {
 	buildDefaultSiteLayout,
 	buildPageTemplate,
 	getPageLayout,
-	migrateLayoutToV2,
+	ensureSiteLayout,
 	type ArmoryPageLayoutConfig,
 	type ArmorySiteLayoutConfig,
 } from "./ArmoryLayoutPages";
@@ -141,30 +141,6 @@ export function loadArmoryLayout(): ArmoryLayoutConfig {
 	};
 }
 
-/** Accepts camelCase (preferred) or legacy PascalCase JSON from older manager builds. */
-function normalizeLayoutFromDisk(raw: Record<string, unknown>): ArmoryLayoutConfig {
-	const gridRaw = (pick(raw, "grid", "Grid") ?? {}) as Record<string, unknown>;
-	const widgetsRaw = pick(raw, "widgets", "Widgets");
-	const navbarRaw = pick(raw, "navbar", "Navbar");
-
-	const widgets = Array.isArray(widgetsRaw)
-		? widgetsRaw
-				.map((entry) => normalizeWidgetFromDisk(entry as Record<string, unknown>))
-				.filter((widget): widget is ArmoryLayoutWidget => widget !== null)
-		: [];
-
-	return {
-		version: readNumber(raw, "version", "Version", 1),
-		grid: {
-			columns: readNumber(gridRaw, "columns", "Columns", 12),
-			rowHeight: readNumber(gridRaw, "rowHeight", "RowHeight", 48),
-			gap: readNumber(gridRaw, "gap", "Gap", 12),
-		},
-		widgets,
-		navbar: normalizeNavbarFromDisk(navbarRaw as Record<string, unknown> | undefined),
-	};
-}
-
 function normalizeSiteLayoutFromDisk(raw: Record<string, unknown>): ArmorySiteLayoutConfig {
 	const version = readNumber(raw, "version", "Version", 1);
 	const navbar = normalizeNavbarFromDisk(pick(raw, "navbar", "Navbar") as Record<string, unknown> | undefined);
@@ -175,18 +151,10 @@ function normalizeSiteLayoutFromDisk(raw: Record<string, unknown>): ArmorySiteLa
 		for (const [pageId, entry] of Object.entries(pagesRaw as Record<string, unknown>)) {
 			pages[pageId] = normalizePageLayoutFromDisk(entry as Record<string, unknown>, pageId);
 		}
-		return migrateLayoutToV2({ version, navbar, pages });
+		return ensureSiteLayout({ version, navbar, pages });
 	}
 
-	const legacy = normalizeLayoutFromDisk(raw);
-	return migrateLayoutToV2({
-		version: legacy.version,
-		navbar: legacy.navbar,
-		grid: legacy.grid,
-		widgets: legacy.widgets,
-		templateId: readString(raw, "templateId", "TemplateId") || undefined,
-		pages: {},
-	});
+	return buildDefaultSiteLayout();
 }
 
 function normalizePageLayoutFromDisk(raw: Record<string, unknown>, pageId: string): ArmoryPageLayoutConfig {

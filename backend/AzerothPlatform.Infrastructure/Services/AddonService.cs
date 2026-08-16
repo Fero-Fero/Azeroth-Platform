@@ -165,26 +165,20 @@ public sealed class AddonService : IAddonService
         },
     ];
 
-    private readonly ClientDistributionOptions _clientOptions;
     private readonly DockerOptions _dockerOptions;
-    private readonly IClientDistributionService _clientDistribution;
     private readonly IStackLauncherService _stackLauncher;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AddonService> _logger;
     private readonly AzerothCoreDbContext _dbContext;
 
     public AddonService(
-        IOptions<ClientDistributionOptions> clientOptions,
         IOptions<DockerOptions> dockerOptions,
-        IClientDistributionService clientDistribution,
         IStackLauncherService stackLauncher,
         IHttpClientFactory httpClientFactory,
         ILogger<AddonService> logger,
         AzerothCoreDbContext dbContext)
     {
-        _clientOptions = clientOptions.Value;
         _dockerOptions = dockerOptions.Value;
-        _clientDistribution = clientDistribution;
         _stackLauncher = stackLauncher;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
@@ -445,26 +439,27 @@ public sealed class AddonService : IAddonService
 
     private string ResolveAddonsDir(string? stackId)
     {
-        string clientRoot;
         if (string.IsNullOrWhiteSpace(stackId))
         {
-            clientRoot = _clientOptions.RootPath;
-        }
-        else
-        {
-            var baseDir = Path.IsPathRooted(_dockerOptions.BuildsPath)
-                ? _dockerOptions.BuildsPath
-                : Path.GetFullPath(_dockerOptions.BuildsPath);
-            clientRoot = Path.Combine(baseDir, stackId, MigrationLayout.ClientDirName);
+            throw new ArgumentException("A stack id is required.", nameof(stackId));
         }
 
+        var baseDir = Path.IsPathRooted(_dockerOptions.BuildsPath)
+            ? _dockerOptions.BuildsPath
+            : Path.GetFullPath(_dockerOptions.BuildsPath);
+        var clientRoot = Path.Combine(baseDir, stackId, MigrationLayout.ClientDirName);
         return Path.Combine(clientRoot, GameDirName, AddonsRelativeDir);
     }
 
-    private Task RescanAsync(string? stackId, CancellationToken cancellationToken) =>
-        string.IsNullOrWhiteSpace(stackId)
-            ? _clientDistribution.RescanAsync(cancellationToken)
-            : _stackLauncher.RescanAsync(stackId, cancellationToken);
+    private Task RescanAsync(string? stackId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(stackId))
+        {
+            throw new ArgumentException("A stack id is required.", nameof(stackId));
+        }
+
+        return _stackLauncher.RescanAsync(stackId, cancellationToken);
+    }
 
     private static AddonListDto BuildList(string? stackId, string addonsDir)
     {

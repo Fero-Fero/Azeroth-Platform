@@ -135,11 +135,6 @@ export interface ArmoryLayoutDto {
   version: number
   navbar?: ArmoryNavbarDto
   pages: Partial<Record<ArmoryPageId, ArmoryPageLayoutDto>>
-  /** @deprecated V1 — migrated to pages.home on load */
-  mode?: ArmoryLayoutMode
-  templateId?: ArmoryLayoutTemplateId
-  grid?: ArmoryLayoutGridDto
-  widgets?: ArmoryLayoutWidgetDto[]
 }
 
 export type ArmoryNavbarLinkKind = 'Home' | 'TopLogs' | 'Map' | 'Connect' | 'News' | 'Custom'

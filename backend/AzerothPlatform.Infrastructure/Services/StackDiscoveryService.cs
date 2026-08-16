@@ -111,7 +111,7 @@ public class StackDiscoveryService : IStackDiscoveryService
         var coreRepoPath = Path.Combine(stackPath, "azerothcore-wotlk");
         var modules = DiscoverModules(coreRepoPath);
         var envData = ReadEnvFile(coreRepoPath);
-        var customEnvVars = ReadDockerComposeOverride(coreRepoPath);
+        var discoveredEnvVars = ReadDockerComposeOverride(coreRepoPath);
         
         _logger.LogDebug("Stack {StackId}: Modules={ModuleCount}, HasDbPassword={HasPassword}, HasSoapUsername={HasSoapUser}",
             stackId, modules?.Count ?? 0, !string.IsNullOrEmpty(envData.DatabasePassword), !string.IsNullOrEmpty(envData.SoapUsername));
@@ -136,7 +136,7 @@ public class StackDiscoveryService : IStackDiscoveryService
             DiscoveredDatabasePassword = envData.DatabasePassword,
             DiscoveredSoapUsername = envData.SoapUsername,
             DiscoveredSoapPassword = envData.SoapPassword,
-            DiscoveredEnvVars = customEnvVars
+            DiscoveredEnvVars = discoveredEnvVars
         };
 
         _logger.LogInformation(

@@ -1324,7 +1324,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
 │       ├── dbc/**                   CSV, .txt, or .dbc files (subfolders allowed)
 │       ├── map/**                   map files (subfolders allowed)
 │       └── mpq/*.mpq                client patch archives (not patch-D.MPQ)
-│           remove.json              optional — { "remove": "Patch-L.MPQ" } retires a published MPQ on apply
+│           mpq.json                 optional — { "remove": ["Patch-L.MPQ"] } retires a published MPQ on apply
 
 Flat layout also works:
 └── patch 1.1/sql/world/...         at the zip root when expansion folders are omitted`}
@@ -1333,9 +1333,10 @@ Flat layout also works:
           <p className="text-xs text-gray-500">
             Patch descriptions default to <span className="font-mono">no description</span> unless{' '}
             <span className="font-mono">description.md</span> or <span className="font-mono">description.txt</span> is
-            included in the patch folder. To retire a published client MPQ on apply, add a JSON file under{' '}
-            <span className="font-mono">mpq/</span> such as{' '}
-            <span className="font-mono">{'{ "remove": "Patch-L.MPQ" }'}</span> (case-insensitive file name).
+            included in the patch folder. To retire a published client MPQ on apply, add{' '}
+            <span className="font-mono">mpq/mpq.json</span> with a{' '}
+            <span className="font-mono">remove</span> array such as{' '}
+            <span className="font-mono">{'{ "remove": ["Patch-L.MPQ"] }'}</span>.
           </p>
 
           <button

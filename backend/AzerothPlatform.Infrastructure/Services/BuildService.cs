@@ -106,7 +106,8 @@ public sealed class BuildService : IBuildService
             {
                 MaxPlayers = stack.MaxPlayers,
                 RealmName = stack.RealmName,
-                CustomEnvVars = JsonSerializer.Deserialize<Dictionary<string, string>>(stack.CustomEnvVarsJson) ?? new Dictionary<string, string>()
+                ServiceEnvVars = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(stack.ServiceEnvVarsJson)
+                    ?? new Dictionary<string, Dictionary<string, string>>()
             }
         };
         
@@ -681,14 +682,6 @@ public sealed class BuildService : IBuildService
             {
                 serviceEnvironment[serviceId] = bucket ?? new Dictionary<string, string>();
             }
-        }
-
-        // Fold legacy flat vars into the worldserver bucket when the caller only sent flat vars.
-        var legacy = config.Advanced.CustomEnvVars ?? new Dictionary<string, string>();
-        if (legacy.Count > 0
-            && (!serviceEnvironment.TryGetValue(ServiceEnvTemplateService.Worldserver, out var world) || world.Count == 0))
-        {
-            serviceEnvironment[ServiceEnvTemplateService.Worldserver] = legacy;
         }
 
         return DockerComposeOverrideGenerator.Generate(stackId, config.StackName, serviceEnvironment, includeLua);

@@ -29,8 +29,7 @@ import { cn } from '@/lib/utils'
 import type { AddonCatalogEntryDto } from '@/types/addon.types'
 
 interface AddonsManagerProps {
-  /** Omit for the global client; pass a stack id to manage that stack's client. */
-  stackId?: string
+  stackId: string
 }
 
 function formatBytes(bytes: number): string {

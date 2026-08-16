@@ -317,7 +317,7 @@ export default function GlobalDockerPage() {
           title="Delete from manager volume?"
           message={
             confirmManagerDir.name === 'client'
-              ? `Remove ${confirmManagerDir.name}/ from the manager volume? This only deletes the legacy manager copy — but if stack client-base Docker volumes are empty, your stacks will lose their clients.`
+              ? `Remove ${confirmManagerDir.name}/ from the manager volume? Client data lives in per-stack Docker volumes, so this only deletes leftover manager files.`
               : `Remove ${confirmManagerDir.name}/ and everything inside it from the manager volume?`
           }
           onCancel={() => setConfirmManagerDir(null)}
@@ -805,8 +805,7 @@ function ManagerPanel({
         <div className="border-b border-blue-100 bg-blue-50/30">
           <div className="border-b border-blue-100 px-4 py-2">
             <p className="text-xs text-blue-900/80">
-              Inspect platform data, migrate legacy client mirrors, or remove deletable files from the manager
-              volume.
+              Inspect platform data or remove deletable files from the manager volume.
             </p>
           </div>
           <ManagerVolumeBrowser />

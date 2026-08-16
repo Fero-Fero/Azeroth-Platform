@@ -6,7 +6,7 @@ namespace AzerothPlatform.Api.Controllers;
 
 /// <summary>
 /// Manages addons served through a <b>specific stack's</b> client
-/// (<c>api/stacks/{stackId}/addons</c>). Mirrors <see cref="AddonsController"/> for per-stack roots.
+/// (<c>api/stacks/{stackId}/addons</c>).
 /// </summary>
 [Authorize]
 [ApiController]

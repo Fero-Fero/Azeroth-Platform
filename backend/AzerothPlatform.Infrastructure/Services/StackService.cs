@@ -307,7 +307,7 @@ public sealed class StackService : IStackService
             ? existingDraft.ClientPort
             : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultClientPort, armoryPort);
 
-        var (serviceEnvJson, worldserverEnvJson) = BuildEnvJson(configuration.Advanced);
+        var serviceEnvJson = BuildEnvJson(configuration.Advanced);
 
         var protectedSshPrivateKey = string.Empty;
         if (deployment.Target == DeploymentTarget.External)
@@ -333,7 +333,6 @@ public sealed class StackService : IStackService
         stack.ClientEnabled = true;
         stack.MaxPlayers = configuration.Advanced.MaxPlayers;
         stack.RealmName = configuration.Advanced.RealmName.Trim();
-        stack.CustomEnvVarsJson = worldserverEnvJson;
         stack.ServiceEnvVarsJson = serviceEnvJson;
         stack.RealmlistHostOverride = realmlistHost;
         stack.DeploymentTarget = deployment.Target;
@@ -462,7 +461,6 @@ public sealed class StackService : IStackService
             Status = StackStatus.SetupIncomplete,
             ServerType = ServerType.Standard,
             ModuleIdsJson = "[]",
-            CustomEnvVarsJson = "{}",
             ServiceEnvVarsJson = "{}",
             AppliedPatchesJson = "[]",
             ClientEnabled = true,
@@ -770,9 +768,7 @@ public sealed class StackService : IStackService
         stack.SoapPort = configuration.Ports.SoapPort;
         stack.MaxPlayers = configuration.Advanced.MaxPlayers;
         stack.RealmName = configuration.Advanced.RealmName.Trim();
-        var (updatedServiceEnvJson, updatedWorldserverEnvJson) = BuildEnvJson(configuration.Advanced);
-        stack.CustomEnvVarsJson = updatedWorldserverEnvJson;
-        stack.ServiceEnvVarsJson = updatedServiceEnvJson;
+        stack.ServiceEnvVarsJson = BuildEnvJson(configuration.Advanced);
         stack.RealmlistHostOverride = RealmlistHostResolver.NormalizeHost(configuration.Advanced.RealmlistHost ?? string.Empty);
         ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
 
@@ -2556,9 +2552,6 @@ public sealed class StackService : IStackService
         }
     }
 
-    private Task<int> AllocateArmoryPortAsync(CancellationToken cancellationToken)
-        => AllocateStackPortAsync(cancellationToken);
-
     /// <summary>
     /// Picks a host port for a new stack service (armory, client, ...) that does not collide with any
     /// port already used by an existing stack (armory, client, database, world, auth, or SOAP) nor with
@@ -3173,8 +3166,6 @@ public sealed class StackService : IStackService
                     RealmName = stack.RealmName,
                     RealmlistHost = stack.RealmlistHostOverride,
                     ServiceEnvVars = BuildServiceEnvDto(stack),
-                    // Back-compat mirror of the worldserver bucket for legacy readers.
-                    CustomEnvVars = Deserialize<Dictionary<string, string>>(stack.CustomEnvVarsJson) ?? new Dictionary<string, string>()
                 },
                 Deployment = new DeploymentConfigDto
                 {
@@ -4112,18 +4103,10 @@ public sealed class StackService : IStackService
         var overridePath = Path.Combine(repoPath, "docker-compose.override.yml");
         var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
 
-        // Older stacks (created before the armory feature) have no port assigned yet.
-        if (stack.ArmoryPort == 0)
+        if (stack.ArmoryPort <= 0 || stack.ClientPort <= 0)
         {
-            stack.ArmoryPort = await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultArmoryPort);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        // Older stacks (created before the client-server feature) have no client port assigned yet.
-        if (stack.ClientPort == 0)
-        {
-            stack.ClientPort = await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultClientPort, stack.ArmoryPort);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"Stack '{stack.StackName}' is missing required published ports (armory={stack.ArmoryPort}, client={stack.ClientPort}).");
         }
 
         // Generate and persist a random armory session secret on first use (independent of the DB
@@ -4335,18 +4318,9 @@ public sealed class StackService : IStackService
     }
 
     /// <summary>
-    /// Builds the per-service env map the override generator consumes from the stack's persisted
-    /// <see cref="ManagedStackEntity.ServiceEnvVarsJson"/>. Legacy flat vars (<c>CustomEnvVarsJson</c>,
-    /// still written by stack discovery) are folded into the worldserver bucket when it has none, so
-    /// pre-existing stacks keep applying their worldserver overrides after the migration.
+    /// Serializes the incoming advanced config's per-service env map for persistence.
     /// </summary>
-    /// <summary>
-    /// Normalizes the incoming advanced config into the two persisted JSON blobs: the per-service map
-    /// (<c>ServiceEnvVarsJson</c>) and the legacy worldserver mirror (<c>CustomEnvVarsJson</c>). Legacy
-    /// flat <see cref="AdvancedConfigDto.CustomEnvVars"/> seeds the worldserver bucket when the caller
-    /// only sent flat vars, so old clients keep working.
-    /// </summary>
-    private static (string ServiceEnvJson, string WorldserverEnvJson) BuildEnvJson(AdvancedConfigDto advanced)
+    private static string BuildEnvJson(AdvancedConfigDto advanced)
     {
         var perService = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
         foreach (var (serviceId, bucket) in advanced.ServiceEnvVars ?? new())
@@ -4361,36 +4335,14 @@ public sealed class StackService : IStackService
                 : new Dictionary<string, string>(bucket);
         }
 
-        var legacy = advanced.CustomEnvVars ?? new Dictionary<string, string>();
-        if (legacy.Count > 0
-            && (!perService.TryGetValue(ServiceEnvTemplateService.Worldserver, out var world) || world.Count == 0))
-        {
-            perService[ServiceEnvTemplateService.Worldserver] = new Dictionary<string, string>(legacy);
-        }
-
-        perService.TryGetValue(ServiceEnvTemplateService.Worldserver, out var worldserverBucket);
-        var worldserverJson = JsonSerializer.Serialize(
-            worldserverBucket ?? new Dictionary<string, string>(), JsonOptions);
-        var serviceJson = JsonSerializer.Serialize(perService, JsonOptions);
-        return (serviceJson, worldserverJson);
+        return JsonSerializer.Serialize(perService, JsonOptions);
     }
 
-    /// <summary>Reads the persisted per-service env map for the config DTO, folding legacy flat vars into worldserver.</summary>
+    /// <summary>Reads the persisted per-service env map for the config DTO.</summary>
     private Dictionary<string, Dictionary<string, string>> BuildServiceEnvDto(ManagedStackEntity stack)
     {
-        var perService = Deserialize<Dictionary<string, Dictionary<string, string>>>(stack.ServiceEnvVarsJson)
+        return Deserialize<Dictionary<string, Dictionary<string, string>>>(stack.ServiceEnvVarsJson)
             ?? new Dictionary<string, Dictionary<string, string>>();
-
-        var legacy = Deserialize<Dictionary<string, string>>(stack.CustomEnvVarsJson)
-            ?? new Dictionary<string, string>();
-
-        if (legacy.Count > 0
-            && (!perService.TryGetValue(ServiceEnvTemplateService.Worldserver, out var world) || world is null || world.Count == 0))
-        {
-            perService[ServiceEnvTemplateService.Worldserver] = legacy;
-        }
-
-        return perService;
     }
 
     private Dictionary<string, IReadOnlyDictionary<string, string>> BuildServiceEnvironment(ManagedStackEntity stack)
@@ -4398,19 +4350,10 @@ public sealed class StackService : IStackService
         var perService = Deserialize<Dictionary<string, Dictionary<string, string>>>(stack.ServiceEnvVarsJson)
             ?? new Dictionary<string, Dictionary<string, string>>();
 
-        var legacy = Deserialize<Dictionary<string, string>>(stack.CustomEnvVarsJson)
-            ?? new Dictionary<string, string>();
-
         var result = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
         foreach (var (serviceId, bucket) in perService)
         {
             result[serviceId] = bucket ?? new Dictionary<string, string>();
-        }
-
-        if (legacy.Count > 0
-            && (!result.TryGetValue(ServiceEnvTemplateService.Worldserver, out var world) || world.Count == 0))
-        {
-            result[ServiceEnvTemplateService.Worldserver] = legacy;
         }
 
         return result;
@@ -5137,7 +5080,10 @@ public sealed class StackService : IStackService
             MaxPlayers = 100,
             RealmName = "AzerothCore",
             ModuleIdsJson = JsonSerializer.Serialize(discovered.DiscoveredModules ?? new List<string>()),
-            CustomEnvVarsJson = JsonSerializer.Serialize(discovered.DiscoveredEnvVars ?? new Dictionary<string, string>()),
+            ServiceEnvVarsJson = JsonSerializer.Serialize(new Dictionary<string, Dictionary<string, string>>
+            {
+                [ServiceEnvTemplateService.Worldserver] = discovered.DiscoveredEnvVars ?? new Dictionary<string, string>(),
+            }),
             
             // Version info from git
             // IMPORTANT: Use discovered branch if available, otherwise infer from ServerType
@@ -5580,15 +5526,20 @@ public sealed class StackService : IStackService
             throw new StackNotFoundException($"Stack with ID '{stackId}' not found.");
         }
 
-        var existing = Deserialize<Dictionary<string, string>>(stack.CustomEnvVarsJson)
-            ?? new Dictionary<string, string>();
+        var perService = Deserialize<Dictionary<string, Dictionary<string, string>>>(stack.ServiceEnvVarsJson)
+            ?? new Dictionary<string, Dictionary<string, string>>();
+        if (!perService.TryGetValue(ServiceEnvTemplateService.Worldserver, out var existing) || existing is null)
+        {
+            existing = new Dictionary<string, string>();
+            perService[ServiceEnvTemplateService.Worldserver] = existing;
+        }
 
         foreach (var (key, value) in envVars)
         {
             existing[key] = value;
         }
 
-        stack.CustomEnvVarsJson = JsonSerializer.Serialize(existing, JsonOptions);
+        stack.ServiceEnvVarsJson = JsonSerializer.Serialize(perService, JsonOptions);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Applied {Count} module env var(s) to stack {StackId}", envVars.Count, stackId);

@@ -415,14 +415,3 @@ export function NewsLivePreviewSidebar({
     </aside>
   )
 }
-
-/** @deprecated Use LauncherNewsArticlePreview */
-export function LauncherNewsReadingPreview({
-  article,
-  accentColor,
-}: {
-  article: NewsPreviewArticle
-  accentColor?: string
-}) {
-  return <LauncherNewsArticlePreview article={article} accentColor={accentColor} />
-}

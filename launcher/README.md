@@ -7,7 +7,7 @@ client in sync with an Azeroth Platform backend, then launches the game.
 
 On start the launcher:
 
-1. Fetches the manifest and config from the manager backend (`/api/launcher/*`).
+1. Fetches the manifest and config from the selected stack's client-server portal (`/manifest`, `/portal`).
 2. Compares the manifest against the local install:
    - **First run:** downloads the full client.
    - **Later runs:** downloads only changed/added files; prunes managed files removed server-side.
@@ -26,9 +26,9 @@ The UI has three tabs:
 
 ## Multi-profile mode
 
-When built from the manager's **Launcher** page, the launcher runs in multi-profile mode: it fetches
-`GET /api/launcher/profiles` at runtime and shows every published stack as a selectable profile. New
-stacks appear automatically without rebuilding the launcher.
+When built from the manager's **Launcher** page, the launcher runs in multi-profile mode: it talks to
+each stack's own portal and shows every published stack as a selectable profile. New stacks appear
+automatically without rebuilding the launcher.
 
 One WoW install (`C:/Program Files/{AppName}`) is shared across profiles. The base client downloads
 once; each profile only overlays its custom MPQs and addons:
@@ -55,14 +55,14 @@ Server-provided addons are delivered automatically. The manager serves them unde
 `game/Interface/AddOns/` as **managed** files, so the launcher installs and updates them in sync with
 the client and removes any the server later drops. Players don't manage these in the launcher, and
 their own manually-installed addons are left alone. Admins add/remove them from the manager's
-**Addons** page (global) or a stack's **Addons** tab (per-stack).
+**Addons** tab (per-stack).
 
-### Global vs per-stack client
+### Per-stack client
 
-Leave **Stack** blank to download the global client (`/api/launcher/*`). Set it to a stack id to
-download that stack's patched client (`/api/stacks/{stackId}/launcher/*`) — used when a stack
-publishes MPQ patches through the migration/Patches system. The stack's realm name becomes the
-launcher branding and its auth port the realmlist port.
+The launcher always downloads from a stack's client-server container (`/manifest`, `/files/*`). There
+is no global manager client root. Each stack publishes its own patched client through the
+migration/Patches system. The stack's realm name becomes the launcher branding and its auth port the
+realmlist port.
 
 Downloads are resumable (HTTP range), run in parallel, and SHA-256 hashes are cached locally
 (`%APPDATA%/AzerothPlatformLauncher/launcher-state.json`) so the full client is not rehashed each launch.

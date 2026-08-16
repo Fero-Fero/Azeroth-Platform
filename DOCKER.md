@@ -161,18 +161,18 @@ environment:
   - Client__ManagedPrefixes__0=Data/patch-
 ```
 
-The launcher consumes these endpoints:
+The launcher talks to **each stack's client-server container** (portal, manifest, files, login), not
+the manager. Admin-only launcher **build** endpoints remain on the manager.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/launcher/config` | Launcher config + rendered settings files |
-| `GET /api/launcher/manifest` | File manifest (path, size, SHA-256, group) |
-| `GET /api/launcher/files/{path}` | Download a file (HTTP range / resume supported) |
-| `POST /api/launcher/rescan` | Rebuild the manifest after changing client files |
+| `GET /portal` | Stack portal (player launcher entry) |
+| `GET /manifest` | File manifest (path, size, SHA-256, group) |
+| `GET /files/{path}` | Download a file (HTTP range / resume supported) |
+| `POST /login` | Launcher account login |
 
-After adding or changing client files, restart the manager or call
-`POST /api/launcher/rescan`. Hashes are cached by path + size + modified-time, so
-unchanged multi-GB files are not re-hashed.
+After adding or changing client files, use the stack **Client** tab to rescan/rebuild the manifest.
+Hashes are cached by path + size + modified-time, so unchanged multi-GB files are not re-hashed.
 
 ### Compiling the launcher (docker sidecar)
 
@@ -210,19 +210,16 @@ Launcher-distribution endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/launcher/profiles` | Aggregated multi-profile document (global branding + visible stacks) |
-| `GET /api/launcher/assets/{background\|logo\|news}` | Global default branding assets |
-| `GET /api/stacks/{id}/launcher/profile-asset/{background\|logo\|news}` | Per-profile branding assets |
-| `GET/PUT /api/launcher-admin/config` | Global launcher config (website) |
-| `POST /api/launcher-admin/assets/{kind}` | Upload global background/logo |
-| `GET/PUT /api/launcher-admin/stacks/{id}/profile` | Per-stack profile config |
+| `GET /api/stacks/{id}/launcher/profile-asset/{background\|logo\|news}` | Per-profile branding assets (admin dashboard) |
 | `POST /api/launcher-build` · `GET /api/launcher-build/status` · `GET /api/launcher-build/download` | Compile / poll / download |
 
-Global launcher config is stored at `/app/data/launcher/` (JSON + assets). Per-stack branding assets
-are stored under each stack's `client/launcher-profile/`. The shared base client is served from the
-global client root; per-stack roots stay overlay-only, so switching profiles in the launcher never
-re-downloads base MPQs. Per-stack profile metadata (visibility, display name, sort order, realmlist
-host override) lives in new `ManagedStacks` columns (`AddLauncherProfileColumns` migration).
+Players fetch the launcher and client from the stack portal, not from `/api/launcher/profiles` or
+`/api/launcher/manifest`. Admin preview assets (`GET /api/launcher/news-image/{id}`,
+`GET /api/launcher/templates/{id}/{asset}`) stay on the manager for the dashboard.
+
+Per-stack branding assets are stored under each stack's `client/launcher-profile/`. Per-stack profile
+metadata (visibility, display name, sort order, realmlist host override) lives in `ManagedStacks`
+columns (`AddLauncherProfileColumns` migration).
 
 ## Armory image & assets
 

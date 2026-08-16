@@ -98,7 +98,7 @@ public sealed class IndividualProgressionRecreateTests
     }
 
     [Fact]
-    public async Task RecreateMissingPatchesAsync_removes_legacy_placeholder_patches()
+    public async Task RecreateMissingPatchesAsync_removes_placeholder_patches()
     {
         var stackId = "ip-recreate-legacy";
         var buildsPath = Path.Combine(Path.GetTempPath(), "azp-ip-recreate-legacy-" + Guid.NewGuid().ToString("N"));
@@ -117,15 +117,15 @@ public sealed class IndividualProgressionRecreateTests
             await service.BootstrapAsync(stackId);
             SeedTestProgressionRepo(stackRoot);
             SeedStackPatchesFromRepo(stackRoot);
-            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 1");
-            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 2");
-            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 3");
+            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 1.0");
+            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 2.0");
+            MigrationLayout.EnsurePatchDirectories(stackRoot, "patch 3.0");
 
             await service.RecreateMissingPatchesAsync(stackId);
 
-            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 1")).Should().BeFalse();
-            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 2")).Should().BeFalse();
-            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 3")).Should().BeFalse();
+            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 1.0")).Should().BeFalse();
+            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 2.0")).Should().BeFalse();
+            Directory.Exists(MigrationLayout.PatchDir(stackRoot, "patch 3.0")).Should().BeFalse();
         }
         finally
         {

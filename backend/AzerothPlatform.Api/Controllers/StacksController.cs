@@ -387,16 +387,6 @@ public class StacksController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    [HttpDelete("{stackId}/docker/images/{imageId}")]
-    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteDockerImageLegacy(
-        string stackId,
-        string imageId,
-        CancellationToken cancellationToken)
-    {
-        var result = await _stackDockerService.DeleteImageAsync(stackId, Uri.UnescapeDataString(imageId), cancellationToken);
-        return result.Success ? Ok(result) : BadRequest(result);
-    }
-
     [HttpDelete("{stackId}/docker/volumes/{volumeName}")]
     public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteDockerVolume(
         string stackId,

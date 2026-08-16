@@ -43,15 +43,6 @@ public class DockerController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
-    [HttpDelete("images/{imageId}")]
-    public async Task<ActionResult<StackDockerDeleteResultDto>> DeleteEngineImageLegacy(
-        string imageId,
-        CancellationToken cancellationToken)
-    {
-        var result = await _stackDockerService.DeleteEngineImageAsync(Uri.UnescapeDataString(imageId), cancellationToken);
-        return result.Success ? Ok(result) : BadRequest(result);
-    }
-
     [HttpGet("disk")]
     public async Task<ActionResult<DockerDiskUsageDto>> GetDiskUsage(CancellationToken cancellationToken)
         => Ok(await _stackDockerService.GetDiskUsageAsync(cancellationToken));
@@ -82,16 +73,6 @@ public class DockerController : ControllerBase
         var result = await _stackDockerService.DeleteManagerFileAsync(path, cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
-
-    [HttpPost("manager/cleanup-mirrors")]
-    public async Task<ActionResult<DockerManagerMirrorCleanupResultDto>> CleanupManagerMirrors(
-        CancellationToken cancellationToken)
-        => Ok(await _stackDockerService.CleanupManagerMirrorsAsync(cancellationToken));
-
-    [HttpPost("manager/migrate-client-mirrors")]
-    public async Task<ActionResult<DockerManagerMirrorCleanupResultDto>> MigrateClientMirrors(
-        CancellationToken cancellationToken)
-        => Ok(await _stackDockerService.MigrateClientMirrorsToVolumesAsync(cancellationToken));
 
     [HttpGet("platform-keys")]
     public async Task<ActionResult<DockerPlatformKeysDto>> GetPlatformKeys(CancellationToken cancellationToken)

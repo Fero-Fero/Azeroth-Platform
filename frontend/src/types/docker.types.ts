@@ -271,11 +271,3 @@ export interface DockerPlatformKeysDto {
   keys: DockerPlatformKeyStatusDto[]
   detail: string
 }
-
-export interface DockerManagerMirrorCleanupResultDto {
-  success: boolean
-  message: string
-  freedBytes: number
-  removedPaths: number
-  removedLabels: string[]
-}

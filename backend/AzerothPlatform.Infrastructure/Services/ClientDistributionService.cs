@@ -2,16 +2,13 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
-using AzerothPlatform.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace AzerothPlatform.Infrastructure.Services;
 
 /// <summary>
 /// Generates and serves WoW client manifests and launcher configuration from files placed under a
-/// client root. Works for both the global client root (<see cref="ClientDistributionOptions"/>) and
-/// per-stack roots via <see cref="ClientDistributionContext"/>.
+/// per-stack client root via <see cref="ClientDistributionContext"/>.
 /// SHA-256 hashes are cached by path + size + mtime so multi-GB clients are not rehashed on every request.
 /// </summary>
 public sealed class ClientDistributionService : IClientDistributionService
@@ -29,52 +26,20 @@ public sealed class ClientDistributionService : IClientDistributionService
         WriteIndented = true
     };
 
-    private readonly ClientDistributionOptions _options;
     private readonly ILogger<ClientDistributionService> _logger;
     private readonly IManifestSigningKeyProvider _signingKeys;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    // Manifest cache keyed by client root path (supports the global root and many per-stack roots).
+    // Manifest cache keyed by client root path.
     private readonly ConcurrentDictionary<string, ClientManifest> _manifestCache = new(StringComparer.Ordinal);
 
     public ClientDistributionService(
-        IOptions<ClientDistributionOptions> options,
         ILogger<ClientDistributionService> logger,
         IManifestSigningKeyProvider signingKeys)
     {
-        _options = options.Value;
         _logger = logger;
         _signingKeys = signingKeys;
     }
-
-    /// <summary>Builds the context describing the global client root from configuration.</summary>
-    private ClientDistributionContext GlobalContext => new()
-    {
-        RootPath = _options.RootPath,
-        GameExecutable = _options.GameExecutable,
-        LaunchArguments = _options.LaunchArguments,
-        ClientVersion = _options.ClientVersion,
-        BrandingTitle = _options.BrandingTitle,
-        RealmlistHost = _options.Realmlist.Host,
-        RealmlistPort = _options.Realmlist.Port,
-        ManagedPrefixes = _options.ManagedPrefixes
-    };
-
-    // ===== Global (backward-compatible) API =====
-
-    public Task<ClientManifest> GetManifestAsync(CancellationToken cancellationToken = default)
-        => GetManifestAsync(GlobalContext, cancellationToken);
-
-    public Task<ClientManifest> RescanAsync(CancellationToken cancellationToken = default)
-        => RescanAsync(GlobalContext, cancellationToken);
-
-    public Task<LauncherConfigDto> GetLauncherConfigAsync(CancellationToken cancellationToken = default)
-        => GetLauncherConfigAsync(GlobalContext, cancellationToken);
-
-    public string? ResolveFilePath(string relativePath)
-        => ResolveFilePath(GlobalContext, relativePath);
-
-    // ===== Context-scoped API =====
 
     public async Task<ClientManifest> GetManifestAsync(ClientDistributionContext context, CancellationToken cancellationToken = default)
     {
@@ -92,9 +57,6 @@ public sealed class ClientDistributionService : IClientDistributionService
         ClearHashCache(context);
         return await BuildManifestAsync(context, cancellationToken);
     }
-
-    public Task<ClientManifest> ForceVerifyAsync(CancellationToken cancellationToken = default)
-        => ForceVerifyAsync(GlobalContext, cancellationToken);
 
     public async Task<ClientManifest> ForceVerifyAsync(ClientDistributionContext context, CancellationToken cancellationToken = default)
     {

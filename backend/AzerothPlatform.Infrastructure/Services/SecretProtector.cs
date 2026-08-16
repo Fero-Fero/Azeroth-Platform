@@ -8,16 +8,14 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// <summary>
 /// Symmetric authenticated encryption for sensitive values stored at rest (e.g. external-engine SSH
 /// private keys in SQLite). Uses AES-256-GCM with a random data key persisted in the protected data
-/// volume. Ciphertext is tagged with a version marker so legacy plaintext values keep working and are
-/// transparently re-encrypted on their next write.
+/// volume. Ciphertext is tagged with a version marker; values without the marker are rejected.
 /// </summary>
 public interface ISecretProtector
 {
     /// <summary>Encrypts a plaintext value into a marker-prefixed, base64 token. Blank in → blank out.</summary>
     string Protect(string? plaintext);
 
-    /// <summary>Decrypts a token produced by <see cref="Protect"/>. Values without the marker (legacy
-    /// plaintext) are returned unchanged so existing data still works.</summary>
+    /// <summary>Decrypts a token produced by <see cref="Protect"/>. Values without the marker are rejected.</summary>
     string Unprotect(string? protectedValue);
 
     /// <summary>True when a value is already in the encrypted-at-rest format.</summary>
@@ -75,7 +73,7 @@ public sealed class SecretProtector : ISecretProtector
 
         if (!IsProtected(protectedValue))
         {
-            return protectedValue; // legacy plaintext
+            throw new CryptographicException("Protected value is missing the encryption marker.");
         }
 
         var combined = Convert.FromBase64String(protectedValue[Marker.Length..]);

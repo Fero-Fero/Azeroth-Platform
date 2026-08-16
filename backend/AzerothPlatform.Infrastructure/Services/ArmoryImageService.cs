@@ -221,7 +221,6 @@ public sealed class ArmoryImageService : IArmoryImageService
     private void EnsureLayoutShell(string staticPath, string stackId)
     {
         EnsureLayoutTemplate(staticPath);
-        RemoveDeprecatedVideoWallpaper(staticPath);
         EnsureThemeStylesheet(staticPath, stackId);
         EnsureLayoutStylesheet(staticPath, stackId);
         EnsureResponsiveStylesheet(staticPath);
@@ -638,8 +637,6 @@ public sealed class ArmoryImageService : IArmoryImageService
         }
 
         var relativePath = wallpaper;
-        PatchLegacyWallpaperReferences(staticPath, relativePath);
-        EnsureLegacyWallpaperImage(staticPath, relativePath);
         var src = "{{websiteRoot}}/" + relativePath;
         var markup =
             $"<div class=\"azp-wallpaper\" aria-hidden=\"true\" style=\"position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;\">"
@@ -794,110 +791,6 @@ public sealed class ArmoryImageService : IArmoryImageService
         {
             File.WriteAllText(destTheme, block);
         }
-    }
-
-    /// <summary>
-    /// Removes the deprecated full-screen mp4 <c>&lt;video class="bg-video"&gt;</c> wallpaper from
-    /// <c>layout.hbs</c>. Image wallpapers are injected separately via <see cref="InjectWallpaper"/>.
-    /// </summary>
-    private static void RemoveDeprecatedVideoWallpaper(string staticPath)
-    {
-        var layoutPath = Path.Combine(staticPath, "layout.hbs");
-        if (!File.Exists(layoutPath))
-        {
-            return;
-        }
-
-        var content = File.ReadAllText(layoutPath);
-        if (!content.Contains("bg-video", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var updated = StripDeprecatedVideoWallpaperMarkup(content);
-        if (content != updated)
-        {
-            File.WriteAllText(layoutPath, updated);
-        }
-    }
-
-    internal static string StripDeprecatedVideoWallpaperMarkup(string content)
-        => Regex.Replace(
-            content,
-            @"\s*<video\b[^>]*\bbg-video\b[^>]*>[\s\S]*?</video>\s*",
-            "\n",
-            RegexOptions.IgnoreCase);
-
-    private void PatchLegacyWallpaperReferences(string staticPath, string wallpaperRelativePath)
-    {
-        var legacyRefs = new[]
-        {
-            "img/bg/wallpaper.jpg",
-            "/img/bg/wallpaper.jpg",
-            "../img/bg/wallpaper.jpg",
-            "{{websiteRoot}}/img/bg/wallpaper.jpg"
-        };
-
-        var replacements = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["img/bg/wallpaper.jpg"] = wallpaperRelativePath,
-            ["/img/bg/wallpaper.jpg"] = "/" + wallpaperRelativePath,
-            ["../img/bg/wallpaper.jpg"] = "../" + wallpaperRelativePath,
-            ["{{websiteRoot}}/img/bg/wallpaper.jpg"] = "{{websiteRoot}}/" + wallpaperRelativePath
-        };
-
-        foreach (var file in Directory.EnumerateFiles(staticPath, "*", SearchOption.AllDirectories))
-        {
-            var extension = Path.GetExtension(file);
-            if (!IsTextAsset(extension))
-            {
-                continue;
-            }
-
-            var content = File.ReadAllText(file);
-            if (!legacyRefs.Any(reference => content.Contains(reference, StringComparison.Ordinal)))
-            {
-                continue;
-            }
-
-            var updated = content;
-            foreach (var (oldValue, newValue) in replacements)
-            {
-                updated = updated.Replace(oldValue, newValue, StringComparison.Ordinal);
-            }
-
-            if (!ReferenceEquals(content, updated) && content != updated)
-            {
-                File.WriteAllText(file, updated);
-                _logger.LogDebug("Patched legacy armory wallpaper reference in {File} to {Wallpaper}.", file, wallpaperRelativePath);
-            }
-        }
-    }
-
-    private static bool IsTextAsset(string extension)
-        => extension.Equals(".hbs", StringComparison.OrdinalIgnoreCase)
-           || extension.Equals(".html", StringComparison.OrdinalIgnoreCase)
-           || extension.Equals(".css", StringComparison.OrdinalIgnoreCase)
-           || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
-           || extension.Equals(".json", StringComparison.OrdinalIgnoreCase);
-
-    private void EnsureLegacyWallpaperImage(string staticPath, string wallpaperRelativePath)
-    {
-        var source = Path.Combine(staticPath, wallpaperRelativePath.Replace('/', Path.DirectorySeparatorChar));
-        if (!File.Exists(source))
-        {
-            return;
-        }
-
-        var legacy = Path.Combine(staticPath, "img", "bg", "wallpaper.jpg");
-        if (Path.GetFullPath(source).Equals(Path.GetFullPath(legacy), StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
-        File.Copy(source, legacy, overwrite: true);
-        _logger.LogDebug("Copied selected armory wallpaper {Source} to legacy path {Legacy}.", source, legacy);
     }
 
     private string? ResolveWallpaper(string staticPath, string stackId)

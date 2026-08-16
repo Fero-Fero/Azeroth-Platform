@@ -11,9 +11,6 @@ export interface ArmorySiteLayoutConfig {
 	version: number;
 	navbar?: ArmoryNavbarConfig;
 	pages: Record<string, ArmoryPageLayoutConfig>;
-	grid?: { columns: number; rowHeight: number; gap: number };
-	widgets?: ArmoryLayoutWidget[];
-	templateId?: string;
 }
 
 export const ALL_ARMORY_PAGE_IDS = [
@@ -163,20 +160,9 @@ export function buildDefaultSiteLayout(): ArmorySiteLayoutConfig {
 	return { version: 2, navbar: DEFAULT_NAVBAR, pages };
 }
 
-export function migrateLayoutToV2(site: ArmorySiteLayoutConfig): ArmorySiteLayoutConfig {
+export function ensureSiteLayout(site: ArmorySiteLayoutConfig): ArmorySiteLayoutConfig {
 	if (site.version >= 2 && site.pages && Object.keys(site.pages).length > 0) {
 		return site;
-	}
-
-	if (site.widgets?.length) {
-		const homeWidgets = site.widgets.filter((widget) => widget.type !== "RealmSelector");
-		const home = page(resolvePageTemplateId("home", site.templateId ?? "Default"), homeWidgets);
-		const defaults = buildDefaultSiteLayout();
-		return {
-			version: 2,
-			navbar: site.navbar ?? defaults.navbar,
-			pages: { ...defaults.pages, home },
-		};
 	}
 
 	return buildDefaultSiteLayout();

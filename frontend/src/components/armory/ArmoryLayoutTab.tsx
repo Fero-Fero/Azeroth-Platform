@@ -23,7 +23,7 @@ import {
   getPageLayout,
   getPageTemplates,
   layoutsEqual,
-  migrateLayoutToV2,
+  ensureSiteLayout,
   PAGE_WIDGET_TYPES,
   resolveEditorTemplateId,
   setPageLayout,
@@ -79,7 +79,7 @@ export default function ArmoryLayoutTab({
     prevRunningRef.current = running
   }, [job?.isRunning, job?.action, job?.success, job?.error, job?.message, qc, stackId])
 
-  const dirty = useMemo(() => (layout ? !layoutsEqual(draft, migrateLayoutToV2(layout)) : false), [draft, layout])
+  const dirty = useMemo(() => (layout ? !layoutsEqual(draft, ensureSiteLayout(layout)) : false), [draft, layout])
   const activePage = useMemo(() => getPageLayout(draft, activePageId), [draft, activePageId])
   const selectedWidget = activePage.widgets.find((w) => w.id === selectedId) ?? null
   const previewStyling = stylingPreviewDraft ?? styling ?? CLASSIC_STYLING_FALLBACK

@@ -23,7 +23,7 @@ export default function ModuleSetupWarnings({ stack }: ModuleSetupWarningsProps)
   // ── AH Bot ──────────────────────────────────────────────────────────────────
   const [ahBotDone, setAhBotDone] = useState(false)
   const hasAhBot = stack.configuration.moduleIds?.includes('mod-ah-bot')
-  const ahBotGuids = stack.configuration.advanced?.customEnvVars?.[AH_BOT_GUID_KEY]
+  const ahBotGuids = stack.configuration.advanced?.serviceEnvVars?.worldserver?.[AH_BOT_GUID_KEY]
   const ahBotNeedsSetup = hasAhBot && !ahBotGuids
 
   const hasDungeonSim = stack.configuration.moduleIds?.includes('mod-playerbot-dungeon-sim')

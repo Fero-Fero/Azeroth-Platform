@@ -50,18 +50,8 @@ public static class MigrationLayout
         "patch 4.0"
     };
 
-    /// <summary>Legacy placeholder folder names removed when seeding Individual Progression templates.</summary>
-    public static readonly IReadOnlyList<string> LegacyDefaultPatches = new[]
-    {
-        "patch 1",
-        "patch 2",
-        "patch 3",
-        "patch 4"
-    };
-
-    /// <summary>All built-in placeholder folders (current + legacy naming).</summary>
-    public static IEnumerable<string> AllPlaceholderPatches =>
-        DefaultPatches.Concat(LegacyDefaultPatches).Distinct(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Built-in placeholder folders created for every new stack.</summary>
+    public static IEnumerable<string> AllPlaceholderPatches => DefaultPatches;
 
     /// <summary>Placeholder descriptions seeded for the default expansion patches.</summary>
     public static readonly IReadOnlyDictionary<string, string> DefaultPatchDescriptions =
@@ -71,10 +61,6 @@ public static class MigrationLayout
             ["patch 2.0"] = "Initial placeholder for The Burning Crusade expansion.",
             ["patch 3.0"] = "Initial placeholder for Wrath of the Lich King expansion.",
             ["patch 4.0"] = "Initial placeholder for custom content.",
-            ["patch 1"] = "Initial placeholder for Classic expansion.",
-            ["patch 2"] = "Initial placeholder for The Burning Crusade expansion.",
-            ["patch 3"] = "Initial placeholder for Wrath of the Lich King expansion.",
-            ["patch 4"] = "Initial placeholder for custom content."
         };
 
     public static readonly IReadOnlyList<string> PatchDescriptionFileNames = new[] { "description.md", "description.txt" };
@@ -374,10 +360,10 @@ public static class MigrationLayout
 
             AddZipTextEntry(
                 archive,
-                patchRoot + "mpq/remove.json",
+                patchRoot + "mpq/mpq.json",
                 """
                 {
-                  "remove": "patch-example.MPQ"
+                  "remove": ["patch-example.MPQ"]
                 }
                 """);
         }

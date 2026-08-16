@@ -6,7 +6,7 @@ namespace AzerothPlatform.Core.Services.Interfaces;
 /// Manages WoW addons served to the launcher. Addons live under a client root's
 /// <c>game/Interface/AddOns/</c> directory and are distributed through the normal client manifest
 /// (they are "managed" files, so the launcher auto-installs, updates, and prunes them).
-/// A null <c>stackId</c> targets the global client; a non-null <c>stackId</c> targets that stack's client.
+/// A non-empty <c>stackId</c> targets that stack's client.
 /// </summary>
 public interface IAddonService
 {

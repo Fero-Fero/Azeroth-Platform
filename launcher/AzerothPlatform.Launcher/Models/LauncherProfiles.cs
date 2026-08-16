@@ -15,8 +15,7 @@ public sealed class LauncherProfile
 
     /// <summary>
     /// Absolute base URL of this stack's own portal/client container (portal + manifest + files +
-    /// launcher + login). Set in stack-portal mode; blank in legacy manager mode. This is the "known
-    /// server" the launcher persists and reconciles against.
+    /// launcher + login). This is the "known server" the launcher persists and reconciles against.
     /// </summary>
     public string PortalUrl { get; set; } = string.Empty;
 
@@ -55,7 +54,7 @@ public sealed class LauncherNewsDto
 }
 
 /// <summary>
-/// The runtime profiles document fetched from /api/launcher/profiles: global branding + every
+/// The runtime profiles document fetched from the stack portal: global branding + every
 /// visible profile. Mirrors the backend LauncherProfilesDto.
 /// </summary>
 public sealed class LauncherProfilesResponse
@@ -65,7 +64,7 @@ public sealed class LauncherProfilesResponse
     public string GameExecutable { get; set; } = "Wow.exe";
     public string LaunchArguments { get; set; } = string.Empty;
     public string ClientVersion { get; set; } = string.Empty;
-    public string BaseManifestUrl { get; set; } = "/api/launcher/manifest";
+    public string BaseManifestUrl { get; set; } = "/manifest";
     public string? DefaultBackgroundUrl { get; set; }
     public string? DefaultLogoUrl { get; set; }
     public string? GlobalNewsUrl { get; set; }

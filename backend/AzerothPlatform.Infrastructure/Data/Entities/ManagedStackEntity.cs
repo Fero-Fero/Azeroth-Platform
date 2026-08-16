@@ -71,13 +71,6 @@ public class ManagedStackEntity
     public string RealmName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Legacy flat env-var dictionary (JSON <c>{key:value}</c>). Superseded by
-    /// <see cref="ServiceEnvVarsJson"/>; retained for back-compat and treated as the worldserver bucket
-    /// when the per-service map has no worldserver entry (stack discovery still writes here).
-    /// </summary>
-    public string CustomEnvVarsJson { get; set; } = "{}";
-
-    /// <summary>
     /// Per-service environment variables (JSON <c>{serviceId:{key:value}}</c>, e.g. worldserver,
     /// authserver, armory, client). Environment variables are per-container, so each service owns its
     /// own bucket which the override generator injects into that service's <c>environment:</c> block.
@@ -105,7 +98,7 @@ public class ManagedStackEntity
     /// Version of the runtime-artifact template (.env / docker-compose.override.yml) the manager last
     /// generated for this stack. Compared against <see cref="Services.RuntimeArtifactTemplate.CurrentVersion"/>
     /// to detect "deployment drift": a lower value means the on-disk artifacts predate current fixes and
-    /// the stack should be re-applied. Defaults to 0 for stacks created before this tracking existed.
+    /// the stack should be re-applied. Starts at 0 until runtime artifacts are generated.
     /// </summary>
     public int RuntimeArtifactVersion { get; set; }
     

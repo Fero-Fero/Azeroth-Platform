@@ -114,7 +114,6 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
       advanced: {
         ...stack.configuration.advanced,
         serviceEnvVars,
-        customEnvVars: serviceEnvVars[WORLDSERVER] ?? stack.configuration.advanced.customEnvVars ?? {},
       },
     }
   }

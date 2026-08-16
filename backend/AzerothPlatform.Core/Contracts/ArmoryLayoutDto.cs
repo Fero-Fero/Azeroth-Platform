@@ -137,17 +137,4 @@ public sealed class ArmoryLayoutDto
     public int Version { get; set; } = 2;
     public ArmoryNavbarDto Navbar { get; set; } = new();
     public Dictionary<string, ArmoryPageLayoutDto> Pages { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>V1 root grid — read for migration only; not written after normalize.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ArmoryLayoutMode? Mode { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ArmoryLayoutTemplateId? TemplateId { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ArmoryLayoutGridDto? Grid { get; set; }
-
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<ArmoryLayoutWidgetDto>? Widgets { get; set; }
 }
