@@ -80,6 +80,11 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DefaultProjectId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Label")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -244,6 +249,31 @@ namespace AzerothPlatform.Infrastructure.Migrations
 
                     b.Property<int>("ClientPort")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("CloudConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudInstanceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudInstanceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudProvider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudRegion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("ConfigMigrationMode")
                         .HasColumnType("INTEGER");
@@ -413,6 +443,9 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("SshHardeningCompletedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("StackName")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -420,6 +453,15 @@ namespace AzerothPlatform.Infrastructure.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WizardDraftJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WizardStepId")
+                        .IsRequired()
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("WorldServerPort")

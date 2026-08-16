@@ -19,6 +19,15 @@ public interface IStackService
 
     Task<StackDetailsDto> CreateAsync(StackConfigurationDto configuration, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates or updates a <see cref="StackStatus.SetupIncomplete"/> stack after a cloud VPC exists
+    /// so My stacks can resume the wizard later.
+    /// </summary>
+    Task<StackDetailsDto> SaveSetupDraftAsync(StackSetupDraftRequestDto request, CancellationToken cancellationToken = default);
+
+    /// <summary>Returns wizard snapshot and SSH key for an incomplete stack. Null when not a draft.</summary>
+    Task<StackSetupDraftDto?> GetSetupDraftAsync(string stackId, CancellationToken cancellationToken = default);
+
     Task<StackDetailsDto?> UpdateAsync(string stackId, StackConfigurationDto configuration, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -46,7 +55,10 @@ public interface IStackService
         Action<PublicHostApplyStepDto>? reportStep,
         CancellationToken cancellationToken = default);
 
-    Task<bool> DeleteAsync(string stackId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteAsync(
+        string stackId,
+        bool terminateCloudInstance = false,
+        CancellationToken cancellationToken = default);
 
     Task<bool> StartAsync(string stackId, CancellationToken cancellationToken = default);
 
@@ -141,6 +153,11 @@ public interface IStackService
 
     /// <summary>Starts or installs Docker on an external stack's VPC over SSH.</summary>
     Task<RemoteSetupResultDto?> ProvisionVpcDockerAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Locks root and image-default users out of internet SSH on an external stack. Operator user stays.
+    /// </summary>
+    Task<RemoteSetupResultDto?> FinalizeSshHardeningAsync(string stackId, CancellationToken cancellationToken = default);
 
     /// <summary>Suggested host/cloud firewall rules for an external stack.</summary>
     Task<VpcSecurityProfileDto?> GetVpcSecurityProfileAsync(string stackId, CancellationToken cancellationToken = default);

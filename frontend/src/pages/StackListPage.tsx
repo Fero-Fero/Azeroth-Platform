@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud, PowerOff } from 'lucide-react'
+import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud, PowerOff, Settings } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import DeleteStackDialog from '@/components/DeleteStackDialog'
@@ -11,10 +11,11 @@ import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import { useStackLifecycleJobs } from '@/hooks/useStackLifecycleJobs'
 import { useStacks, stackKeys } from '@/hooks/useStacks'
 import { isStackJobRunning } from '@/lib/stackJob'
-import { getVpcListHostAlert } from '@/lib/utils'
+import { getVpcListHostAlert, apiErrorMessage } from '@/lib/utils'
 import { stackApi, buildApi } from '@/services/api'
 import type { StackDetailsDto } from '@/types/stack.types'
-import { DeploymentTarget, StackStatus } from '@/types/stack.types'
+import { CloudProvider, DeploymentTarget, StackStatus } from '@/types/stack.types'
+import { providerDisplayName } from '@/lib/cloud-auth'
 
 // Calculate stack uptime from containers
 function calculateStackUptime(stack: StackDetailsDto): string | null {
@@ -58,9 +59,45 @@ function getStatusBadgeColor(status: StackStatus): string {
       return 'bg-blue-100 text-blue-800'
     case StackStatus.Failed:
       return 'bg-red-100 text-red-800'
+    case StackStatus.SetupIncomplete:
+      return 'bg-amber-100 text-amber-900'
     default:
       return 'bg-gray-100 text-gray-800'
   }
+}
+
+function formatStackStatus(status: StackStatus): string {
+  return status === StackStatus.SetupIncomplete ? 'Setup incomplete' : status
+}
+
+function stackListName(stack: StackDetailsDto): string {
+  const display = stack.displayName?.trim()
+  if (display) {
+    return display
+  }
+
+  const name = stack.stackName?.trim() ?? ''
+  if (
+    stack.status === StackStatus.SetupIncomplete
+    && (!name || name.toLowerCase().startsWith('unnamed-instance') || /^vpc-[a-f0-9]{8}$/i.test(name))
+  ) {
+    return 'Unnamed instance'
+  }
+
+  return stack.stackName
+}
+
+function isCloudProvider(value: string): value is CloudProvider {
+  return Object.values(CloudProvider).includes(value as CloudProvider)
+}
+
+function formatCloudProviderTag(provider?: string): string | null {
+  const value = provider?.trim()
+  if (!value) {
+    return null
+  }
+
+  return isCloudProvider(value) ? providerDisplayName(value) : value
 }
 
 export default function StackListPage() {
@@ -92,6 +129,7 @@ export default function StackListPage() {
     let cancelled = false
     void (async () => {
       for (const stack of stacks) {
+        if (stack.status === StackStatus.SetupIncomplete) continue
         try {
           const res = await stackApi.jobStatus(stack.stackId)
           if (!cancelled && res.data && isStackJobRunning(res.data)) {
@@ -137,16 +175,19 @@ export default function StackListPage() {
   })
 
   const deleteStack = useMutation({
-    mutationFn: (stackId: string) => stackApi.delete(stackId),
-    onSuccess: (_data, deletedStackId) => {
+    mutationFn: ({
+      stackId,
+      terminateCloudInstance,
+    }: {
+      stackId: string
+      terminateCloudInstance: boolean
+    }) => stackApi.delete(stackId, { terminateCloudInstance }),
+    onSuccess: (_data, variables) => {
       setDeletingStack(null)
       queryClient.setQueryData<StackDetailsDto[]>(stackKeys.lists(), (current) =>
-        current?.filter((stack) => stack.stackId !== deletedStackId),
+        current?.filter((stack) => stack.stackId !== variables.stackId),
       )
       void probeAll.mutate()
-    },
-    onError: () => {
-      setDeletingStack(null)
     },
   })
 
@@ -179,8 +220,8 @@ export default function StackListPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Your Stacks</h1>
           <p className="mt-1 text-gray-500">
-            Manage your AzerothCore server instances. Status is probed once when you open this page and
-            cached until you refresh or open a stack for a live update.
+            Manage your AzerothCore server instances. Live status is checked once per session and
+            cached until you refresh or open a stack.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -257,15 +298,25 @@ export default function StackListPage() {
       ) : (
         <div className={`space-y-4 ${isProbing ? 'opacity-90' : ''}`}>
           {stacks.map((stack) => {
+            const isSetupIncomplete = stack.status === StackStatus.SetupIncomplete
             const displayStatus =
               stack.status === StackStatus.Failed ? StackStatus.Stopped : stack.status
-            const isRunning = displayStatus === StackStatus.Running
-            const isStopped = displayStatus === StackStatus.Stopped
-            const isDegraded = displayStatus === StackStatus.Degraded
-            const uptime = calculateStackUptime(stack)
+            const isRunning = !isSetupIncomplete && displayStatus === StackStatus.Running
+            const isStopped = !isSetupIncomplete && displayStatus === StackStatus.Stopped
+            const isDegraded = !isSetupIncomplete && displayStatus === StackStatus.Degraded
+            const uptime = isSetupIncomplete ? null : calculateStackUptime(stack)
             const isExternal = stack.configuration.deployment?.target === DeploymentTarget.External
-            const vpcHostAlert = !isProbing ? getVpcListHostAlert(stack) : null
+            const vpcHostAlert = !isSetupIncomplete && !isProbing ? getVpcListHostAlert(stack) : null
             const vpcHostOffline = vpcHostAlert?.kind === 'offline'
+            const providerTag = isSetupIncomplete
+              ? formatCloudProviderTag(stack.configuration.deployment?.cloudProvider)
+              : null
+            const instanceTypeTag = isSetupIncomplete
+              ? stack.configuration.deployment?.cloudInstanceType?.trim() || null
+              : null
+            const stackHref = isSetupIncomplete
+              ? `/stacks/new?draft=${encodeURIComponent(stack.stackId)}`
+              : `/stacks/${stack.stackId}`
 
             const lifecycleJob = lifecycleJobs[stack.stackId]
             const lifecycleBusy = isStackBusy(stack.stackId)
@@ -285,17 +336,17 @@ export default function StackListPage() {
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Link
-                        to={`/stacks/${stack.stackId}`}
+                        to={stackHref}
                         className="text-xl font-semibold text-gray-900 hover:text-blue-600"
                       >
-                        {stack.stackName}
+                        {stackListName(stack)}
                       </Link>
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusBadgeColor(displayStatus)}`}
                       >
-                        {displayStatus}
+                        {formatStackStatus(displayStatus)}
                       </span>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -306,6 +357,19 @@ export default function StackListPage() {
                         {isExternal ? <Cloud className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
                         {isExternal ? 'VPC' : 'Local'}
                       </span>
+                      {providerTag && (
+                        <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-900">
+                          {providerTag}
+                        </span>
+                      )}
+                      {instanceTypeTag && (
+                        <span
+                          className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 font-mono text-xs font-medium text-slate-800"
+                          title="Cloud instance type"
+                        >
+                          {instanceTypeTag}
+                        </span>
+                      )}
                       {vpcHostOffline && (
                         <span
                           className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-900"
@@ -324,7 +388,7 @@ export default function StackListPage() {
                           Docker stopped
                         </span>
                       )}
-                      {isExternal && isProbing && (
+                      {isExternal && isProbing && !isSetupIncomplete && (
                         <span className="inline-flex items-center gap-1 text-xs text-gray-500">
                           <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
                           Checking VPC…
@@ -385,15 +449,30 @@ export default function StackListPage() {
                         Stack containers are stopped. The VPC host is online — use Start to bring the server back up.
                       </p>
                     )}
+                    {isSetupIncomplete ? (
+                      <p className="mt-2 text-sm text-gray-500">
+                        VPC instance is ready. Finish server setup when you are ready to continue.
+                      </p>
+                    ) : (
                     <div className="mt-3 flex gap-4 text-sm text-gray-600">
                       <span>Auth: {stack.configuration.ports.authServer}</span>
                       <span>World: {stack.configuration.ports.worldServer}</span>
                       <span>DB: {stack.configuration.database.port}</span>
                     </div>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
-                    {(isStopped || isDegraded) && (
+                    {isSetupIncomplete && (
+                      <Link
+                        to={stackHref}
+                        className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                        Finish setup
+                      </Link>
+                    )}
+                    {!isSetupIncomplete && (isStopped || isDegraded) && (
                       <button
                         onClick={() => startStack.mutate(stack.stackId)}
                         disabled={lifecycleBusy}
@@ -460,7 +539,7 @@ export default function StackListPage() {
                       </Link>
                     )}
                     {/* Rebuild button - available for Building/Failed states, or anytime really */}
-                    {(stack.status === 'Building' || stack.status === 'Failed' || stack.status === 'Stopped') && (
+                    {!isSetupIncomplete && (stack.status === 'Building' || stack.status === 'Failed' || stack.status === 'Stopped') && (
                       <button
                         onClick={() => rebuildStack.mutate(stack.stackId)}
                         disabled={rebuildStack.isPending}
@@ -479,7 +558,7 @@ export default function StackListPage() {
                       onClick={() =>
                         setDeletingStack({
                           id: stack.stackId,
-                          name: stack.stackName,
+                          name: stackListName(stack),
                           isExternal,
                         })
                       }
@@ -501,9 +580,17 @@ export default function StackListPage() {
         <DeleteStackDialog
           stackName={deletingStack.name}
           isExternal={deletingStack.isExternal}
-          onConfirm={() => deleteStack.mutate(deletingStack.id)}
-          onCancel={() => setDeletingStack(null)}
+          onConfirm={(terminateCloudInstance) =>
+            deleteStack.mutate({ stackId: deletingStack.id, terminateCloudInstance })
+          }
+          onCancel={() => {
+            if (!deleteStack.isPending) {
+              setDeletingStack(null)
+              deleteStack.reset()
+            }
+          }}
           isDeleting={deleteStack.isPending}
+          error={deleteStack.error ? apiErrorMessage(deleteStack.error) : null}
         />
       )}
       

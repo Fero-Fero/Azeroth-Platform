@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Copy, ExternalLink, X } from 'lucide-react'
+import { Check, Copy, ExternalLink, X, AlertTriangle } from 'lucide-react'
 import { CloudSecurityGroupRulesCard } from '@/components/stacks/VpcSecurityRolesCard'
 import { DEFAULT_ARMORY_PORT, DEFAULT_CLIENT_PORT } from '@/lib/stack-network-defaults'
 import { resolvePublicAdminSourceCidr } from '@/lib/public-ip'
 import { systemApi } from '@/services/api'
 import type { VpcSecurityProfileDto } from '@/types/stack.types'
 
-type CloudProvider = 'aws' | 'gcp' | 'azure'
+type CloudProvider = 'aws' | 'digitalocean' | 'vultr' | 'gcp' | 'azure' | 'hetzner'
 
 interface CloudSecurityGroupGuideDialogProps {
   open: boolean
@@ -19,9 +19,15 @@ interface CloudSecurityGroupGuideDialogProps {
   requireAcknowledgment?: boolean
   acknowledged?: boolean
   onAcknowledgedChange?: (value: boolean) => void
+  /** Prefills the provider tab when the dialog opens. */
+  initialProvider?: CloudProvider
 }
 
 const AWS_CONSOLE_INSTANCES = 'https://console.aws.amazon.com/ec2/home#Instances:'
+const DIGITALOCEAN_FIREWALLS = 'https://cloud.digitalocean.com/networking/firewalls'
+const VULTR_FIREWALLS = 'https://my.vultr.com/firewall/'
+const GCP_FIREWALLS = 'https://console.cloud.google.com/networking/firewalls'
+const HETZNER_FIREWALLS = 'https://console.hetzner.cloud/'
 
 function CopyableCidr({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false)
@@ -76,7 +82,7 @@ function AdminIpHint({ suggestedAdminSourceCidr }: { suggestedAdminSourceCidr?: 
 
   return (
     <span className="mt-1 block text-xs text-blue-900">
-      Your public IP (paste as SSH source in AWS):
+      Your public IP (paste as SSH source):
       <CopyableCidr value={suggestedAdminSourceCidr} label="IP" />
       <span className="mt-1 block text-[11px] text-blue-800/80">
         This is looked up from your browser, not from the platform container — use this value, not Docker
@@ -144,9 +150,106 @@ function ProviderSteps({
           <span className="font-mono">0.0.0.0/0</span> unless you intentionally restrict players to a CIDR.
         </li>
         <li>
-          Save rules. Confirm ports <span className="font-mono">3306</span> (MySQL) and{' '}
-          <span className="font-mono">7878</span> (SOAP) are <span className="font-medium">not</span> in the
-          inbound list.
+          Save rules. See the highlighted <span className="font-medium">Do not add inbound rules for</span>{' '}
+          section below (MySQL 3306 and SOAP 7878 must stay closed).
+        </li>
+      </ol>
+    )
+  }
+
+  if (provider === 'digitalocean') {
+    return (
+      <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
+        <li>
+          Open{' '}
+          <a
+            href={DIGITALOCEAN_FIREWALLS}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-blue-700 hover:underline"
+          >
+            Networking → Firewalls
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>{' '}
+          in DigitalOcean Cloud.
+        </li>
+        <li>
+          Create a firewall (or edit the one named{' '}
+          <span className="font-mono text-xs">azeroth-platform-…</span>) and assign it to your Droplet
+          {host?.trim() ? (
+            <>
+              {' '}
+              (public IP <span className="font-mono text-gray-900">{host.trim()}</span>)
+            </>
+          ) : (
+            ' (match the public IP from the wizard)'
+          )}
+          .
+        </li>
+        <li>
+          Add inbound TCP rules for each row in the table below. Outbound can stay allow-all.
+        </li>
+        <li>
+          For SSH (port {sshPort}), set sources to your admin IP — do not use{' '}
+          <span className="font-mono">0.0.0.0/0</span> for SSH.
+          <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
+        </li>
+        <li>
+          For game ports (3724, 8085, and web ports when shown), use{' '}
+          <span className="font-mono">0.0.0.0/0</span> unless you intentionally restrict players.
+        </li>
+        <li>
+          See the highlighted <span className="font-medium">Do not add inbound rules for</span> section below
+          (MySQL 3306 and SOAP 7878 must stay closed).
+        </li>
+      </ol>
+    )
+  }
+
+  if (provider === 'vultr') {
+    return (
+      <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
+        <li>
+          Open{' '}
+          <a
+            href={VULTR_FIREWALLS}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-blue-700 hover:underline"
+          >
+            Products → Firewall
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>{' '}
+          in the Vultr customer portal.
+        </li>
+        <li>
+          Create a firewall group (or edit the one named{' '}
+          <span className="font-mono text-xs">azeroth-platform-…</span>) and link it to your instance
+          {host?.trim() ? (
+            <>
+              {' '}
+              (public IP <span className="font-mono text-gray-900">{host.trim()}</span>)
+            </>
+          ) : (
+            ' (match the public IP from the wizard)'
+          )}
+          .
+        </li>
+        <li>
+          Add inbound IPv4 TCP rules for each row in the table below.
+        </li>
+        <li>
+          For SSH (port {sshPort}), set the source to your admin IP — do not use{' '}
+          <span className="font-mono">0.0.0.0/0</span> for SSH.
+          <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
+        </li>
+        <li>
+          For game ports (3724, 8085, and web ports when shown), use{' '}
+          <span className="font-mono">0.0.0.0/0</span> unless you intentionally restrict players.
+        </li>
+        <li>
+          See the highlighted <span className="font-medium">Do not add inbound rules for</span> section below
+          (MySQL 3306 and SOAP 7878 must stay closed).
         </li>
       </ol>
     )
@@ -156,16 +259,80 @@ function ProviderSteps({
     return (
       <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
         <li>
-          Open <span className="font-medium">VPC network → Firewall</span> in Google Cloud Console.
+          Open{' '}
+          <a
+            href={GCP_FIREWALLS}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-blue-800 hover:underline"
+          >
+            VPC network → Firewall
+            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+          </a>{' '}
+          in Google Cloud Console.
         </li>
         <li>
-          Create or edit an ingress rule for your instance&apos;s network tags with the allow ports below.
+          Confirm the VM has network tag <span className="font-mono">azeroth-platform</span> (set automatically
+          at launch).
         </li>
         <li>
-          Restrict SSH (port {sshPort}) to your admin IP; open player/web ports to the internet as needed.
+          Create ingress rules targeting that tag. Restrict SSH (port {sshPort}) to your admin IP; open
+          player/web ports to the internet as needed.
           <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
         </li>
-        <li>Do not create allow rules for MySQL (3306) or SOAP (7878).</li>
+        <li>
+          See the highlighted <span className="font-medium">Do not add inbound rules for</span> section below
+          (MySQL 3306 and SOAP 7878 must stay closed).
+        </li>
+      </ol>
+    )
+  }
+
+  if (provider === 'hetzner') {
+    return (
+      <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
+        <li>
+          Open{' '}
+          <a
+            href={HETZNER_FIREWALLS}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-blue-700 hover:underline"
+          >
+            Hetzner Cloud Console → Firewalls
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+          .
+        </li>
+        <li>
+          Create a firewall (or edit the one named{' '}
+          <span className="font-mono text-xs">azeroth-platform-…</span>) and apply it to your server
+          {host?.trim() ? (
+            <>
+              {' '}
+              (public IP <span className="font-mono text-gray-900">{host.trim()}</span>)
+            </>
+          ) : (
+            ' (match the public IP from the wizard)'
+          )}
+          . Launch and pick apply this automatically.
+        </li>
+        <li>
+          Add inbound TCP rules for each row in the table below.
+        </li>
+        <li>
+          For SSH (port {sshPort}), set sources to your admin IP — do not use{' '}
+          <span className="font-mono">0.0.0.0/0</span> for SSH.
+          <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
+        </li>
+        <li>
+          For game ports (3724, 8085, and web ports when shown), use{' '}
+          <span className="font-mono">0.0.0.0/0</span> unless you intentionally restrict players.
+        </li>
+        <li>
+          See the highlighted <span className="font-medium">Do not add inbound rules for</span> section below
+          (MySQL 3306 and SOAP 7878 must stay closed).
+        </li>
       </ol>
     )
   }
@@ -173,13 +340,18 @@ function ProviderSteps({
   return (
     <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
       <li>
-        Open your VM in Azure Portal → <span className="font-medium">Networking</span>.
+        Open your VM in Azure Portal → <span className="font-medium">Networking</span>. Pick/bootstrap
+        applies an NSG on the NIC automatically (rules named <span className="font-mono">azp-tcp-{'{port}'}</span>
+        ). Use this checklist only if you need to inspect or repair those rules.
       </li>
       <li>
-        Add inbound port rules matching the table below (SSH on port {sshPort} from your IP only).
+        Confirm inbound port rules matching the table below (SSH on port {sshPort} from your IP only).
         <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
       </li>
-      <li>Do not add inbound rules for MySQL (3306) or SOAP (7878).</li>
+      <li>
+        See the highlighted <span className="font-medium">Do not add inbound rules for</span> section below
+        (MySQL 3306 and SOAP 7878 must stay closed).
+      </li>
     </ol>
   )
 }
@@ -193,9 +365,10 @@ export function CloudSecurityGroupGuideDialog({
   requireAcknowledgment = true,
   acknowledged = false,
   onAcknowledgedChange,
+  initialProvider = 'aws',
 }: CloudSecurityGroupGuideDialogProps) {
   const titleId = useId()
-  const [provider, setProvider] = useState<CloudProvider>('aws')
+  const [provider, setProvider] = useState<CloudProvider>(initialProvider)
   const [localAcknowledged, setLocalAcknowledged] = useState(acknowledged)
 
   const { data: networkInfo } = useQuery({
@@ -218,8 +391,9 @@ export function CloudSecurityGroupGuideDialog({
   useEffect(() => {
     if (open) {
       setLocalAcknowledged(acknowledged)
+      setProvider(initialProvider)
     }
-  }, [acknowledged, open])
+  }, [acknowledged, initialProvider, open])
 
   if (!open) {
     return null
@@ -254,9 +428,10 @@ export function CloudSecurityGroupGuideDialog({
               Configure cloud security group
             </h2>
             <p className="mt-1 text-sm text-gray-600">
-              Host <span className="font-medium">ufw</span> (from Setup Now) protects the Linux instance.
-              Your cloud provider&apos;s security group is a separate layer in front of the VPC — configure it
-              manually in AWS, GCP, or Azure, or use the optional AWS automation on the stack overview.
+              Host <span className="font-medium">ufw</span> (from Verify VPC / Repair) protects the Linux instance.
+              Your cloud provider&apos;s security group or Cloud Firewall is a separate layer in front of the VPC.
+              AWS, DigitalOcean, Vultr, Google Cloud, Azure, and Hetzner can apply this automatically at launch; use this
+              guide when you configure rules by hand.
             </p>
           </div>
           <button
@@ -276,8 +451,11 @@ export function CloudSecurityGroupGuideDialog({
               {(
                 [
                   { id: 'aws' as const, label: 'AWS EC2' },
+                  { id: 'digitalocean' as const, label: 'DigitalOcean' },
+                  { id: 'vultr' as const, label: 'Vultr' },
                   { id: 'gcp' as const, label: 'Google Cloud' },
                   { id: 'azure' as const, label: 'Azure' },
+                  { id: 'hetzner' as const, label: 'Hetzner' },
                 ] as const
               ).map((option) => (
                 <button
@@ -317,12 +495,18 @@ export function CloudSecurityGroupGuideDialog({
               />
             </div>
           ) : (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-              Enter a remote host above to load the inbound rule list. Default web ports are{' '}
-              <span className="font-mono">{DEFAULT_ARMORY_PORT}</span> (armory) and{' '}
-              <span className="font-mono">{DEFAULT_CLIENT_PORT}</span>{' '}
-              (launcher/client). Do not open <span className="font-mono">3306</span> or{' '}
-              <span className="font-mono">7878</span>.
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Do not add inbound rules for MySQL or SOAP
+              </p>
+              <p className="mt-1">
+                Enter a remote host above to load the inbound allow list. Default web ports are{' '}
+                <span className="font-mono">{DEFAULT_ARMORY_PORT}</span> (armory) and{' '}
+                <span className="font-mono">{DEFAULT_CLIENT_PORT}</span> (launcher/client). Never open{' '}
+                <span className="font-mono">3306</span> (MySQL) or <span className="font-mono">7878</span>{' '}
+                (SOAP) at the cloud edge.
+              </p>
             </div>
           )}
 
@@ -342,8 +526,9 @@ export function CloudSecurityGroupGuideDialog({
                 className="mt-0.5"
               />
               <span>
-                I have configured my cloud security group (or firewall rules) to match the allow/deny guidance
-                above.
+                I have configured my cloud security group (or firewall rules) to match the allow/deny
+                guidance above, including <span className="font-medium">not</span> opening MySQL (3306) or
+                SOAP (7878).
               </span>
             </label>
           )}

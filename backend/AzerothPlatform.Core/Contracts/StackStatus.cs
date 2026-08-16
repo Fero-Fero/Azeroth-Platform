@@ -38,5 +38,10 @@ public enum StackStatus
     /// <summary>
     /// Stack has failed or is in error state
     /// </summary>
-    Failed
+    Failed,
+
+    /// <summary>
+    /// Cloud VPC exists but the create-stack wizard has not finished (no worldserver build yet).
+    /// </summary>
+    SetupIncomplete
 }

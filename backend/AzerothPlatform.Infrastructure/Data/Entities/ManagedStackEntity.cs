@@ -233,6 +233,27 @@ public class ManagedStackEntity
     /// <summary>PEM-encoded SSH private key for the remote host (stored at rest; encryption is a follow-up).</summary>
     public string ExternalSshPrivateKey { get; set; } = string.Empty;
 
+    /// <summary>Linked cloud account used to launch or pick this stack's VM (External stacks only).</summary>
+    public string CloudConnectionId { get; set; } = string.Empty;
+
+    /// <summary>Provider instance id (EC2 i-..., droplet id, etc.) for terminate.</summary>
+    public string CloudInstanceId { get; set; } = string.Empty;
+
+    /// <summary>Provider region or zone of <see cref="CloudInstanceId"/>.</summary>
+    public string CloudRegion { get; set; } = string.Empty;
+
+    /// <summary>Cloud provider of the bound VM (Aws, DigitalOcean, …). Blank for local stacks.</summary>
+    public string CloudProvider { get; set; } = string.Empty;
+
+    /// <summary>Provider instance type / size (t3.micro, s-2vcpu-2gb, cx22, …).</summary>
+    public string CloudInstanceType { get; set; } = string.Empty;
+
+    /// <summary>JSON snapshot of the unfinished create-stack wizard (no SSH private key).</summary>
+    public string WizardDraftJson { get; set; } = string.Empty;
+
+    /// <summary>Wizard step id to resume (e.g. server-config). Blank when setup is complete.</summary>
+    public string WizardStepId { get; set; } = string.Empty;
+
     /// <summary>When true, armory registration uses email verification before account activation.</summary>
     public bool ArmoryUseEmailConfirmation { get; set; }
 
@@ -244,4 +265,9 @@ public class ManagedStackEntity
 
     /// <summary>Encrypted SMTP password for armory outbound mail. Blank until configured.</summary>
     public string ArmoryEmailSmtpPasswordProtected { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When SSH hardening last succeeded (root / image-default users locked out of internet SSH).
+    /// </summary>
+    public DateTime? SshHardeningCompletedAt { get; set; }
 }

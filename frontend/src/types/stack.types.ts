@@ -45,6 +45,7 @@ export enum StackStatus {
   Degraded = 'Degraded',
   Running = 'Running',
   Failed = 'Failed',
+  SetupIncomplete = 'SetupIncomplete',
 }
 
 // Configuration DTOs
@@ -114,6 +115,11 @@ export interface DeploymentConfigDto {
   savedSshKeyId?: string
   saveSshKeyToVault?: boolean
   saveSshKeyLabel?: string
+  cloudConnectionId?: string
+  cloudInstanceId?: string
+  cloudRegion?: string
+  cloudProvider?: string
+  cloudInstanceType?: string
 }
 
 export interface CloudSshKeyDto {
@@ -166,11 +172,18 @@ export interface CloudProviderConnectionDto {
   provider: CloudProvider
   label: string
   defaultRegion?: string
+  defaultProjectId?: string
   createdAtUtc: string
   authMethod?: CloudAuthMethod
   accountHint?: string
   tokenExpiresAtUtc?: string
   needsReauth?: boolean
+}
+
+export interface CloudConnectionVerifyResultDto {
+  ok: boolean
+  message: string
+  connection: CloudProviderConnectionDto
 }
 
 export interface CloudAuthProviderStatusDto {
@@ -189,6 +202,7 @@ export interface CloudAuthStartRequestDto {
   label?: string
   policyTier?: string
   externalId?: string
+  useDeviceCode?: boolean
 }
 
 export interface CloudAuthAwsTemplateDto {
@@ -218,6 +232,9 @@ export interface CloudAuthCompleteRequestDto {
   label?: string
   reconnectConnectionId?: string
   defaultRegion?: string
+  defaultProjectId?: string
+  deviceCode?: string
+  accessToken?: string
 }
 
 export interface CloudInstanceSetupDialogDto {
@@ -233,6 +250,8 @@ export interface CloudInstanceSetupDialogDto {
   autoFirewallDefault: boolean
   suggestedAdminCidr?: string
   launchDefaults?: CloudLaunchDefaultsDto
+  defaultProjectId?: string
+  projects?: CloudLaunchCatalogOptionDto[]
 }
 
 export interface CreateCloudProviderConnectionRequestDto {
@@ -258,6 +277,7 @@ export interface CloudInstanceDto {
   publicHost: string
   suggestedSshUser: string
   image: string
+  instanceType?: string
 }
 
 export enum CloudLaunchMode {
@@ -353,6 +373,8 @@ export interface StackConfigurationDto {
   deployment?: DeploymentConfigDto
   customFork?: CustomForkConfigDto
   armoryAccounts?: ArmoryAccountsConfigDto
+  /** Completes this unfinished VPC draft instead of creating a new stack. */
+  draftStackId?: string
 }
 
 export interface NetworkInfoDto {
@@ -623,6 +645,7 @@ export interface StackUpdateStatusDto {
 export interface StackDetailsDto {
   stackId: string
   stackName: string
+  displayName?: string
   serverType: ServerType
   status: StackStatus
   containers: ContainerStatusDto[]
@@ -643,6 +666,27 @@ export interface StackDetailsDto {
   dockerEngineUnavailableReason?: string | null
   /** False until the first worldserver build completes successfully. */
   hasCompletedBuild?: boolean
+  /** Wizard step to resume when status is SetupIncomplete. */
+  wizardStepId?: string | null
+  /** When SSH hardening last succeeded (root / image-default users locked out of internet SSH). */
+  sshHardeningCompletedAt?: string | null
+}
+
+export interface StackSetupDraftRequestDto {
+  stackId?: string
+  wizardStepId: string
+  wizardDraftJson: string
+  stackName?: string
+  deployment: DeploymentConfigDto
+}
+
+export interface StackSetupDraftDto {
+  stackId: string
+  stackName: string
+  wizardStepId: string
+  wizardDraftJson: string
+  externalSshPrivateKey: string
+  deployment: DeploymentConfigDto
 }
 
 export interface SoapCredentialsDto {

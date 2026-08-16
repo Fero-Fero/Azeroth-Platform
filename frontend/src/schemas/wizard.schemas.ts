@@ -75,6 +75,11 @@ export const deploymentSchema = z.object({
       savedSshKeyId: z.string().optional().default(''),
       saveSshKeyToVault: z.boolean().optional().default(true),
       saveSshKeyLabel: z.string().max(100).optional().default(''),
+      cloudConnectionId: z.string().optional().default(''),
+      cloudInstanceId: z.string().optional().default(''),
+      cloudRegion: z.string().optional().default(''),
+      cloudProvider: z.string().optional().default(''),
+      cloudInstanceType: z.string().optional().default(''),
       connectionVerified: z.boolean().optional().default(false),
       firstTimeSetupCompleted: z.boolean().optional().default(false),
       sshCertificateVerified: z.boolean().optional().default(true),
@@ -90,6 +95,15 @@ export const deploymentSchema = z.object({
         }
         if (!deployment.externalSshUser?.trim()) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'SSH user is required for external stacks', path: ['externalSshUser'] })
+        } else {
+          const sshUser = deployment.externalSshUser.trim().toLowerCase()
+          if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(sshUser) || sshUser === 'root' || sshUser === 'nobody' || sshUser === 'sshd') {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Use a dedicated operator user such as azp-admin (not root).',
+              path: ['externalSshUser'],
+            })
+          }
         }
         if (!deployment.externalSshPrivateKey?.trim() && !deployment.savedSshKeyId?.trim()) {
           ctx.addIssue({
@@ -136,6 +150,9 @@ export const wizardSchema = serverConfigSchema
   .merge(advancedSchema)
   .merge(deploymentSchema)
   .merge(armoryAccountsSchema)
+  .extend({
+    draftStackId: z.string().optional().default(''),
+  })
   .superRefine((values, ctx) => {
     // The Custom server type builds from a user-supplied fork; require a valid http(s) URL for it.
     if (values.serverType === ServerType.Custom) {
@@ -197,6 +214,7 @@ export const wizardSchema = serverConfigSchema
 export type WizardFormData = z.infer<typeof wizardSchema>
 
 export const WIZARD_DEFAULTS: WizardFormData = {
+  draftStackId: '',
   stackName: '',
   serverType: ServerType.Standard,
   customFork: { repositoryUrl: '', branch: 'master' },
@@ -213,6 +231,11 @@ export const WIZARD_DEFAULTS: WizardFormData = {
     savedSshKeyId: '',
     saveSshKeyToVault: true,
     saveSshKeyLabel: '',
+    cloudConnectionId: '',
+    cloudInstanceId: '',
+    cloudRegion: '',
+    cloudProvider: '',
+    cloudInstanceType: '',
     connectionVerified: false,
     firstTimeSetupCompleted: false,
     vpcSetupMode: 'skip',

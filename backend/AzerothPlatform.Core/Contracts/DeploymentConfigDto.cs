@@ -28,6 +28,21 @@ public class DeploymentConfigDto
     /// <summary>When set, the platform loads the private key from the SSH key vault (never returned to clients).</summary>
     public string SavedSshKeyId { get; set; } = string.Empty;
 
+    /// <summary>Linked cloud account that launched or selected this stack's VM.</summary>
+    public string CloudConnectionId { get; set; } = string.Empty;
+
+    /// <summary>Provider instance id used to terminate the VM with the stack.</summary>
+    public string CloudInstanceId { get; set; } = string.Empty;
+
+    /// <summary>Provider region or zone of <see cref="CloudInstanceId"/>.</summary>
+    public string CloudRegion { get; set; } = string.Empty;
+
+    /// <summary>Cloud provider of the bound VM (Aws, DigitalOcean, …).</summary>
+    public string CloudProvider { get; set; } = string.Empty;
+
+    /// <summary>Provider instance type / size (t3.micro, s-2vcpu-2gb, …).</summary>
+    public string CloudInstanceType { get; set; } = string.Empty;
+
     /// <summary>When creating a stack, save a newly pasted key to the vault for reuse.</summary>
     public bool SaveSshKeyToVault { get; set; } = true;
 

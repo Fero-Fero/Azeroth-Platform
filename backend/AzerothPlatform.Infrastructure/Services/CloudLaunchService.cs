@@ -22,6 +22,10 @@ public sealed class CloudLaunchService : ICloudLaunchService
     private readonly VultrClient _vultrClient;
     private readonly ICloudAuditService _cloudAuditService;
     private readonly IAwsCredentialResolver _awsCredentialResolver;
+    private readonly IDigitalOceanTokenResolver _digitalOceanTokenResolver;
+    private readonly IVultrTokenResolver _vultrTokenResolver;
+    private readonly IGcpCredentialResolver _gcpCredentialResolver;
+    private readonly IAzureCredentialResolver _azureCredentialResolver;
 
     public CloudLaunchService(
         AzerothCoreDbContext dbContext,
@@ -35,7 +39,11 @@ public sealed class CloudLaunchService : ICloudLaunchService
         HetznerCloudClient hetznerCloudClient,
         VultrClient vultrClient,
         ICloudAuditService cloudAuditService,
-        IAwsCredentialResolver awsCredentialResolver)
+        IAwsCredentialResolver awsCredentialResolver,
+        IDigitalOceanTokenResolver digitalOceanTokenResolver,
+        IVultrTokenResolver vultrTokenResolver,
+        IGcpCredentialResolver gcpCredentialResolver,
+        IAzureCredentialResolver azureCredentialResolver)
     {
         _dbContext = dbContext;
         _secretProtector = secretProtector;
@@ -49,6 +57,10 @@ public sealed class CloudLaunchService : ICloudLaunchService
         _vultrClient = vultrClient;
         _cloudAuditService = cloudAuditService;
         _awsCredentialResolver = awsCredentialResolver;
+        _digitalOceanTokenResolver = digitalOceanTokenResolver;
+        _vultrTokenResolver = vultrTokenResolver;
+        _gcpCredentialResolver = gcpCredentialResolver;
+        _azureCredentialResolver = azureCredentialResolver;
     }
 
     public async Task<CloudLaunchDefaultsDto> GetDefaultsAsync(
@@ -70,9 +82,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "nyc3",
                 Size = "s-2vcpu-4gb",
                 Image = "ubuntu-22-04-x64",
-                SshUser = "ubuntu",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = true,
-                SupportsBootstrapExisting = false,
+                SupportsBootstrapExisting = true,
             },
             CloudProvider.Aws => new CloudLaunchDefaultsDto
             {
@@ -80,7 +92,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "us-east-1",
                 Size = "t3.micro",
                 Image = string.Empty,
-                SshUser = "ubuntu",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = true,
                 SupportsBootstrapExisting = true,
             },
@@ -90,9 +102,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "us-central1-a",
                 Size = "e2-medium",
                 Image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts",
-                SshUser = "ubuntu",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = true,
-                SupportsBootstrapExisting = false,
+                SupportsBootstrapExisting = true,
             },
             CloudProvider.Azure => new CloudLaunchDefaultsDto
             {
@@ -100,7 +112,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "eastus",
                 Size = string.Empty,
                 Image = string.Empty,
-                SshUser = "azureuser",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = false,
                 SupportsBootstrapExisting = true,
             },
@@ -110,9 +122,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "nbg1",
                 Size = "cx22",
                 Image = "ubuntu-22.04",
-                SshUser = "root",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = true,
-                SupportsBootstrapExisting = false,
+                SupportsBootstrapExisting = true,
             },
             CloudProvider.Vultr => new CloudLaunchDefaultsDto
             {
@@ -120,9 +132,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
                 Region = defaultRegion ?? "ewr",
                 Size = "vc2-2c-4gb",
                 Image = string.Empty,
-                SshUser = "root",
+                SshUser = VpcBootstrapUserData.DefaultOperatorUser,
                 SupportsCreate = true,
-                SupportsBootstrapExisting = false,
+                SupportsBootstrapExisting = true,
             },
             _ => throw new InvalidOperationException($"{provider} launch defaults are not supported yet."),
         };
@@ -181,23 +193,62 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CloudLaunchRequestDto request,
         CancellationToken cancellationToken)
     {
+        var accessToken = await _digitalOceanTokenResolver.ResolveAsync(entity, cancellationToken);
+
         if (request.Mode == CloudLaunchMode.BootstrapExisting)
         {
-            throw new ArgumentException("DigitalOcean only supports creating a new droplet from the platform.");
-        }
+            var existing = await _digitalOceanClient.FindDropletAsync(
+                accessToken,
+                request.InstanceId,
+                publicHost: null,
+                cancellationToken)
+                ?? throw new ArgumentException("DigitalOcean droplet id is required to apply Cloud Firewall on an existing VM.");
 
-        var accessToken = CloudProviderCredentialStore.UnprotectDigitalOceanToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
+            var existingFirewall = await _digitalOceanClient.ApplyDropletFirewallAsync(
+                accessToken,
+                $"azeroth-platform-{existing.Id}",
+                existing.Id,
+                ToDigitalOceanInbound(LaunchInboundRules(request)),
+                cancellationToken);
+            var existingPublicIp = existing.Networks?.V4
+                .FirstOrDefault(network => string.Equals(network.Type, "public", StringComparison.OrdinalIgnoreCase))
+                ?.IpAddress ?? string.Empty;
+            var existingImageSlug = existing.Image?.Slug ?? string.Empty;
+            return await CompleteLaunchAsync(
+                entity,
+                request,
+                new CloudLaunchResultDto
+                {
+                    Instance = new CloudInstanceDto
+                    {
+                        Id = existing.Id.ToString(),
+                        Provider = CloudProvider.DigitalOcean,
+                        Name = existing.Name,
+                        Region = existing.Region?.Slug ?? string.Empty,
+                        State = existing.Status,
+                        PublicHost = existingPublicIp,
+                        SuggestedSshUser = CloudProviderConnectionService.SuggestSshUserFromImage(
+                            existingImageSlug,
+                            existing.Image?.Distribution),
+                        Image = string.IsNullOrWhiteSpace(existingImageSlug)
+                            ? existing.Image?.Distribution ?? string.Empty
+                            : existingImageSlug,
+                        InstanceType = existing.SizeSlug,
+                    },
+                    Message = request.ApplyNetworkProfile
+                        ? $"DigitalOcean Cloud Firewall {existingFirewall.Name} now allows SSH, game, and web ports on this droplet."
+                        : $"DigitalOcean Cloud Firewall {existingFirewall.Name} allows SSH.",
+                },
+                cancellationToken);
+        }
 
         var name = SanitizeResourceName(request.Name, "azeroth-vpc");
         var region = (request.Region ?? entity.DefaultRegion ?? "nyc3").Trim();
         var size = (request.Size ?? "s-2vcpu-4gb").Trim();
         var image = (request.Image ?? "ubuntu-22-04-x64").Trim();
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
-
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser, publicKey);
         var doKeyId = await _digitalOceanClient.UploadAccountSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -223,6 +274,25 @@ public sealed class CloudLaunchService : ICloudLaunchService
             .FirstOrDefault(network => string.Equals(network.Type, "public", StringComparison.OrdinalIgnoreCase))
             ?.IpAddress ?? string.Empty;
 
+        var firewall = await _digitalOceanClient.ApplyDropletFirewallAsync(
+            accessToken,
+            $"azeroth-platform-{active.Id}",
+            active.Id,
+            ToDigitalOceanInbound(request.ApplyNetworkProfile
+                ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+                :
+                [
+                    new VpcSecurityRuleDto
+                    {
+                        Port = 22,
+                        Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                            ? "0.0.0.0/0"
+                            : request.AdminSourceCidr.Trim(),
+                        Description = "SSH for platform bootstrap",
+                    },
+                ]),
+            cancellationToken);
+
         var imageSlug = active.Image?.Slug ?? string.Empty;
         return await CompleteLaunchAsync(
             entity,
@@ -241,10 +311,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
                         imageSlug,
                         active.Image?.Distribution),
                     Image = string.IsNullOrWhiteSpace(imageSlug) ? image : imageSlug,
+                    InstanceType = string.IsNullOrWhiteSpace(active.SizeSlug) ? size : active.SizeSlug,
                 },
                 SavedSshKeyId = savedKeyId,
                 PrivateKeyPem = generatedPrivateKey,
-                Message = "DigitalOcean droplet created and bootstrap script injected via user data.",
+                Message = request.ApplyNetworkProfile
+                    ? $"DigitalOcean droplet created. User data installs Docker, ufw, and OS baselines; Cloud Firewall {firewall.Name} allows SSH, game, and web ports."
+                    : "DigitalOcean droplet created and bootstrap script injected via user data.",
             },
             cancellationToken);
     }
@@ -254,23 +327,70 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CloudLaunchRequestDto request,
         CancellationToken cancellationToken)
     {
-        if (request.Mode == CloudLaunchMode.BootstrapExisting)
-        {
-            throw new ArgumentException("Hetzner Cloud only supports creating a new server from the platform.");
-        }
-
         var accessToken = CloudProviderCredentialStore.UnprotectApiToken(
             _secretProtector,
             entity.ProtectedCredentials);
+
+        if (request.Mode == CloudLaunchMode.BootstrapExisting)
+        {
+            var server = await _hetznerCloudClient.FindServerAsync(
+                accessToken,
+                request.InstanceId,
+                publicHost: null,
+                cancellationToken)
+                ?? throw new ArgumentException("Hetzner server id is required to apply Cloud Firewall on an existing VM.");
+
+            var inbound = ToHetznerInbound(request.ApplyNetworkProfile
+                ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+                :
+                [
+                    new VpcSecurityRuleDto
+                    {
+                        Port = 22,
+                        Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                            ? "0.0.0.0/0"
+                            : request.AdminSourceCidr.Trim(),
+                        Description = "SSH for platform bootstrap",
+                    },
+                ]);
+            var firewall = await _hetznerCloudClient.ApplyFirewallAsync(
+                accessToken,
+                $"azeroth-platform-{server.Id}",
+                server.Id,
+                inbound,
+                cancellationToken);
+            var existingImageName = server.Image?.Name ?? string.Empty;
+            return await CompleteLaunchAsync(
+                entity,
+                request,
+                new CloudLaunchResultDto
+                {
+                    Instance = new CloudInstanceDto
+                    {
+                        Id = server.Id.ToString(),
+                        Provider = CloudProvider.Hetzner,
+                        Name = server.Name,
+                        Region = server.Datacenter?.Location?.Name ?? server.Datacenter?.Name ?? string.Empty,
+                        State = server.Status,
+                        PublicHost = server.PublicIpv4,
+                        SuggestedSshUser = HetznerCloudClient.SuggestSshUserFromImage(existingImageName),
+                        Image = existingImageName,
+                        InstanceType = server.ServerType,
+                    },
+                    Message = request.ApplyNetworkProfile
+                        ? $"Hetzner Cloud Firewall {firewall.Name} now allows SSH, game, and web ports on this server."
+                        : $"Hetzner Cloud Firewall {firewall.Name} allows SSH.",
+                },
+                cancellationToken);
+        }
 
         var name = SanitizeResourceName(request.Name, "azeroth-vpc");
         var location = (request.Region ?? entity.DefaultRegion ?? "nbg1").Trim();
         var serverType = (request.Size ?? "cx22").Trim();
         var image = (request.Image ?? "ubuntu-22.04").Trim();
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
-
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser, publicKey);
         var sshKeyId = await _hetznerCloudClient.UploadSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -292,6 +412,27 @@ public sealed class CloudLaunchService : ICloudLaunchService
             created.Id,
             cancellationToken);
 
+        var firewallName = $"azeroth-platform-{active.Id}";
+        var launchInbound = ToHetznerInbound(request.ApplyNetworkProfile
+            ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+            :
+            [
+                new VpcSecurityRuleDto
+                {
+                    Port = 22,
+                    Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                        ? "0.0.0.0/0"
+                        : request.AdminSourceCidr.Trim(),
+                    Description = "SSH for platform bootstrap",
+                },
+            ]);
+        var applied = await _hetznerCloudClient.ApplyFirewallAsync(
+            accessToken,
+            firewallName,
+            active.Id,
+            launchInbound,
+            cancellationToken);
+
         var imageName = active.Image?.Name ?? image;
         return await CompleteLaunchAsync(
             entity,
@@ -308,10 +449,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     PublicHost = active.PublicIpv4,
                     SuggestedSshUser = HetznerCloudClient.SuggestSshUserFromImage(imageName),
                     Image = imageName,
+                    InstanceType = string.IsNullOrWhiteSpace(active.ServerType) ? serverType : active.ServerType,
                 },
                 SavedSshKeyId = savedKeyId,
                 PrivateKeyPem = generatedPrivateKey,
-                Message = "Hetzner Cloud server created and bootstrap script injected via user data.",
+                Message = request.ApplyNetworkProfile
+                    ? $"Hetzner Cloud server created. User data installs Docker, ufw, and OS baselines; Cloud Firewall {applied.Name} allows SSH, game, and web ports."
+                    : "Hetzner Cloud server created and bootstrap script injected via user data.",
             },
             cancellationToken);
     }
@@ -321,14 +465,46 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CloudLaunchRequestDto request,
         CancellationToken cancellationToken)
     {
+        var accessToken = await _vultrTokenResolver.ResolveAsync(entity, cancellationToken);
+
         if (request.Mode == CloudLaunchMode.BootstrapExisting)
         {
-            throw new ArgumentException("Vultr only supports creating a new instance from the platform.");
-        }
+            var instance = await _vultrClient.FindInstanceAsync(
+                accessToken,
+                request.InstanceId,
+                publicHost: null,
+                cancellationToken)
+                ?? throw new ArgumentException("Vultr instance id is required to apply a firewall group on an existing VM.");
 
-        var accessToken = CloudProviderCredentialStore.UnprotectApiToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
+            var existingFirewall = await _vultrClient.ApplyFirewallGroupAsync(
+                accessToken,
+                $"azeroth-platform-{instance.Id}",
+                instance.Id,
+                ToVultrInbound(LaunchInboundRules(request)),
+                cancellationToken);
+            return await CompleteLaunchAsync(
+                entity,
+                request,
+                new CloudLaunchResultDto
+                {
+                    Instance = new CloudInstanceDto
+                    {
+                        Id = instance.Id,
+                        Provider = CloudProvider.Vultr,
+                        Name = instance.Label,
+                        Region = instance.Region,
+                        State = instance.Status,
+                        PublicHost = instance.PublicHost,
+                        SuggestedSshUser = instance.SuggestedSshUser,
+                        Image = instance.Os,
+                        InstanceType = instance.Plan,
+                    },
+                    Message = request.ApplyNetworkProfile
+                        ? $"Vultr firewall group {existingFirewall.Description} now allows SSH, game, and web ports on this instance."
+                        : $"Vultr firewall group {existingFirewall.Description} allows SSH.",
+                },
+                cancellationToken);
+        }
 
         var label = SanitizeResourceName(request.Name, "azeroth-vpc");
         var region = (request.Region ?? entity.DefaultRegion ?? "ewr").Trim();
@@ -339,10 +515,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
             throw new ArgumentException("Select an operating system for the new Vultr instance.");
         }
 
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
-
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser, publicKey);
         var sshKeyId = await _vultrClient.UploadSshKeyAsync(
             accessToken,
             $"azeroth-{savedKeyId[..8]}",
@@ -357,11 +532,31 @@ public sealed class CloudLaunchService : ICloudLaunchService
             osId,
             script,
             [sshKeyId],
+            firewallGroupId: null,
             cancellationToken);
 
         var active = await _vultrClient.WaitForActiveInstanceAsync(
             accessToken,
             created.Id,
+            cancellationToken);
+
+        var firewall = await _vultrClient.ApplyFirewallGroupAsync(
+            accessToken,
+            $"azeroth-platform-{active.Id}",
+            active.Id,
+            ToVultrInbound(request.ApplyNetworkProfile
+                ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+                :
+                [
+                    new VpcSecurityRuleDto
+                    {
+                        Port = 22,
+                        Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                            ? "0.0.0.0/0"
+                            : request.AdminSourceCidr.Trim(),
+                        Description = "SSH for platform bootstrap",
+                    },
+                ]),
             cancellationToken);
 
         return await CompleteLaunchAsync(
@@ -379,10 +574,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     PublicHost = active.PublicHost,
                     SuggestedSshUser = active.SuggestedSshUser,
                     Image = active.Os,
+                    InstanceType = string.IsNullOrWhiteSpace(active.Plan) ? plan : active.Plan,
                 },
                 SavedSshKeyId = savedKeyId,
                 PrivateKeyPem = generatedPrivateKey,
-                Message = "Vultr instance created and bootstrap script injected via user data.",
+                Message = request.ApplyNetworkProfile
+                    ? $"Vultr instance created. User data installs Docker, ufw, and OS baselines; firewall group {firewall.Description} allows SSH, game, and web ports."
+                    : "Vultr instance created and bootstrap script injected via user data.",
             },
             cancellationToken);
     }
@@ -392,10 +590,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         string? regionFilter,
         CancellationToken cancellationToken)
     {
-        var accessToken = CloudProviderCredentialStore.UnprotectDigitalOceanToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
-
+        var accessToken = await _digitalOceanTokenResolver.ResolveAsync(entity, cancellationToken);
         var regionsTask = _digitalOceanClient.ListRegionsAsync(accessToken, cancellationToken);
         var sizesTask = _digitalOceanClient.ListSizesAsync(accessToken, regionFilter, cancellationToken);
         var imagesTask = _digitalOceanClient.ListDistributionImagesAsync(accessToken, cancellationToken);
@@ -502,11 +697,8 @@ public sealed class CloudLaunchService : ICloudLaunchService
         string? zoneFilter,
         CancellationToken cancellationToken)
     {
-        var serviceAccountJson = CloudProviderCredentialStore.UnprotectGcpServiceAccountJson(
-            _secretProtector,
-            entity.ProtectedCredentials);
-
-        var zones = await _gcpComputeClient.ListZonesAsync(serviceAccountJson, cancellationToken);
+        var access = await _gcpCredentialResolver.ResolveAsync(entity, cancellationToken);
+        var zones = await _gcpComputeClient.ListZonesAsync(access, cancellationToken);
         var selectedZone = (zoneFilter ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(selectedZone))
         {
@@ -514,7 +706,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         }
 
         var machineTypes = await _gcpComputeClient.ListMachineTypesAsync(
-            serviceAccountJson,
+            access,
             selectedZone,
             cancellationToken);
 
@@ -570,11 +762,11 @@ public sealed class CloudLaunchService : ICloudLaunchService
         }
 
         var name = SanitizeResourceName(request.Name, "azeroth-vpc");
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser, publicKey);
         var keyPairName = $"azeroth-{savedKeyId[..8]}";
 
         var instance = await _awsEc2Client.CreateInstanceAsync(
@@ -627,7 +819,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         }
 
         var region = (request.Region ?? entity.DefaultRegion ?? "us-east-1").Trim();
-        var sshUser = SanitizeSshUser(request.SshUser);
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
@@ -742,10 +934,7 @@ public sealed class CloudLaunchService : ICloudLaunchService
         string? regionFilter,
         CancellationToken cancellationToken)
     {
-        var accessToken = CloudProviderCredentialStore.UnprotectApiToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
-
+        var accessToken = await _vultrTokenResolver.ResolveAsync(entity, cancellationToken);
         var regionsTask = _vultrClient.ListRegionsAsync(accessToken, cancellationToken);
         var osTask = _vultrClient.ListOperatingSystemsAsync(accessToken, cancellationToken);
         await Task.WhenAll(regionsTask, osTask);
@@ -793,12 +982,8 @@ public sealed class CloudLaunchService : ICloudLaunchService
         string? locationFilter,
         CancellationToken cancellationToken)
     {
-        var credentials = CloudProviderCredentialStore.UnprotectAzureCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
-        var azureCredentials = CloudProviderConnectionService.ToAzureClientCredentials(credentials);
-
-        var locations = await _azureComputeClient.ListLocationsAsync(azureCredentials, cancellationToken);
+        var access = await _azureCredentialResolver.ResolveAsync(entity, cancellationToken);
+        var locations = await _azureComputeClient.ListLocationsAsync(access, cancellationToken);
         var selectedLocation = (locationFilter ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(selectedLocation))
         {
@@ -837,33 +1022,52 @@ public sealed class CloudLaunchService : ICloudLaunchService
         }
 
         var location = (request.Region ?? entity.DefaultRegion ?? string.Empty).Trim();
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var credentials = CloudProviderCredentialStore.UnprotectAzureCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
-        var azureCredentials = CloudProviderConnectionService.ToAzureClientCredentials(credentials);
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
+        var access = await _azureCredentialResolver.ResolveAsync(entity, cancellationToken);
 
         var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
         await _azureComputeClient.RunBootstrapScriptAsync(
-            azureCredentials,
+            access,
             vmResourceId,
             script,
             cancellationToken);
 
-        var instances = await _azureComputeClient.ListRunningInstancesAsync(
-            azureCredentials,
-            string.IsNullOrWhiteSpace(location) ? null : location,
-            cancellationToken);
+        var instance = await _azureComputeClient.FindInstanceAsync(
+            access,
+            vmResourceId,
+            publicHost: null,
+            cancellationToken)
+            ?? new AzureComputeClient.AzureVmInstance
+            {
+                Id = vmResourceId,
+                Name = vmResourceId.Split('/').LastOrDefault() ?? vmResourceId,
+                Location = location,
+                PublicHost = string.Empty,
+                SuggestedSshUser = sshUser,
+            };
 
-        var instance = instances.FirstOrDefault(item => item.Id.Equals(vmResourceId, StringComparison.OrdinalIgnoreCase))
-                       ?? new AzureComputeClient.AzureVmInstance
-                       {
-                           Id = vmResourceId,
-                           Name = vmResourceId.Split('/').LastOrDefault() ?? vmResourceId,
-                           Location = location,
-                           PublicHost = string.Empty,
-                           SuggestedSshUser = sshUser,
-                       };
+        var nsgMessage = string.Empty;
+        var inbound = ToAzureInbound(request.ApplyNetworkProfile
+            ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+            :
+            [
+                new VpcSecurityRuleDto
+                {
+                    Port = 22,
+                    Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                        ? "0.0.0.0/0"
+                        : request.AdminSourceCidr.Trim(),
+                    Description = "SSH for platform bootstrap",
+                },
+            ]);
+        var (applied, _) = await _azureComputeClient.ApplyNsgRulesAsync(
+            access,
+            instance.Id,
+            inbound,
+            cancellationToken);
+        nsgMessage = request.ApplyNetworkProfile
+            ? $" NSG updated with {applied} inbound rule(s) (SSH, game, and web ports)."
+            : $" NSG allows SSH ({applied} rule(s)).";
 
         return await CompleteLaunchAsync(
             entity,
@@ -880,8 +1084,9 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     PublicHost = instance.PublicHost,
                     SuggestedSshUser = instance.SuggestedSshUser,
                     Image = instance.Image,
+                    InstanceType = instance.VmSize,
                 },
-                Message = "Azure Run Command bootstrap completed successfully.",
+                Message = "Azure Run Command bootstrap completed successfully." + nsgMessage,
             },
             cancellationToken);
     }
@@ -891,27 +1096,58 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CloudLaunchRequestDto request,
         CancellationToken cancellationToken)
     {
+        var access = await _gcpCredentialResolver.ResolveAsync(entity, cancellationToken);
+
         if (request.Mode == CloudLaunchMode.BootstrapExisting)
         {
-            throw new ArgumentException("GCP only supports creating a new VM from the platform.");
-        }
+            var instance = await _gcpComputeClient.FindInstanceAsync(
+                access,
+                request.InstanceId,
+                publicHost: null,
+                cancellationToken)
+                ?? throw new ArgumentException("GCP instance id is required to apply VPC firewall rules on an existing VM.");
 
-        var serviceAccountJson = CloudProviderCredentialStore.UnprotectGcpServiceAccountJson(
-            _secretProtector,
-            entity.ProtectedCredentials);
+            var applied = await _gcpComputeClient.ApplyFirewallRulesAsync(
+                access,
+                instance.Name,
+                instance,
+                ToGcpInbound(LaunchInboundRules(request)),
+                cancellationToken);
+            return await CompleteLaunchAsync(
+                entity,
+                request,
+                new CloudLaunchResultDto
+                {
+                    Instance = new CloudInstanceDto
+                    {
+                        Id = instance.Id,
+                        Provider = CloudProvider.Gcp,
+                        Name = instance.Name,
+                        Region = instance.Zone,
+                        State = instance.State,
+                        PublicHost = instance.PublicHost,
+                        SuggestedSshUser = instance.SuggestedSshUser,
+                        Image = instance.Image,
+                        InstanceType = instance.MachineType,
+                    },
+                    Message = request.ApplyNetworkProfile
+                        ? $"GCP VPC firewall updated ({applied} ingress rule(s)) targeting tag {GcpComputeClient.PlatformNetworkTag}."
+                        : $"GCP VPC firewall allows SSH ({applied} ingress rule(s)).",
+                },
+                cancellationToken);
+        }
 
         var name = SanitizeResourceName(request.Name, "azeroth-vpc");
         var zone = (request.Region ?? entity.DefaultRegion ?? "us-central1-a").Trim();
         var machineType = (request.Size ?? "e2-medium").Trim();
         var sourceImage = (request.Image ?? "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts").Trim();
-        var sshUser = SanitizeSshUser(request.SshUser);
-        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser);
-
+        var sshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
         var (savedKeyId, publicKey, generatedPrivateKey) = await ResolveLaunchSshKeyAsync(request, sshUser, cancellationToken);
+        var script = VpcBootstrapUserData.BuildLaunchScript(sshUser, publicKey);
         var metadataPublicKey = $"{sshUser}:{publicKey}";
 
         await _gcpComputeClient.CreateInstanceAsync(
-            serviceAccountJson,
+            access,
             name,
             zone,
             machineType,
@@ -921,9 +1157,29 @@ public sealed class CloudLaunchService : ICloudLaunchService
             cancellationToken);
 
         var running = await _gcpComputeClient.WaitForRunningInstanceAsync(
-            serviceAccountJson,
+            access,
             zone,
             name,
+            cancellationToken);
+
+        var firewallRules = ToGcpInbound(request.ApplyNetworkProfile
+            ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+            :
+            [
+                new VpcSecurityRuleDto
+                {
+                    Port = 22,
+                    Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                        ? "0.0.0.0/0"
+                        : request.AdminSourceCidr.Trim(),
+                    Description = "SSH for platform bootstrap",
+                },
+            ]);
+        await _gcpComputeClient.ApplyFirewallRulesAsync(
+            access,
+            running.Name,
+            running,
+            firewallRules,
             cancellationToken);
 
         return await CompleteLaunchAsync(
@@ -941,10 +1197,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
                     PublicHost = running.PublicHost,
                     SuggestedSshUser = running.SuggestedSshUser,
                     Image = running.Image,
+                    InstanceType = string.IsNullOrWhiteSpace(running.MachineType) ? machineType : running.MachineType,
                 },
                 SavedSshKeyId = savedKeyId,
                 PrivateKeyPem = generatedPrivateKey,
-                Message = "GCP VM created and bootstrap script injected via startup-script metadata.",
+                Message = request.ApplyNetworkProfile
+                    ? "GCP VM created. Startup-script installs Docker, ufw, and OS baselines; VPC firewall rules targeting tag azeroth-platform allow SSH, game, and web ports."
+                    : "GCP VM created and bootstrap script injected via startup-script metadata.",
             },
             cancellationToken);
     }
@@ -985,6 +1244,13 @@ public sealed class CloudLaunchService : ICloudLaunchService
         CloudLaunchResultDto result,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(result.Instance.InstanceType))
+        {
+            result.Instance.InstanceType = (request.Size ?? string.Empty).Trim();
+        }
+
+        result.Instance.SuggestedSshUser = VpcBootstrapUserData.EnsureLaunchSshUser(request.SshUser);
+
         await _cloudAuditService.WriteAsync(
             new WriteCloudAuditLogRequestDto
             {
@@ -1032,6 +1298,86 @@ public sealed class CloudLaunchService : ICloudLaunchService
         return string.IsNullOrWhiteSpace(sanitized) ? fallback : sanitized[..Math.Min(sanitized.Length, 63)];
     }
 
-    private static string SanitizeSshUser(string sshUser)
-        => VpcBootstrapUserData.CreateDto(sshUser).SshUser;
+    private static IReadOnlyList<VpcSecurityRuleDto> LaunchInboundRules(CloudLaunchRequestDto request)
+        => request.ApplyNetworkProfile
+            ? VpcSecurityCatalog.BuildLaunchCloudIngressRules(request.AdminSourceCidr)
+            :
+            [
+                new VpcSecurityRuleDto
+                {
+                    Port = 22,
+                    Source = string.IsNullOrWhiteSpace(request.AdminSourceCidr)
+                        ? "0.0.0.0/0"
+                        : request.AdminSourceCidr.Trim(),
+                    Description = "SSH for platform bootstrap",
+                },
+            ];
+
+    private static List<DigitalOceanClient.DigitalOceanFirewallInboundRule> ToDigitalOceanInbound(
+        IEnumerable<VpcSecurityRuleDto> rules)
+        => rules
+            .Select(rule => new DigitalOceanClient.DigitalOceanFirewallInboundRule
+            {
+                Protocol = "tcp",
+                Ports = rule.Port.ToString(),
+                SourceAddresses =
+                [
+                    string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim(),
+                ],
+            })
+            .ToList();
+
+    private static List<GcpComputeClient.GcpFirewallInboundRule> ToGcpInbound(
+        IEnumerable<VpcSecurityRuleDto> rules)
+        => rules
+            .Select(rule => new GcpComputeClient.GcpFirewallInboundRule
+            {
+                Port = rule.Port,
+                SourceCidr = string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim(),
+                Description = rule.Description,
+            })
+            .ToList();
+
+    private static List<AzureComputeClient.AzureNsgInboundRule> ToAzureInbound(
+        IEnumerable<VpcSecurityRuleDto> rules)
+        => rules
+            .Select(rule => new AzureComputeClient.AzureNsgInboundRule
+            {
+                Port = rule.Port,
+                SourceCidr = string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim(),
+                Description = rule.Description,
+            })
+            .ToList();
+
+    private static List<VultrClient.VultrFirewallInboundRule> ToVultrInbound(
+        IEnumerable<VpcSecurityRuleDto> rules)
+        => rules
+            .Select(rule =>
+            {
+                var cidr = string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim();
+                var (subnet, size) = VultrClient.SplitCidr(cidr);
+                return new VultrClient.VultrFirewallInboundRule
+                {
+                    Protocol = "tcp",
+                    Port = rule.Port.ToString(),
+                    Subnet = subnet,
+                    SubnetSize = size,
+                    Notes = rule.Description,
+                };
+            })
+            .ToList();
+
+    private static List<HetznerCloudClient.HetznerFirewallInboundRule> ToHetznerInbound(
+        IEnumerable<VpcSecurityRuleDto> rules)
+        => rules
+            .Select(rule => new HetznerCloudClient.HetznerFirewallInboundRule
+            {
+                Port = rule.Port.ToString(),
+                SourceIps =
+                [
+                    string.IsNullOrWhiteSpace(rule.Source) ? "0.0.0.0/0" : rule.Source.Trim(),
+                ],
+                Description = rule.Description,
+            })
+            .ToList();
 }

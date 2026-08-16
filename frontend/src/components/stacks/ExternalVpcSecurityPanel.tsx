@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,7 +22,9 @@ import type {
   VpcSecurityCheckDto,
   VpcSecurityCheckStatus,
 } from '@/types/stack.types'
-import { CloudProvider, DeploymentTarget } from '@/types/stack.types'
+import { CloudProvider, DeploymentTarget, StackStatus } from '@/types/stack.types'
+import { stackKeys } from '@/hooks/useStacks'
+import { isForbiddenSshUser, isImageDefaultSshUser } from '@/lib/ssh-user'
 
 function StatusIcon({ status }: { status: VpcSecurityCheckStatus }) {
   switch (status) {
@@ -117,6 +119,7 @@ function VpcSecurityStatusCard({
 }
 
 export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetailsDto }) {
+  const queryClient = useQueryClient()
   const isExternal = stack.configuration?.deployment?.target === DeploymentTarget.External
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [syncSuccess, setSyncSuccess] = useState<boolean | null>(null)
@@ -129,6 +132,10 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
   const [awsRegion, setAwsRegion] = useState('')
   const [cloudSgMessage, setCloudSgMessage] = useState<string | null>(null)
   const [cloudSgSuccess, setCloudSgSuccess] = useState<boolean | null>(null)
+  const [hardenConfirm, setHardenConfirm] = useState(false)
+  const [hardenMessage, setHardenMessage] = useState<string | null>(null)
+  const [hardenSuccess, setHardenSuccess] = useState<boolean | null>(null)
+  const [hardenSteps, setHardenSteps] = useState<RemotePrerequisiteCheckDto[] | null>(null)
 
   const deployment = stack.configuration?.deployment
   const remoteHost = deployment?.externalHost?.trim()
@@ -151,11 +158,19 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
     refetchInterval: 120_000,
   })
 
-  const { data: awsConnections = [] } = useQuery({
-    queryKey: ['cloud-connections', 'aws'],
+  const { data: firewallConnections = [] } = useQuery({
+    queryKey: ['cloud-connections', 'firewall'],
     queryFn: async () => {
       const res = await cloudApi.listConnections()
-      return res.data.filter((connection) => connection.provider === CloudProvider.Aws)
+      return res.data.filter(
+        (connection) =>
+          connection.provider === CloudProvider.Aws
+          || connection.provider === CloudProvider.DigitalOcean
+          || connection.provider === CloudProvider.Vultr
+          || connection.provider === CloudProvider.Gcp
+          || connection.provider === CloudProvider.Azure
+          || connection.provider === CloudProvider.Hetzner,
+      )
     },
     enabled: isExternal,
   })
@@ -216,7 +231,61 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
     },
     onError: (err) => {
       setCloudSgSuccess(false)
-      setCloudSgMessage(apiErrorMessage(err, 'Failed to apply AWS security group rules.'))
+      setCloudSgMessage(apiErrorMessage(err, 'Failed to apply cloud firewall rules.'))
+    },
+  })
+
+  const sshUser = deployment?.externalSshUser?.trim() ?? ''
+  const canHarden =
+    stack.status !== StackStatus.SetupIncomplete
+    && sshUser.length > 0
+    && !isForbiddenSshUser(sshUser)
+    && !isImageDefaultSshUser(sshUser)
+  const stackCloudProvider = deployment?.cloudProvider ?? stack.configuration?.deployment?.cloudProvider
+  const isAwsStack = stackCloudProvider === CloudProvider.Aws
+  const isDigitalOceanStack = stackCloudProvider === CloudProvider.DigitalOcean
+  const isVultrStack = stackCloudProvider === CloudProvider.Vultr
+  const isGcpStack = stackCloudProvider === CloudProvider.Gcp
+  const isAzureStack = stackCloudProvider === CloudProvider.Azure
+  const isHetznerStack = stackCloudProvider === CloudProvider.Hetzner
+  const selectedConnection = firewallConnections.find((connection) => connection.id === connectionId)
+  const selectedProvider = selectedConnection?.provider
+  const isAwsConnection = selectedProvider === CloudProvider.Aws
+  const isDigitalOceanConnection = selectedProvider === CloudProvider.DigitalOcean
+  const isVultrConnection = selectedProvider === CloudProvider.Vultr
+  const isGcpConnection = selectedProvider === CloudProvider.Gcp
+  const isAzureConnection = selectedProvider === CloudProvider.Azure
+  const isHetznerConnection = selectedProvider === CloudProvider.Hetzner
+
+  useEffect(() => {
+    const savedConnectionId = (deployment?.cloudConnectionId ?? '').trim()
+    if (savedConnectionId && firewallConnections.some((connection) => connection.id === savedConnectionId)) {
+      setConnectionId((current) => current || savedConnectionId)
+    }
+
+    const savedInstanceId = (deployment?.cloudInstanceId ?? '').trim()
+    if (savedInstanceId) {
+      setInstanceId((current) => current || savedInstanceId)
+    }
+  }, [deployment?.cloudConnectionId, deployment?.cloudInstanceId, firewallConnections])
+
+  const finalizeSsh = useMutation({
+    mutationFn: () => stackApi.finalizeSshHardening(stack.stackId),
+    onMutate: () => {
+      setHardenSuccess(null)
+      setHardenMessage(null)
+      setHardenSteps(null)
+    },
+    onSuccess: (res) => {
+      setHardenSuccess(res.data.success)
+      setHardenMessage(res.data.message)
+      setHardenSteps(res.data.steps ?? null)
+      setHardenConfirm(false)
+      void queryClient.invalidateQueries({ queryKey: stackKeys.detail(stack.stackId) })
+    },
+    onError: (err) => {
+      setHardenSuccess(false)
+      setHardenMessage(apiErrorMessage(err, 'SSH hardening failed.'))
     },
   })
 
@@ -328,10 +397,11 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
             className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left"
           >
             <div>
-              <p className="text-xs font-semibold text-blue-950">Apply AWS security group rules (optional)</p>
+              <p className="text-xs font-semibold text-blue-950">Apply cloud firewall rules (optional)</p>
               <p className="mt-0.5 text-[11px] text-blue-900/90">
-                Uses a linked AWS account to add ingress rules from this stack&apos;s profile. SSH is restricted
-                to your admin CIDR; game and web ports use the public template.
+                Uses a linked AWS, DigitalOcean, Vultr, or Google Cloud account to add ingress rules from this
+                stack&apos;s profile. SSH is restricted to your admin CIDR; game and web ports use the public
+                template.
               </p>
             </div>
             {cloudSgOpen ? (
@@ -342,23 +412,36 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
           </button>
           {cloudSgOpen && (
             <div className="space-y-3 border-t border-blue-200 px-3 py-3">
-              {awsConnections.length === 0 ? (
+              {firewallConnections.length === 0 ? (
                 <p className="text-xs text-blue-950">
-                  Link an AWS account under <span className="font-medium">Admin → Cloud</span> to use automation.
+                  Link an AWS, DigitalOcean, Vultr, Google Cloud, Azure, or Hetzner account under{' '}
+                  <span className="font-medium">Admin → Cloud</span> to use automation.
                 </p>
               ) : (
                 <>
                   <label className="block text-xs text-blue-950">
-                    <span className="mb-1 block font-medium">Linked AWS account</span>
+                    <span className="mb-1 block font-medium">Linked cloud account</span>
                     <select
                       value={connectionId}
                       onChange={(event) => setConnectionId(event.target.value)}
                       className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 text-xs text-gray-900"
                     >
                       <option value="">Select connection…</option>
-                      {awsConnections.map((connection) => (
+                      {firewallConnections.map((connection) => (
                         <option key={connection.id} value={connection.id}>
                           {connection.label}
+                          {connection.provider === CloudProvider.DigitalOcean
+                            ? ' (DigitalOcean)'
+                            : connection.provider === CloudProvider.Vultr
+                              ? ' (Vultr)'
+                              : connection.provider === CloudProvider.Gcp
+                                ? ' (Google Cloud)'
+                                : connection.provider === CloudProvider.Azure
+                                  ? ' (Azure)'
+                                  : connection.provider === CloudProvider.Hetzner
+                                    ? ' (Hetzner)'
+                                    : ' (AWS)'}
+                          {connection.defaultProjectId ? ` [${connection.defaultProjectId}]` : ''}
                           {connection.defaultRegion ? ` (${connection.defaultRegion})` : ''}
                         </option>
                       ))}
@@ -387,28 +470,54 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block text-xs text-blue-950">
-                      <span className="mb-1 block font-medium">EC2 instance id (optional)</span>
+                      <span className="mb-1 block font-medium">
+                        {isDigitalOceanConnection
+                          ? 'Droplet id (optional)'
+                          : isVultrConnection
+                            ? 'Vultr instance id (optional)'
+                            : isGcpConnection
+                              ? 'GCP instance id (optional)'
+                              : isAzureConnection
+                                ? 'Azure VM resource id (optional)'
+                                : isHetznerConnection
+                                  ? 'Hetzner server id (optional)'
+                                  : 'EC2 instance id (optional)'}
+                      </span>
                       <input
                         type="text"
                         value={instanceId}
                         onChange={(event) => setInstanceId(event.target.value)}
-                        placeholder="i-0abc123…"
+                        placeholder={
+                          isDigitalOceanConnection
+                            ? '123456789'
+                            : isVultrConnection
+                              ? 'instance uuid'
+                              : isGcpConnection
+                                ? 'zone/instance-name'
+                                : isAzureConnection
+                                  ? '/subscriptions/…/virtualMachines/…'
+                                  : isHetznerConnection
+                                    ? '12345678'
+                                    : 'i-0abc123…'
+                        }
                         className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
                       />
                     </label>
-                    <label className="block text-xs text-blue-950">
-                      <span className="mb-1 block font-medium">AWS region (optional)</span>
-                      <input
-                        type="text"
-                        value={awsRegion}
-                        onChange={(event) => setAwsRegion(event.target.value)}
-                        placeholder="us-east-1"
-                        className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
-                      />
-                    </label>
+                    {isAwsConnection || !selectedProvider ? (
+                      <label className="block text-xs text-blue-950">
+                        <span className="mb-1 block font-medium">AWS region (optional)</span>
+                        <input
+                          type="text"
+                          value={awsRegion}
+                          onChange={(event) => setAwsRegion(event.target.value)}
+                          placeholder="us-east-1"
+                          className="w-full rounded-md border border-blue-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-900"
+                        />
+                      </label>
+                    ) : null}
                   </div>
                   <p className="text-[11px] text-blue-900/90">
-                    When instance id is omitted, the platform finds the running EC2 instance whose public IP or DNS
+                    When instance id is omitted, the platform finds the running VM whose public IP or DNS
                     matches this stack&apos;s host ({remoteHost || 'not set'}). Duplicate rules are skipped.
                   </p>
                   <button
@@ -426,7 +535,17 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                     ) : (
                       <Shield className="h-3.5 w-3.5" aria-hidden="true" />
                     )}
-                    Apply AWS security group rules
+                    {isDigitalOceanConnection
+                      ? 'Apply DigitalOcean Cloud Firewall rules'
+                      : isVultrConnection
+                        ? 'Apply Vultr firewall group rules'
+                        : isGcpConnection
+                          ? 'Apply GCP VPC firewall rules'
+                          : isAzureConnection
+                            ? 'Apply Azure NSG rules'
+                            : isHetznerConnection
+                              ? 'Apply Hetzner Cloud Firewall rules'
+                              : 'Apply AWS security group rules'}
                   </button>
                 </>
               )}
@@ -483,6 +602,151 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
         )}
       </div>
 
+      {stack.status !== StackStatus.SetupIncomplete ? (
+        <div className="mt-4 space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+          <p className="text-xs font-semibold text-gray-800">Finalize SSH hardening</p>
+          {stack.sshHardeningCompletedAt ? (
+            <p className="text-[11px] text-green-800">
+              Applied {new Date(stack.sshHardeningCompletedAt).toLocaleString()}. Daily SSH is{' '}
+              <span className="font-mono">{sshUser || 'the operator user'}</span>
+              {isAwsStack
+                ? '; ubuntu is AWS console Instance Connect only'
+                : isDigitalOceanStack
+                  ? '; image-default users cannot SSH from the internet (break-glass is Droplet Console)'
+                  : isVultrStack
+                    ? '; image-default users cannot SSH from the internet (break-glass is View Console)'
+                    : isGcpStack
+                      ? '; image-default users cannot SSH from the internet (break-glass is serial console / IAP)'
+                      : isAzureStack
+                        ? '; image-default users cannot SSH from the internet (break-glass is Bastion / serial / Run Command)'
+                        : isHetznerStack
+                          ? '; image-default users cannot SSH from the internet (break-glass is Hetzner KVM Console)'
+                          : '; image-default users cannot SSH from the internet'}.
+            </p>
+          ) : (
+            <p className="text-[11px] text-gray-600">
+              Last step after the stack is working. Disables root SSH and removes static keys from ubuntu (and other
+              image defaults). Keep one operator session until it finishes.
+            </p>
+          )}
+          {!canHarden ? (
+            <p className="text-[11px] text-amber-800">
+              Connect as a dedicated operator user such as <span className="font-mono">azp-admin</span> first. Current
+              SSH user <span className="font-mono">{sshUser || '(empty)'}</span> cannot be hardened.
+            </p>
+          ) : null}
+          {isAwsStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: AWS console → EC2 → instance → Connect → EC2 Instance Connect as{' '}
+              <span className="font-mono">ubuntu</span>, then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>.
+            </p>
+          ) : isVultrStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: Vultr portal → instance →{' '}
+              <span className="font-medium">View Console</span>, then{' '}
+              <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no internet SSH to
+              root after this.
+            </p>
+          ) : isGcpStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: Google Cloud Console → Compute Engine → VM →{' '}
+              <span className="font-medium">Serial console</span> or <span className="font-medium">IAP SSH</span>
+              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
+              internet SSH to root after this.
+            </p>
+          ) : isAzureStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: Azure Portal → VM →{' '}
+              <span className="font-medium">Bastion</span>, serial console, or{' '}
+              <span className="font-medium">Run Command</span>
+              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
+              internet SSH to root after this.
+            </p>
+          ) : isHetznerStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: Hetzner Cloud Console → server →{' '}
+              <span className="font-medium">Console</span> (KVM)
+              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
+              internet SSH to root after this.
+            </p>
+          ) : isDigitalOceanStack ? (
+            <p className="text-[11px] text-gray-600">
+              Recovery if the operator key is lost: DigitalOcean → Droplet → Access →{' '}
+              <span className="font-medium">Launch Droplet Console</span>, then{' '}
+              <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no internet SSH to
+              root after this.
+            </p>
+          ) : (
+            <p className="text-[11px] text-gray-600">
+              Recovery is the provider console (serial / web console) only. There is no internet SSH to root after this.
+            </p>
+          )}
+          {hardenConfirm ? (
+            <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-medium text-amber-950">
+                I understand ubuntu is console-only after this, and daily access is via my operator user. This cannot be
+                undone from the platform.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => finalizeSsh.mutate()}
+                  disabled={finalizeSsh.isPending}
+                  className="inline-flex items-center gap-2 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900 disabled:opacity-60"
+                >
+                  {finalizeSsh.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Apply SSH hardening
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHardenConfirm(false)}
+                  disabled={finalizeSsh.isPending}
+                  className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-950"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setHardenConfirm(true)}
+              disabled={!canHarden || finalizeSsh.isPending}
+              className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-white disabled:opacity-60"
+            >
+              <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+              {stack.sshHardeningCompletedAt ? 'Re-apply SSH hardening' : 'Finalize SSH hardening'}
+            </button>
+          )}
+          {hardenMessage ? (
+            <div
+              role="status"
+              className={`rounded-md border px-3 py-2 text-xs ${
+                hardenSuccess
+                  ? 'border-green-200 bg-green-50 text-green-900'
+                  : 'border-amber-200 bg-amber-50 text-amber-950'
+              }`}
+            >
+              <p>{hardenMessage}</p>
+              {hardenSteps && hardenSteps.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {hardenSteps.map((step) => (
+                    <li key={step.name}>
+                      {step.name}
+                      {step.message ? ` — ${step.message}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <CloudSecurityGroupGuideDialog
         open={sgGuideOpen}
         onClose={() => setSgGuideOpen(false)}
@@ -490,6 +754,19 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
         sshPort={deployment?.externalSshPort ?? 22}
         profile={profile}
         requireAcknowledgment={false}
+        initialProvider={
+          isDigitalOceanStack
+            ? 'digitalocean'
+            : isVultrStack
+              ? 'vultr'
+              : isGcpStack
+                ? 'gcp'
+                : isAzureStack
+                  ? 'azure'
+                  : isHetznerStack
+                    ? 'hetzner'
+                    : 'aws'
+        }
       />
     </section>
   )

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { stackApi, buildApi } from '@/services/api'
 import { DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type { StackServiceDto, StackServiceAction } from '@/types/stack.types'
-import { Suspense, useState, useMemo, useEffect, useRef, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { stackKeys, useStackDetail } from '@/hooks/useStacks'
 import { useDelayedTrue } from '@/hooks/useDelayedTrue'
 import { accountKeys } from '@/hooks/useAccounts'
@@ -21,12 +21,14 @@ import { useRealms, realmKeys } from '@/hooks/useRealms'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import StackDetailLoadingShell from '@/components/stacks/StackDetailLoadingShell'
 import { resolveArmoryBrowseUrl } from '@/lib/armory-network'
+import { apiErrorMessage } from '@/lib/utils'
 import { useLauncherProfile } from '@/hooks/useLauncher'
 import { Eye, EyeOff, Copy, Play, Square, RotateCw, Hammer, Loader2 } from 'lucide-react'
 
 const EditStackConfigModal = lazyWithRetry(() => import('@/components/EditStackConfigModal'))
 const UpdateStackDialog = lazyWithRetry(() => import('@/components/UpdateStackDialog'))
 const RebuildStackDialog = lazyWithRetry(() => import('@/components/RebuildStackDialog'))
+const DeleteStackDialog = lazyWithRetry(() => import('@/components/DeleteStackDialog'))
 const AccountsTab = lazyWithRetry(() => import('@/components/accounts/AccountsTab'))
 const CharactersTab = lazyWithRetry(() => import('@/components/characters/CharactersTab'))
 const RealmsTab = lazyWithRetry(() => import('@/components/realms/RealmsTab'))
@@ -55,6 +57,16 @@ const InitialBuildRequiredPanel = lazyWithRetry(() => import('@/components/stack
 const StackOverviewStatusPanel = lazyWithRetry(() => import('@/components/stacks/StackOverviewStatusPanel'))
 
 function TabSuspense({ children }: { children: ReactNode }) {
+  // React Router wraps navigations in startTransition. If a lazy tab suspends on the first
+  // paint, React keeps the previous page visible (URL already updated). Defer lazy children
+  // until after commit so the new route paints immediately.
+  const [allowLazy, setAllowLazy] = useState(false)
+  useEffect(() => {
+    setAllowLazy(true)
+  }, [])
+  if (!allowLazy) {
+    return <PageLoader />
+  }
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>
 }
 
@@ -232,6 +244,12 @@ function StackDetailsPageContent() {
     },
   })
 
+  useEffect(() => {
+    if (stack?.status === StackStatus.SetupIncomplete) {
+      navigate(`/stacks/new?draft=${encodeURIComponent(stack.stackId)}`, { replace: true })
+    }
+  }, [navigate, stack])
+
   const isExternalStack = stack?.configuration.deployment?.target === DeploymentTarget.External
   const isBackgroundRefetch = isFetching && !!stack && !isStackBusy
   // VPC SSH probes are slow; only surface a banner when a refresh is genuinely stuck, not on every poll.
@@ -408,7 +426,8 @@ function StackDetailsPageContent() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => stackApi.delete(stackId!),
+    mutationFn: (terminateCloudInstance: boolean) =>
+      stackApi.delete(stackId!, { terminateCloudInstance }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
       navigate('/stacks')
@@ -520,6 +539,10 @@ function StackDetailsPageContent() {
     return <StackDetailLoadingShell stackId={stackId!} isRefreshing={isFetching} />
   }
 
+  if (stack.status === StackStatus.SetupIncomplete) {
+    return <StackDetailLoadingShell stackId={stackId!} isRefreshing />
+  }
+
   const hasCompletedBuild =
     stack.hasCompletedBuild === true ||
     (stack.hasCompletedBuild === undefined && !!stack.updateStatus?.currentCoreSha)
@@ -532,7 +555,7 @@ function StackDetailsPageContent() {
           stackId={stackId!}
           onRetryBuild={() => retryInitialBuildMutation.mutate()}
           isRetrying={retryInitialBuildMutation.isPending}
-          onDelete={() => deleteMutation.mutate()}
+          onDelete={() => deleteMutation.mutate(false)}
           isDeleting={deleteMutation.isPending}
         />
       </TabSuspense>
@@ -555,6 +578,8 @@ function StackDetailsPageContent() {
         return 'bg-blue-100 text-blue-800 border-blue-200'
       case StackStatus.Failed:
         return 'bg-red-100 text-red-800 border-red-200'
+      case StackStatus.SetupIncomplete:
+        return 'bg-amber-100 text-amber-900 border-amber-200'
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200'
     }
@@ -1475,49 +1500,22 @@ function StackDetailsPageContent() {
       )}
 
       {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md mx-4">
-            <h3 className="text-xl font-semibold mb-4">
-              {isExternalStack ? 'Remove VPC stack from manager?' : 'Delete Stack?'}
-            </h3>
-            <p className="text-gray-600 mb-6">
-              {isExternalStack ? (
-                <>
-                  Remove <strong>{stack.stackName}</strong> from this manager? Remote containers on the VPC
-                  will keep running — only the manager record, SSH connection, and local build files are removed.
-                </>
-              ) : (
-                <>
-                  Are you sure you want to delete <strong>{stack.stackName}</strong>? This will remove all
-                  containers, images, and build files. This action cannot be undone.
-                </>
-              )}
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  deleteMutation.mutate()
-                  setShowDeleteConfirm(false)
-                }}
-                disabled={deleteMutation.isPending}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition"
-              >
-                {deleteMutation.isPending
-                  ? 'Removing…'
-                  : isExternalStack
-                    ? 'Remove from manager'
-                    : 'Delete Stack'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {showDeleteConfirm && stack && (
+        <TabSuspense>
+          <DeleteStackDialog
+            stackName={stack.stackName}
+            isExternal={isExternalStack}
+            onConfirm={(terminateCloudInstance) => deleteMutation.mutate(terminateCloudInstance)}
+            onCancel={() => {
+              if (!deleteMutation.isPending) {
+                setShowDeleteConfirm(false)
+                deleteMutation.reset()
+              }
+            }}
+            isDeleting={deleteMutation.isPending}
+            error={deleteMutation.error ? apiErrorMessage(deleteMutation.error) : null}
+          />
+        </TabSuspense>
       )}
 
       {/* Edit Configuration Modal */}

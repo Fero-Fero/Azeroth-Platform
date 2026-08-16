@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, Cloud, Copy, Loader2, Server, XCircle } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
 import { VpcConnectionMethodTabs } from '@/components/wizard/common/VpcConnectionMethodTabs'
@@ -22,6 +22,7 @@ import {
 
 interface DeploymentStepProps {
   form: WizardForm
+  onVpcBound?: () => void
 }
 
 const PLANNED_SETUP_ITEMS = [
@@ -46,7 +47,8 @@ const PLANNED_SETUP_ITEMS = [
   {
     id: 'cloud-sg',
     title: 'Configure cloud security group',
-    description: 'Mirror the same allow/deny rules in AWS/GCP/Azure (manual checklist for now).',
+    description:
+      'Launch and pick apply these rules automatically on AWS, GCP, Azure, DigitalOcean, Hetzner, and Vultr. Use the checklist if you need to inspect or repair by hand.',
     available: true,
   },
 ] as const
@@ -559,7 +561,7 @@ function ConnectionTestProgressBar({
   )
 }
 
-export function DeploymentStep({ form }: DeploymentStepProps) {
+export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
   const {
     register,
     watch,
@@ -579,6 +581,9 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const remoteOs = watch('deployment.remoteOs') ?? RemoteHostOs.Linux
   const enableHostFirewall = watch('deployment.enableHostFirewall') ?? true
   const sshCertificateVerified = watch('deployment.sshCertificateVerified') ?? true
+  const cloudConnectionId = watch('deployment.cloudConnectionId') ?? ''
+  const cloudInstanceId = watch('deployment.cloudInstanceId') ?? ''
+  const cloudProvider = watch('deployment.cloudProvider') ?? ''
   const authServerPort = watch('ports.authServer') ?? 3724
   const worldServerPort = watch('ports.worldServer') ?? 8085
 
@@ -613,7 +618,15 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const [sshTestResult, setSshTestResult] = useState<RemoteConnectionTestResultDto | null>(null)
   const [settingUp, setSettingUp] = useState(false)
   const [setupResult, setSetupResult] = useState<RemoteSetupResultDto | null>(null)
-  const [cloudConnectionId, setCloudConnectionId] = useState('')
+  const skipCredentialResetRef = useRef(true)
+
+  const handleCloudConnectionIdChange = useCallback((id: string) => {
+    setValue('deployment.cloudConnectionId', id, { shouldDirty: true })
+  }, [setValue])
+
+  const handleCloudProviderChange = useCallback((provider: string) => {
+    setValue('deployment.cloudProvider', provider, { shouldDirty: true })
+  }, [setValue])
 
   const connectionFieldsReady =
     externalHost.trim().length > 0 && externalSshUser.trim().length > 0
@@ -626,6 +639,11 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
   const dockerReady = prerequisitesMet(testResult)
 
   useEffect(() => {
+    if (skipCredentialResetRef.current) {
+      skipCredentialResetRef.current = false
+      return
+    }
+
     setValue('deployment.connectionVerified', false, { shouldDirty: true })
     setValue('deployment.firstTimeSetupCompleted', false, { shouldDirty: true })
     setValue('deployment.cloudSecurityGroupAcknowledged', false, { shouldDirty: true })
@@ -653,6 +671,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
           const probe = (
             await cloudApi.probeFirewall(cloudConnectionId, {
               publicHost: externalHost.trim(),
+              instanceId: cloudInstanceId.trim() || undefined,
             })
           ).data
           cloudChecks = probe.checks ?? []
@@ -683,7 +702,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
         prerequisites,
       }
     },
-    [cloudConnectionId, deploymentPayload, externalHost]
+    [cloudConnectionId, cloudInstanceId, deploymentPayload, externalHost]
   )
 
   const runConnectionTest = useCallback(async (): Promise<RemoteConnectionTestResultDto | null> => {
@@ -956,7 +975,9 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
               <VpcConnectionMethodTabs
                 disabled={testing || settingUp || sshTesting}
                 cloudConnectionId={cloudConnectionId}
-                onCloudConnectionIdChange={setCloudConnectionId}
+                onCloudConnectionIdChange={handleCloudConnectionIdChange}
+                cloudProvider={cloudProvider}
+                onCloudProviderChange={handleCloudProviderChange}
                 externalHost={externalHost}
                 externalSshUser={externalSshUser}
                 savedSshKeyId={savedSshKeyId}
@@ -976,18 +997,33 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                 sshTestResult={sshTestResult}
                 onSelectInstance={(instance) => {
                   setValue('deployment.externalHost', instance.publicHost, { shouldDirty: true, shouldValidate: true })
+                  setValue('deployment.cloudInstanceId', instance.id, { shouldDirty: true })
+                  setValue('deployment.cloudRegion', instance.region ?? '', { shouldDirty: true })
+                  if (cloudConnectionId.trim()) {
+                    setValue('deployment.cloudConnectionId', cloudConnectionId, { shouldDirty: true })
+                  }
+                  setValue('deployment.cloudProvider', instance.provider, { shouldDirty: true })
+                  setValue('deployment.cloudInstanceType', instance.instanceType ?? '', { shouldDirty: true })
                   if (instance.suggestedSshUser) {
                     setValue('deployment.externalSshUser', instance.suggestedSshUser, {
                       shouldDirty: true,
                       shouldValidate: true,
                     })
                   }
+                  onVpcBound?.()
                 }}
                 onLaunched={(result) => {
                   setValue('deployment.externalHost', result.instance.publicHost, {
                     shouldDirty: true,
                     shouldValidate: true,
                   })
+                  setValue('deployment.cloudInstanceId', result.instance.id, { shouldDirty: true })
+                  setValue('deployment.cloudRegion', result.instance.region ?? '', { shouldDirty: true })
+                  if (cloudConnectionId.trim()) {
+                    setValue('deployment.cloudConnectionId', cloudConnectionId, { shouldDirty: true })
+                  }
+                  setValue('deployment.cloudProvider', result.instance.provider, { shouldDirty: true })
+                  setValue('deployment.cloudInstanceType', result.instance.instanceType ?? '', { shouldDirty: true })
                   if (result.instance.suggestedSshUser) {
                     setValue('deployment.externalSshUser', result.instance.suggestedSshUser, {
                       shouldDirty: true,
@@ -1004,6 +1040,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                   setValue('deployment.vpcSetupMode', 'skip', { shouldDirty: true })
                   setValue('deployment.firstTimeSetupCompleted', true, { shouldDirty: true })
                   setValue('deployment.cloudSecurityGroupAcknowledged', true, { shouldDirty: true })
+                  onVpcBound?.()
                 }}
               >
                 <div className="space-y-3">
@@ -1125,7 +1162,7 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                 </button>
                 <p className="text-xs text-gray-500">
                   Checks SSH, Docker, ufw ports, OS baselines
-                  {cloudConnectionId.trim() ? ', and AWS security groups' : ''}.
+                  {cloudConnectionId.trim() ? ', and the linked cloud firewall' : ''}.
                 </p>
               </div>
 
@@ -1177,8 +1214,9 @@ export function DeploymentStep({ form }: DeploymentStepProps) {
                 </p>
               ) : (
                 <p className="text-xs text-amber-800">
-                  Verify VPC must pass before you can continue. If launch user data is still running, wait and
-                  try again. Use Repair host setup only for an existing VM that was not launched from this wizard.
+                  Verify VPC must pass before you can continue. It waits for launch user-data and installs
+                  Docker if the VPC still does not have it. Use Repair host setup only when Verify cannot
+                  finish setup on an existing VM.
                 </p>
               )}
 

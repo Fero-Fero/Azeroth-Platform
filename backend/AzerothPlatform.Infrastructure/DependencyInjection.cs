@@ -136,10 +136,15 @@ public static class DependencyInjection
         services.AddSingleton<AwsSsmClient>();
         services.AddSingleton<AwsStsClient>();
         services.AddSingleton<IAwsCredentialResolver, AwsCredentialResolver>();
-        services.AddSingleton<GcpComputeClient>();
-        services.AddSingleton<AzureComputeClient>();
+        services.AddScoped<IDigitalOceanTokenResolver, DigitalOceanTokenResolver>();
+        services.AddScoped<IVultrTokenResolver, VultrTokenResolver>();
+        services.AddScoped<IGcpCredentialResolver, GcpTokenResolver>();
+        services.AddHttpClient<GcpComputeClient>();
+        services.AddScoped<IAzureCredentialResolver, AzureTokenResolver>();
+        services.AddHttpClient<AzureComputeClient>();
         services.AddScoped<ICloudProviderConnectionService, CloudProviderConnectionService>();
         services.AddScoped<ICloudLaunchService, CloudLaunchService>();
+        services.AddScoped<ICloudInstanceLifecycleService, CloudInstanceLifecycleService>();
         services.AddScoped<ICloudFirewallService, CloudFirewallService>();
         services.AddSingleton<ICloudOAuthStateStore, MemoryCloudOAuthStateStore>();
         services.AddScoped<ICloudProviderAuthStrategy, DigitalOceanAuthStrategy>();

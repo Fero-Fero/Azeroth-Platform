@@ -51,6 +51,15 @@ public sealed class CloudAuthStartRequestDto
 
     /// <summary>Reuse an External ID already shown in the Connect AWS wizard (tier change / reconnect).</summary>
     public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// Public origin of this API (scheme+host). The server fills this so OAuth redirect_uri matches the
+    /// callback the browser will hit. Operators can still override with provider RedirectUri config.
+    /// </summary>
+    public string? CallbackBaseUrl { get; set; }
+
+    /// <summary>When true, Azure starts device-code flow instead of a browser redirect.</summary>
+    public bool UseDeviceCode { get; set; }
 }
 
 public sealed class CloudAuthStartResultDto
@@ -102,6 +111,15 @@ public sealed class CloudAuthCompleteRequestDto
     public string? ReconnectConnectionId { get; set; }
 
     public string? DefaultRegion { get; set; }
+
+    /// <summary>GCP project id or Azure subscription id selected after Sign in.</summary>
+    public string? DefaultProjectId { get; set; }
+
+    /// <summary>Azure device-code value returned from /start when using device login.</summary>
+    public string? DeviceCode { get; set; }
+
+    /// <summary>Hetzner project API token for guided Connect (not OAuth).</summary>
+    public string? AccessToken { get; set; }
 }
 
 public sealed class CloudInstanceSetupDialogDto
@@ -129,4 +147,8 @@ public sealed class CloudInstanceSetupDialogDto
     public string? SuggestedAdminCidr { get; set; }
 
     public CloudLaunchDefaultsDto? LaunchDefaults { get; set; }
+
+    public string? DefaultProjectId { get; set; }
+
+    public IReadOnlyList<CloudLaunchCatalogOptionDto> Projects { get; set; } = [];
 }

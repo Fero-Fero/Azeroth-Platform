@@ -20,6 +20,10 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
     private readonly VultrClient _vultrClient;
     private readonly ICloudAuditService _cloudAuditService;
     private readonly IAwsCredentialResolver _awsCredentialResolver;
+    private readonly IDigitalOceanTokenResolver _digitalOceanTokenResolver;
+    private readonly IVultrTokenResolver _vultrTokenResolver;
+    private readonly IGcpCredentialResolver _gcpCredentialResolver;
+    private readonly IAzureCredentialResolver _azureCredentialResolver;
 
     public CloudProviderConnectionService(
         AzerothCoreDbContext dbContext,
@@ -31,7 +35,11 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         HetznerCloudClient hetznerCloudClient,
         VultrClient vultrClient,
         ICloudAuditService cloudAuditService,
-        IAwsCredentialResolver awsCredentialResolver)
+        IAwsCredentialResolver awsCredentialResolver,
+        IDigitalOceanTokenResolver digitalOceanTokenResolver,
+        IVultrTokenResolver vultrTokenResolver,
+        IGcpCredentialResolver gcpCredentialResolver,
+        IAzureCredentialResolver azureCredentialResolver)
     {
         _dbContext = dbContext;
         _secretProtector = secretProtector;
@@ -43,6 +51,10 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         _vultrClient = vultrClient;
         _cloudAuditService = cloudAuditService;
         _awsCredentialResolver = awsCredentialResolver;
+        _digitalOceanTokenResolver = digitalOceanTokenResolver;
+        _vultrTokenResolver = vultrTokenResolver;
+        _gcpCredentialResolver = gcpCredentialResolver;
+        _azureCredentialResolver = azureCredentialResolver;
     }
 
     public async Task<IReadOnlyList<CloudProviderConnectionDto>> ListAsync(CancellationToken cancellationToken = default)
@@ -80,6 +92,8 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
 
         string protectedCredentials;
         var defaultRegion = (request.DefaultRegion ?? string.Empty).Trim();
+        var defaultProjectId = string.Empty;
+        var accountHint = string.Empty;
 
         switch (request.Provider)
         {
@@ -128,6 +142,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 protectedCredentials = CloudProviderCredentialStore.ProtectGcpServiceAccountJson(
                     _secretProtector,
                     serviceAccountJson);
+                defaultProjectId = GcpComputeClient.ExtractProjectId(serviceAccountJson);
                 break;
             }
             case CloudProvider.Azure:
@@ -160,6 +175,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                         clientId,
                         clientSecret,
                         subscriptionId));
+                defaultProjectId = subscriptionId;
                 break;
             }
             case CloudProvider.Hetzner:
@@ -174,6 +190,8 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 if (request.Provider == CloudProvider.Hetzner)
                 {
                     await _hetznerCloudClient.ValidateTokenAsync(token, cancellationToken);
+                    await _hetznerCloudClient.ProbeWriteAccessAsync(token, cancellationToken);
+                    accountHint = HetznerCloudClient.MaskToken(token);
                 }
                 else
                 {
@@ -194,9 +212,10 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
             Label = label,
             ProtectedCredentials = protectedCredentials,
             DefaultRegion = defaultRegion,
+            DefaultProjectId = defaultProjectId,
             CreatedAtUtc = DateTime.UtcNow,
             AuthMethod = CloudAuthMethod.Manual.ToString(),
-            AccountHint = string.Empty,
+            AccountHint = accountHint,
             NeedsReauth = false,
         };
 
@@ -267,6 +286,11 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
             {
                 entity.DefaultRegion = request.DefaultRegion.Trim();
             }
+
+            if (!string.IsNullOrWhiteSpace(request.DefaultProjectId))
+            {
+                entity.DefaultProjectId = request.DefaultProjectId.Trim();
+            }
         }
         else
         {
@@ -277,6 +301,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 Label = label,
                 ProtectedCredentials = request.ProtectedCredentials,
                 DefaultRegion = (request.DefaultRegion ?? string.Empty).Trim(),
+                DefaultProjectId = (request.DefaultProjectId ?? string.Empty).Trim(),
                 CreatedAtUtc = DateTime.UtcNow,
                 AuthMethod = request.AuthMethod.ToString(),
                 AccountHint = accountHint,
@@ -312,6 +337,88 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         return ToDto(entity);
     }
 
+    public async Task<CloudProviderConnectionDto> SetDefaultProjectAsync(
+        string id,
+        string projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.CloudProviderConnections
+                         .FirstOrDefaultAsync(connection => connection.Id == id, cancellationToken)
+                     ?? throw new KeyNotFoundException("Cloud connection not found.");
+
+        if (!string.Equals(entity.Provider, CloudProvider.Gcp.ToString(), StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(entity.Provider, CloudProvider.Azure.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Project or subscription selection is only available for Google Cloud and Azure connections.");
+        }
+
+        var selected = (projectId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(selected) || selected.Length > 64)
+        {
+            throw new ArgumentException("Project or subscription id must be 1-64 characters.");
+        }
+
+        if (string.Equals(entity.Provider, CloudProvider.Azure.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            var azureAccess = await _azureCredentialResolver.ResolveAsync(entity, cancellationToken);
+            var azureScoped = new AzureComputeClient.AzureAccess
+            {
+                Credential = azureAccess.Credential,
+                SubscriptionId = selected,
+                TenantId = azureAccess.TenantId,
+                AccessToken = azureAccess.AccessToken,
+            };
+            await _azureComputeClient.ValidateAccessAsync(azureScoped, cancellationToken);
+            entity.DefaultProjectId = selected;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            await _cloudAuditService.WriteAsync(
+                new WriteCloudAuditLogRequestDto
+                {
+                    EventType = CloudAuditEventTypes.ConnectionOAuthLinked,
+                    ResourceType = "connection",
+                    ResourceId = entity.Id,
+                    Summary = $"Selected Azure subscription {selected} for \"{entity.Label}\".",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        provider = entity.Provider,
+                        subscriptionId = selected,
+                    }),
+                },
+                cancellationToken);
+
+            return ToDto(entity);
+        }
+
+        var gcpAccess = await _gcpCredentialResolver.ResolveAsync(entity, cancellationToken);
+        var gcpScoped = new GcpComputeClient.GcpAccess
+        {
+            Credential = gcpAccess.Credential,
+            ProjectId = selected,
+            AccessToken = gcpAccess.AccessToken,
+        };
+        await _gcpComputeClient.ValidateAccessAsync(gcpScoped, cancellationToken);
+        entity.DefaultProjectId = selected;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _cloudAuditService.WriteAsync(
+            new WriteCloudAuditLogRequestDto
+            {
+                EventType = CloudAuditEventTypes.ConnectionOAuthLinked,
+                ResourceType = "connection",
+                ResourceId = entity.Id,
+                Summary = $"Selected Google Cloud project {selected} for \"{entity.Label}\".",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    provider = entity.Provider,
+                    projectId = selected,
+                }),
+            },
+            cancellationToken);
+
+        return ToDto(entity);
+    }
+
     public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
         var entity = await _dbContext.CloudProviderConnections.FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
@@ -334,6 +441,82 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 }),
             },
             cancellationToken);
+    }
+
+    public async Task<CloudConnectionVerifyResultDto> VerifyAsync(
+        string id,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.CloudProviderConnections
+                         .FirstOrDefaultAsync(connection => connection.Id == id, cancellationToken)
+                     ?? throw new KeyNotFoundException("Cloud connection not found.");
+
+        if (!Enum.TryParse<CloudProvider>(entity.Provider, ignoreCase: true, out var provider))
+        {
+            throw new InvalidOperationException("Unknown cloud provider on this connection.");
+        }
+
+        try
+        {
+            await ValidateStoredCredentialsAsync(entity, provider, cancellationToken);
+            entity.NeedsReauth = false;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            var dto = ToDto(entity);
+            await _cloudAuditService.WriteAsync(
+                new WriteCloudAuditLogRequestDto
+                {
+                    EventType = CloudAuditEventTypes.ConnectionVerified,
+                    ResourceType = "connection",
+                    ResourceId = entity.Id,
+                    Summary = $"Verified {entity.Provider} account \"{entity.Label}\".",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        provider = entity.Provider,
+                        label = entity.Label,
+                        ok = true,
+                    }),
+                },
+                cancellationToken);
+
+            return new CloudConnectionVerifyResultDto
+            {
+                Ok = true,
+                Message = $"{provider} credentials are valid and the API is reachable.",
+                Connection = dto,
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not KeyNotFoundException)
+        {
+            entity.NeedsReauth = true;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            var dto = ToDto(entity);
+            await _cloudAuditService.WriteAsync(
+                new WriteCloudAuditLogRequestDto
+                {
+                    EventType = CloudAuditEventTypes.ConnectionVerified,
+                    ResourceType = "connection",
+                    ResourceId = entity.Id,
+                    Summary = $"Verify failed for {entity.Provider} account \"{entity.Label}\".",
+                    MetadataJson = JsonSerializer.Serialize(new
+                    {
+                        provider = entity.Provider,
+                        label = entity.Label,
+                        ok = false,
+                    }),
+                },
+                cancellationToken);
+
+            return new CloudConnectionVerifyResultDto
+            {
+                Ok = false,
+                Message = string.IsNullOrWhiteSpace(ex.Message)
+                    ? $"{provider} rejected the stored credentials."
+                    : ex.Message,
+                Connection = dto,
+            };
+        }
     }
 
     public async Task<IReadOnlyList<CloudInstanceDto>> ListInstancesAsync(
@@ -382,14 +565,74 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         };
     }
 
+    private async Task ValidateStoredCredentialsAsync(
+        CloudProviderConnectionEntity entity,
+        CloudProvider provider,
+        CancellationToken cancellationToken)
+    {
+        switch (provider)
+        {
+            case CloudProvider.DigitalOcean:
+            {
+                var accessToken = await _digitalOceanTokenResolver.ResolveAsync(entity, cancellationToken);
+                await _digitalOceanClient.ValidateTokenAsync(accessToken, cancellationToken);
+                return;
+            }
+            case CloudProvider.Aws:
+            {
+                var credentials = await _awsCredentialResolver.ResolveAsync(entity, cancellationToken);
+                await _awsEc2Client.ValidateCredentialsAsync(credentials, cancellationToken);
+                return;
+            }
+            case CloudProvider.Gcp:
+            {
+                var access = await _gcpCredentialResolver.ResolveAsync(entity, cancellationToken);
+                if (string.IsNullOrWhiteSpace(access.ProjectId))
+                {
+                    _ = await _gcpComputeClient.ListProjectsAsync(access, cancellationToken);
+                    return;
+                }
+
+                await _gcpComputeClient.ValidateAccessAsync(access, cancellationToken);
+                return;
+            }
+            case CloudProvider.Azure:
+            {
+                var access = await _azureCredentialResolver.ResolveAsync(entity, cancellationToken);
+                if (string.IsNullOrWhiteSpace(access.SubscriptionId))
+                {
+                    _ = await _azureComputeClient.ListSubscriptionsAsync(access, cancellationToken);
+                    return;
+                }
+
+                await _azureComputeClient.ValidateAccessAsync(access, cancellationToken);
+                return;
+            }
+            case CloudProvider.Hetzner:
+            {
+                var accessToken = CloudProviderCredentialStore.UnprotectApiToken(
+                    _secretProtector,
+                    entity.ProtectedCredentials);
+                await _hetznerCloudClient.ValidateTokenAsync(accessToken, cancellationToken);
+                return;
+            }
+            case CloudProvider.Vultr:
+            {
+                var accessToken = await _vultrTokenResolver.ResolveAsync(entity, cancellationToken);
+                await _vultrClient.ValidateTokenAsync(accessToken, cancellationToken);
+                return;
+            }
+            default:
+                throw new InvalidOperationException($"{provider} credential verification is not supported yet.");
+        }
+    }
+
     private async Task<IReadOnlyList<CloudInstanceDto>> ListDigitalOceanInstancesAsync(
         CloudProviderConnectionEntity entity,
         string regionFilter,
         CancellationToken cancellationToken)
     {
-        var accessToken = CloudProviderCredentialStore.UnprotectDigitalOceanToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var accessToken = await _digitalOceanTokenResolver.ResolveAsync(entity, cancellationToken);
 
         var droplets = await _digitalOceanClient.ListDropletsAsync(accessToken, cancellationToken);
 
@@ -413,6 +656,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                     PublicHost = publicIp,
                     SuggestedSshUser = SuggestSshUserFromImage(imageSlug, droplet.Image?.Distribution),
                     Image = string.IsNullOrWhiteSpace(imageSlug) ? droplet.Image?.Distribution ?? string.Empty : imageSlug,
+                    InstanceType = droplet.SizeSlug ?? string.Empty,
                 };
             })
             .Where(instance => !string.IsNullOrWhiteSpace(instance.PublicHost))
@@ -445,6 +689,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 Image = string.IsNullOrWhiteSpace(instance.InstanceType)
                     ? instance.Image
                     : $"{instance.Image} ({instance.InstanceType})",
+                InstanceType = instance.InstanceType,
             })
             .OrderBy(instance => instance.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -455,12 +700,9 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         string regionFilter,
         CancellationToken cancellationToken)
     {
-        var serviceAccountJson = CloudProviderCredentialStore.UnprotectGcpServiceAccountJson(
-            _secretProtector,
-            entity.ProtectedCredentials);
-
+        var access = await _gcpCredentialResolver.ResolveAsync(entity, cancellationToken);
         var instances = await _gcpComputeClient.ListRunningInstancesAsync(
-            serviceAccountJson,
+            access,
             string.IsNullOrWhiteSpace(regionFilter) ? null : regionFilter,
             cancellationToken);
 
@@ -475,6 +717,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 PublicHost = instance.PublicHost,
                 SuggestedSshUser = instance.SuggestedSshUser,
                 Image = instance.Image,
+                InstanceType = instance.MachineType,
             })
             .OrderBy(instance => instance.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -485,12 +728,9 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         string locationFilter,
         CancellationToken cancellationToken)
     {
-        var credentials = CloudProviderCredentialStore.UnprotectAzureCredentials(
-            _secretProtector,
-            entity.ProtectedCredentials);
-
+        var access = await _azureCredentialResolver.ResolveAsync(entity, cancellationToken);
         var instances = await _azureComputeClient.ListRunningInstancesAsync(
-            ToAzureClientCredentials(credentials),
+            access,
             string.IsNullOrWhiteSpace(locationFilter) ? null : locationFilter,
             cancellationToken);
 
@@ -507,6 +747,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 Image = string.IsNullOrWhiteSpace(instance.Image)
                     ? instance.ResourceGroup
                     : $"{instance.Image} ({instance.ResourceGroup})",
+                InstanceType = instance.VmSize,
             })
             .OrderBy(instance => instance.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -537,6 +778,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 PublicHost = server.PublicIpv4,
                 SuggestedSshUser = server.SuggestedSshUser,
                 Image = server.Image?.Name ?? server.Image?.Description ?? string.Empty,
+                InstanceType = server.ServerType ?? string.Empty,
             })
             .OrderBy(instance => instance.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -547,9 +789,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
         string regionFilter,
         CancellationToken cancellationToken)
     {
-        var accessToken = CloudProviderCredentialStore.UnprotectApiToken(
-            _secretProtector,
-            entity.ProtectedCredentials);
+        var accessToken = await _vultrTokenResolver.ResolveAsync(entity, cancellationToken);
 
         var instances = await _vultrClient.ListInstancesAsync(
             accessToken,
@@ -567,6 +807,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
                 PublicHost = instance.PublicHost,
                 SuggestedSshUser = instance.SuggestedSshUser,
                 Image = instance.Os,
+                InstanceType = instance.Plan ?? string.Empty,
             })
             .OrderBy(instance => instance.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -626,6 +867,7 @@ public sealed class CloudProviderConnectionService : ICloudProviderConnectionSer
             Provider = provider,
             Label = entity.Label,
             DefaultRegion = string.IsNullOrWhiteSpace(entity.DefaultRegion) ? null : entity.DefaultRegion,
+            DefaultProjectId = string.IsNullOrWhiteSpace(entity.DefaultProjectId) ? null : entity.DefaultProjectId,
             CreatedAtUtc = entity.CreatedAtUtc,
             AuthMethod = authMethod,
             AccountHint = string.IsNullOrWhiteSpace(entity.AccountHint) ? null : entity.AccountHint,

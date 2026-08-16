@@ -48,6 +48,12 @@ public class StackConfigurationDto
 
     /// <summary>Armory player-account options (email confirmation, SMTP when enabled).</summary>
     public ArmoryAccountsConfigDto ArmoryAccounts { get; set; } = new();
+
+    /// <summary>
+    /// When set, <c>POST /api/stacks</c> completes this <see cref="StackStatus.SetupIncomplete"/> draft
+    /// instead of creating a new stack id.
+    /// </summary>
+    public string? DraftStackId { get; set; }
 }
 
 /// <summary>

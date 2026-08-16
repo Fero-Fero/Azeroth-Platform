@@ -39,7 +39,7 @@ public class CloudAuthController : ControllerBase
         {
             return Ok(await _cloudAuthOrchestrator.StartAsync(
                 provider,
-                request ?? new CloudAuthStartRequestDto(),
+                BindStartRequest(request),
                 cancellationToken));
         }
         catch (ArgumentException ex)
@@ -194,5 +194,16 @@ public class CloudAuthController : ControllerBase
         }
 
         return origin + path + query.ToUriComponent();
+    }
+
+    private CloudAuthStartRequestDto BindStartRequest(CloudAuthStartRequestDto? request)
+    {
+        var payload = request ?? new CloudAuthStartRequestDto();
+        if (string.IsNullOrWhiteSpace(payload.CallbackBaseUrl))
+        {
+            payload.CallbackBaseUrl = $"{Request.Scheme}://{Request.Host.Value}";
+        }
+
+        return payload;
     }
 }

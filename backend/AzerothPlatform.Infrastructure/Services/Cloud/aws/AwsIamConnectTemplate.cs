@@ -31,7 +31,7 @@ internal static class AwsIamConnectTemplate
                 StandardActions),
             _ => (
                 "Full",
-                "List, launch new EC2, SSM bootstrap, and security group sync.",
+                "List, launch new EC2, terminate instances, SSM bootstrap, and security group sync.",
                 FullActions),
         };
 
@@ -134,5 +134,6 @@ internal static class AwsIamConnectTemplate
         "ec2:CreateSecurityGroup",
         "ec2:AuthorizeSecurityGroupIngress",
         "ec2:CreateTags",
+        "ec2:TerminateInstances",
     ];
 }

@@ -56,6 +56,45 @@ public sealed class AwsEc2Client
             .ToList();
     }
 
+    public async Task TerminateInstanceAsync(
+        AwsRuntimeCredentials credentials,
+        string region,
+        string instanceId,
+        CancellationToken cancellationToken)
+    {
+        var id = (instanceId ?? string.Empty).Trim();
+        var regionName = (region ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ArgumentException("Instance id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(regionName))
+        {
+            throw new ArgumentException("AWS region is required to terminate an instance.");
+        }
+
+        using var client = CreateClient(credentials, regionName);
+        try
+        {
+            await client.TerminateInstancesAsync(
+                new TerminateInstancesRequest { InstanceIds = [id] },
+                cancellationToken);
+        }
+        catch (AmazonEC2Exception ex) when (ex.ErrorCode is "InvalidInstanceID.NotFound")
+        {
+            // Already gone.
+        }
+        catch (AmazonEC2Exception ex)
+        {
+            throw new InvalidOperationException(ParseAwsError(ex, "AWS rejected the terminate request."));
+        }
+        catch (AmazonServiceException ex)
+        {
+            throw new InvalidOperationException(ParseAwsError(ex, "AWS rejected the terminate request."));
+        }
+    }
+
     public async Task<AwsInstanceNetworkTarget> ResolveInstanceForFirewallAsync(
         AwsRuntimeCredentials credentials,
         string publicHost,

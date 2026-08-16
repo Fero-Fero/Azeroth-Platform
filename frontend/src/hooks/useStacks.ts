@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { stackApi } from '@/services/api'
 import type { StackDetailsDto } from '@/types/stack.types'
 
@@ -11,6 +11,8 @@ export const stackKeys = {
   detail: (id: string) => [...stackKeys.details(), id] as const,
 }
 
+let listProbeStartedThisSession = false
+
 function stackFromListCache(
   queryClient: ReturnType<typeof useQueryClient>,
   stackId: string,
@@ -21,7 +23,6 @@ function stackFromListCache(
 
 export function useStacks() {
   const queryClient = useQueryClient()
-  const initialProbeStarted = useRef(false)
 
   const query = useQuery({
     queryKey: stackKeys.lists(),
@@ -50,11 +51,11 @@ export function useStacks() {
   const { mutate: runProbeAll, isPending: isProbing } = probeAll
 
   useEffect(() => {
-    if (!query.isSuccess || initialProbeStarted.current || !query.data?.length) {
+    if (!query.isSuccess || listProbeStartedThisSession || !query.data?.length) {
       return
     }
 
-    initialProbeStarted.current = true
+    listProbeStartedThisSession = true
     runProbeAll()
   }, [query.isSuccess, query.data?.length, runProbeAll])
 
@@ -76,7 +77,7 @@ export function useStackDetail(
 
   const detailQuery = useQuery({
     queryKey: stackKeys.detail(stackId),
-    queryFn: () => stackApi.get(stackId).then((res) => res.data),
+    queryFn: ({ signal }) => stackApi.get(stackId, signal).then((res) => res.data),
     enabled: (options?.enabled ?? true) && !!stackId,
     staleTime: 15_000,
     gcTime: 10 * 60_000,

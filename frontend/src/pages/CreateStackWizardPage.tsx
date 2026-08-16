@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, X } from 'lucide-react'
 import type { Path } from 'react-hook-form'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { StepIndicator, type WizardStep } from '@/components/wizard/StepIndicator'
 import { WizardNavigation } from '@/components/wizard/WizardNavigation'
 import { AdvancedStep } from '@/components/wizard/steps/AdvancedStep'
@@ -15,14 +16,17 @@ import { PortsStep } from '@/components/wizard/steps/PortsStep'
 import { ReviewStep } from '@/components/wizard/steps/ReviewStep'
 import { ServerConfigStep } from '@/components/wizard/steps/ServerConfigStep'
 import { useWizardDraft } from '@/hooks/useWizardDraft'
-import { useCreateStack, useStacks } from '@/hooks/useStacks'
+import { useCreateStack, useStacks, stackKeys } from '@/hooks/useStacks'
 import { wizardSchema, WIZARD_DEFAULTS, STEP_TRIGGER_FIELDS_BY_ID, EMAIL_STEP_TRIGGER_FIELDS, type WizardFormData } from '@/schemas/wizard.schemas'
-import { validationApi, buildApi } from '@/services/api'
-import { ServerType, DeploymentTarget } from '@/types/stack.types'
+import { DEFAULT_ARMORY_EMAIL } from '@/lib/armory-email-defaults'
+import { validationApi, buildApi, stackApi } from '@/services/api'
+import { ServerType, DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type {
+  DeploymentConfigDto,
   PortFieldPath,
   StackConfigurationDto,
   StackDetailsDto,
+  StackSetupDraftDto,
   SuggestedPorts,
   ValidationResultDto,
 } from '@/types/stack.types'
@@ -86,11 +90,21 @@ const DEFAULT_PORTS: Record<PortFieldPath, number> = {
 
 export default function CreateStackWizardPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const queryClient = useQueryClient()
   const { save: saveDraft, load: loadDraft, clear: clearDraft } = useWizardDraft()
   const createStack = useCreateStack()
   const { data: existingStacks = [] } = useStacks()
   const appliedDefaultPortsRef = useRef(false)
+  const loadedServerDraftRef = useRef(false)
+  const persistDraftChainRef = useRef(Promise.resolve())
+  const allowPersistDraftRef = useRef(!searchParams.get('draft')?.trim())
+  const initialResumeStackId = useRef(searchParams.get('draft')?.trim() ?? '')
+  const resumeStackId = searchParams.get('draft')?.trim() ?? ''
   const initialDraft = useMemo(() => {
+    if (initialResumeStackId.current) {
+      return null
+    }
     const draft = loadDraft()
     return draft && draft.data.stackName ? draft : null
   }, [loadDraft])
@@ -114,6 +128,8 @@ export default function CreateStackWizardPage() {
   })
   const { isDirty } = form.formState
   const useEmailConfirmation = form.watch('armoryAccounts.useEmailConfirmation')
+  const draftStackId = form.watch('draftStackId')
+  const isFinishingDraft = Boolean(resumeStackId || draftStackId)
   const steps = useMemo(() => buildWizardSteps(useEmailConfirmation), [useEmailConfirmation])
   const reviewStepIndex = steps.findIndex((step) => step.id === 'review')
 
@@ -124,7 +140,13 @@ export default function CreateStackWizardPage() {
   }, [currentStep, steps.length])
 
   useEffect(() => {
-    if (appliedDefaultPortsRef.current || pendingDraft || isDirty || existingStacks.length === 0) {
+    if (
+      appliedDefaultPortsRef.current
+      || pendingDraft
+      || initialResumeStackId.current
+      || isDirty
+      || existingStacks.length === 0
+    ) {
       return
     }
 
@@ -149,7 +171,8 @@ export default function CreateStackWizardPage() {
 
     try {
       const config = formDataToDto(values)
-      const response = await validationApi.validate(config)
+      const draftId = values.draftStackId?.trim()
+      const response = await validationApi.validate(config, draftId || undefined)
       const result: ValidationResultDto = response.data
 
       if (!result.isValid) {
@@ -172,6 +195,122 @@ export default function CreateStackWizardPage() {
       setIsValidating(false)
     }
   }, [form])
+
+  const persistSetupDraft = useCallback((stepId: string) => {
+    persistDraftChainRef.current = persistDraftChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (!allowPersistDraftRef.current) {
+          return
+        }
+
+        const values = form.getValues()
+        if (values.deployment.target !== DeploymentTarget.External) {
+          return
+        }
+
+        const host = values.deployment.externalHost?.trim() ?? ''
+        const instanceId = values.deployment.cloudInstanceId?.trim() ?? ''
+        if (!host && !instanceId) {
+          return
+        }
+
+        const draftJson: WizardFormData = {
+          ...values,
+          deployment: {
+            ...values.deployment,
+            externalSshPrivateKey: '',
+          },
+        }
+        const requestedName = values.stackName?.trim()
+        const response = await stackApi.saveSetupDraft({
+          stackId: values.draftStackId?.trim() || undefined,
+          wizardStepId: stepId,
+          wizardDraftJson: JSON.stringify(draftJson),
+          stackName: isPlaceholderStackName(requestedName) ? undefined : requestedName || undefined,
+          deployment: toDraftDeploymentDto(values),
+        })
+        const id = response.data.stackId
+        loadedServerDraftRef.current = true
+        if (id && id !== values.draftStackId) {
+          form.setValue('draftStackId', id)
+          setSearchParams({ draft: id }, { replace: true })
+        }
+        if (!requestedName && response.data.stackName && !isPlaceholderStackName(response.data.stackName)) {
+          form.setValue('stackName', response.data.stackName)
+        }
+        void queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
+      })
+      .catch((error) => {
+        console.error('[WIZARD] Failed to save unfinished VPC stack:', error)
+      })
+
+    return persistDraftChainRef.current
+  }, [form, queryClient, setSearchParams])
+
+  useEffect(() => {
+    const draftId = initialResumeStackId.current
+    if (!draftId || loadedServerDraftRef.current) {
+      return
+    }
+
+    loadedServerDraftRef.current = true
+    appliedDefaultPortsRef.current = true
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const response = await stackApi.getSetupDraft(draftId)
+        if (cancelled) {
+          return
+        }
+
+        const merged = mergeSetupDraft(response.data)
+        form.reset(merged)
+        const resumeSteps = buildWizardSteps(Boolean(merged.armoryAccounts.useEmailConfirmation))
+        const stepId = resolveResumeStepId(merged, response.data.wizardStepId)
+        const stepIndex = resumeSteps.findIndex((step) => step.id === stepId)
+        setCurrentStep(stepIndex >= 0 ? stepIndex : 0)
+        setShowResumeBanner(false)
+        setPendingDraft(null)
+        allowPersistDraftRef.current = true
+      } catch (error) {
+        console.error('[WIZARD] Failed to load unfinished VPC stack:', error)
+        if (!cancelled) {
+          setSubmitError('Could not load the unfinished VPC stack. It may have been completed or deleted.')
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [form])
+
+  useEffect(() => {
+    const subscription = form.watch((values, info) => {
+      if (info.name !== 'deployment.connectionVerified' || !values.deployment?.connectionVerified) {
+        return
+      }
+
+      const currentId = steps[currentStep]?.id ?? 'deployment'
+      void persistSetupDraft(currentId === 'deployment' ? 'server-config' : currentId)
+    })
+    return () => subscription.unsubscribe()
+  }, [currentStep, form, persistSetupDraft, steps])
+
+  const persistSetupDraftRef = useRef(persistSetupDraft)
+  persistSetupDraftRef.current = persistSetupDraft
+  const currentStepRef = useRef(currentStep)
+  currentStepRef.current = currentStep
+  const stepsRef = useRef(steps)
+  stepsRef.current = steps
+
+  useEffect(() => {
+    return () => {
+      void persistSetupDraftRef.current(stepsRef.current[currentStepRef.current]?.id ?? 'deployment')
+    }
+  }, [])
 
   const resumeDraft = useCallback(() => {
     if (!pendingDraft) {
@@ -233,13 +372,15 @@ export default function CreateStackWizardPage() {
     setCurrentStep(targetStep)
     setSubmitError(null)
     setDeploymentStepError(null)
+    const targetId = steps[targetStep]?.id ?? 'deployment'
+    void persistSetupDraft(targetId)
 
     if (targetStep === reviewStepIndex) {
       void validateWithBackend(values).then(result => {
         console.log('[WIZARD] Review step validation:', result)
       })
     }
-  }, [currentStep, form, reviewStepIndex, saveDraft, steps, validateWithBackend])
+  }, [currentStep, form, persistSetupDraft, reviewStepIndex, saveDraft, steps, validateWithBackend])
 
   const handleSkipEmailStep = useCallback(() => {
     form.setValue('armoryAccounts.emailConfigured', false, { shouldDirty: true })
@@ -311,6 +452,7 @@ export default function CreateStackWizardPage() {
       console.log('[WIZARD] Build started successfully')
       
       clearDraft()
+      allowPersistDraftRef.current = false
       
       // Navigate to build progress page
       navigate(`/stacks/${stackId}/build`)
@@ -326,9 +468,13 @@ export default function CreateStackWizardPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Create New Stack</h1>
+        <h1 className="text-3xl font-bold text-gray-900">
+          {isFinishingDraft ? 'Finish stack setup' : 'Create New Stack'}
+        </h1>
         <p className="mt-1 text-gray-500">
-          Configure and launch a new AzerothCore server stack.
+          {isFinishingDraft
+            ? 'Continue configuring this VPC. The instance is already created.'
+            : 'Configure and launch a new AzerothCore server stack.'}
         </p>
       </div>
 
@@ -380,7 +526,16 @@ export default function CreateStackWizardPage() {
         </div>
 
         <div className="min-h-[24rem] overflow-visible px-6 py-6">
-          {steps[currentStep]?.id === 'deployment' && <DeploymentStep form={form} />}
+          {steps[currentStep]?.id === 'deployment' && (
+            <DeploymentStep
+              form={form}
+              onVpcBound={() => {
+                queueMicrotask(() => {
+                  void persistSetupDraft(steps[currentStep]?.id ?? 'deployment')
+                })
+              }}
+            />
+          )}
           {steps[currentStep]?.id === 'server-config' && <ServerConfigStep form={form} />}
           {steps[currentStep]?.id === 'modules' && <ModulesStep form={form} />}
           {steps[currentStep]?.id === 'database' && <DatabaseStep form={form} />}
@@ -470,6 +625,11 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
           savedSshKeyId: values.deployment.savedSshKeyId ?? '',
           saveSshKeyToVault: values.deployment.saveSshKeyToVault ?? true,
           saveSshKeyLabel: values.deployment.saveSshKeyLabel ?? '',
+          cloudConnectionId: values.deployment.cloudConnectionId ?? '',
+          cloudInstanceId: values.deployment.cloudInstanceId ?? '',
+          cloudRegion: values.deployment.cloudRegion ?? '',
+          cloudProvider: values.deployment.cloudProvider ?? '',
+          cloudInstanceType: values.deployment.cloudInstanceType ?? '',
         }
       : undefined,
     customFork: values.serverType === ServerType.Custom
@@ -483,6 +643,7 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
       emailConfigured: values.armoryAccounts.emailConfigured,
       email: values.armoryAccounts.useEmailConfirmation ? values.armoryAccounts.email ?? null : null,
     },
+    draftStackId: values.draftStackId?.trim() || undefined,
   }
 }
 
@@ -509,6 +670,9 @@ function getAvailableDefaultPorts(existingStacks: StackDetailsDto[]): Record<Por
   const usedPorts = new Set<number>()
 
   existingStacks.forEach((stack) => {
+    if (stack.status === StackStatus.SetupIncomplete) {
+      return
+    }
     usedPorts.add(stack.configuration.database.port)
     usedPorts.add(stack.configuration.ports.authServer)
     usedPorts.add(stack.configuration.ports.worldServer)
@@ -538,3 +702,85 @@ function findAvailablePort(usedPorts: Set<number>, preferredPort: number): numbe
 
   return preferredPort
 }
+
+function toDraftDeploymentDto(values: WizardFormData): DeploymentConfigDto {
+  return {
+    target: DeploymentTarget.External,
+    externalHost: values.deployment.externalHost ?? '',
+    externalSshPort: values.deployment.externalSshPort ?? 22,
+    externalSshUser: values.deployment.externalSshUser ?? '',
+    externalSshPrivateKey: values.deployment.externalSshPrivateKey ?? '',
+    savedSshKeyId: values.deployment.savedSshKeyId ?? '',
+    saveSshKeyToVault: values.deployment.saveSshKeyToVault ?? true,
+    saveSshKeyLabel: values.deployment.saveSshKeyLabel ?? '',
+    cloudConnectionId: values.deployment.cloudConnectionId ?? '',
+    cloudInstanceId: values.deployment.cloudInstanceId ?? '',
+    cloudRegion: values.deployment.cloudRegion ?? '',
+    cloudProvider: values.deployment.cloudProvider ?? '',
+    cloudInstanceType: values.deployment.cloudInstanceType ?? '',
+  }
+}
+
+function mergeSetupDraft(draft: StackSetupDraftDto): WizardFormData {
+  let parsed: Partial<WizardFormData> = {}
+  try {
+    parsed = JSON.parse(draft.wizardDraftJson) as Partial<WizardFormData>
+  } catch {
+    parsed = {}
+  }
+
+  return {
+    ...WIZARD_DEFAULTS,
+    ...parsed,
+    draftStackId: draft.stackId,
+    stackName: isPlaceholderStackName(parsed.stackName) ? '' : (parsed.stackName?.trim() || ''),
+    database: { ...WIZARD_DEFAULTS.database, ...parsed.database },
+    ports: { ...WIZARD_DEFAULTS.ports, ...parsed.ports },
+    advanced: { ...WIZARD_DEFAULTS.advanced, ...parsed.advanced },
+    customFork: { ...WIZARD_DEFAULTS.customFork, ...parsed.customFork },
+    armoryAccounts: {
+      ...WIZARD_DEFAULTS.armoryAccounts,
+      ...parsed.armoryAccounts,
+      email: {
+        ...DEFAULT_ARMORY_EMAIL,
+        ...(parsed.armoryAccounts?.email ?? {}),
+      } as typeof DEFAULT_ARMORY_EMAIL,
+    },
+    deployment: {
+      ...WIZARD_DEFAULTS.deployment,
+      ...parsed.deployment,
+      target: DeploymentTarget.External,
+      externalHost: draft.deployment.externalHost || parsed.deployment?.externalHost || '',
+      externalSshPort: draft.deployment.externalSshPort || parsed.deployment?.externalSshPort || 22,
+      externalSshUser: draft.deployment.externalSshUser || parsed.deployment?.externalSshUser || '',
+      cloudConnectionId: draft.deployment.cloudConnectionId || parsed.deployment?.cloudConnectionId || '',
+      cloudInstanceId: draft.deployment.cloudInstanceId || parsed.deployment?.cloudInstanceId || '',
+      cloudRegion: draft.deployment.cloudRegion || parsed.deployment?.cloudRegion || '',
+      cloudProvider: draft.deployment.cloudProvider || parsed.deployment?.cloudProvider || '',
+      cloudInstanceType: draft.deployment.cloudInstanceType || parsed.deployment?.cloudInstanceType || '',
+      savedSshKeyId: parsed.deployment?.savedSshKeyId || '',
+      externalSshPrivateKey: draft.externalSshPrivateKey || parsed.deployment?.externalSshPrivateKey || '',
+    },
+  }
+}
+
+function resolveResumeStepId(form: WizardFormData, savedStepId: string): string {
+  if (!form.deployment.connectionVerified) {
+    return 'deployment'
+  }
+
+  if (!savedStepId || savedStepId === 'deployment') {
+    return 'server-config'
+  }
+
+  return savedStepId
+}
+
+function isPlaceholderStackName(name?: string): boolean {
+  const value = (name ?? '').trim().toLowerCase()
+  return !value
+    || value.startsWith('unnamed-instance')
+    || /^vpc-[a-f0-9]{8}$/.test(value)
+}
+
+

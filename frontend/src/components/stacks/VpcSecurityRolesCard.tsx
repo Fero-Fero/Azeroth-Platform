@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Shield } from 'lucide-react'
+import { AlertTriangle, Shield } from 'lucide-react'
 import { systemApi } from '@/services/api'
 import type { VpcSecurityProfileDto, VpcSecurityRuleDto } from '@/types/stack.types'
 
@@ -16,6 +16,45 @@ function RuleTable({
 }) {
   if (rules.length === 0) {
     return null
+  }
+
+  if (variant === 'deny') {
+    return (
+      <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+        <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {title}
+        </p>
+        <p className="mt-1 text-xs text-amber-950">
+          Do not create allow rules for these ports in your cloud firewall. Opening them exposes your
+          database or SOAP admin API.
+        </p>
+        <div className="mt-2 overflow-x-auto rounded border border-amber-200 bg-white">
+          <table className="min-w-full divide-y divide-amber-100 text-xs">
+            <thead className="bg-amber-50/80">
+              <tr>
+                <th className="px-2 py-1.5 text-left font-medium text-amber-900">Port</th>
+                {showSource && (
+                  <th className="px-2 py-1.5 text-left font-medium text-amber-900">Source</th>
+                )}
+                <th className="px-2 py-1.5 text-left font-medium text-amber-900">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-100">
+              {rules.map((rule) => (
+                <tr key={`${rule.roleId}-${rule.port}-${rule.action}`}>
+                  <td className="px-2 py-1.5 font-mono text-red-800">{rule.port}/{rule.protocol}</td>
+                  {showSource && (
+                    <td className="px-2 py-1.5 font-mono text-red-800">{rule.source?.trim() || '—'}</td>
+                  )}
+                  <td className="px-2 py-1.5 text-red-800">{rule.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -39,7 +78,7 @@ function RuleTable({
                 {showSource && (
                   <td className="px-2 py-1.5 font-mono">{rule.source?.trim() || '—'}</td>
                 )}
-                <td className={`px-2 py-1.5 ${variant === 'deny' ? 'text-red-700' : 'text-gray-700'}`}>
+                <td className="px-2 py-1.5 text-gray-700">
                   {rule.description}
                 </td>
               </tr>
@@ -61,7 +100,7 @@ function resolveCloudSshSource(rules: VpcSecurityRuleDto[], suggestedSshSource?:
   )
 }
 
-/** Inbound rules to add manually in AWS/GCP/Azure — cloud SG guide only. */
+/** Inbound rules to add manually — cloud firewall guide only. */
 export function CloudSecurityGroupRulesCard({
   profile,
   suggestedSshSource,
@@ -74,9 +113,9 @@ export function CloudSecurityGroupRulesCard({
   return (
     <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="text-xs text-gray-700">
-        Add these <span className="font-medium">inbound allow</span> rules in your cloud security group.
-        Host <span className="font-medium">ufw</span> is configured separately by Setup Now — you do not
-        need to set source CIDRs on the Linux host.
+        Add these <span className="font-medium">inbound allow</span> rules in your cloud firewall (security
+        group, NSG, or Cloud Firewall). Host <span className="font-medium">ufw</span> is applied at launch
+        and by Verify VPC / Repair — you do not need to set source CIDRs on the Linux host.
       </p>
       <RuleTable
         title="Inbound allow"

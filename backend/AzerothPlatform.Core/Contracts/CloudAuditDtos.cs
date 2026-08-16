@@ -12,9 +12,11 @@ public static class CloudAuditEventTypes
     public const string ConnectionOAuthRefreshed = "connection.oauth.refreshed";
     public const string ConnectionOAuthRevoked = "connection.oauth.revoked";
     public const string ConnectionAssumedRoleLinked = "connection.assumed_role.linked";
+    public const string ConnectionVerified = "connection.verified";
     public const string TerminalStarted = "terminal.started";
     public const string TerminalEnded = "terminal.ended";
     public const string LaunchCompleted = "launch.completed";
+    public const string InstanceTerminated = "instance.terminated";
     public const string CloudFirewallApplied = "cloud_firewall.applied";
 }
 

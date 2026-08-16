@@ -57,6 +57,13 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.ExternalHost).HasMaxLength(255).IsRequired();
             entity.Property(stack => stack.ExternalSshUser).HasMaxLength(64).IsRequired();
             entity.Property(stack => stack.ExternalSshPrivateKey).IsRequired();
+            entity.Property(stack => stack.CloudConnectionId).HasMaxLength(64).IsRequired();
+            entity.Property(stack => stack.CloudInstanceId).HasMaxLength(128).IsRequired();
+            entity.Property(stack => stack.CloudRegion).HasMaxLength(64).IsRequired();
+            entity.Property(stack => stack.CloudProvider).HasMaxLength(32).IsRequired();
+            entity.Property(stack => stack.CloudInstanceType).HasMaxLength(64).IsRequired();
+            entity.Property(stack => stack.WizardDraftJson).IsRequired();
+            entity.Property(stack => stack.WizardStepId).HasMaxLength(32).IsRequired();
         });
 
         modelBuilder.Entity<CloudSshKeyEntity>(entity =>
@@ -79,6 +86,7 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(connection => connection.Label).HasMaxLength(100).IsRequired();
             entity.Property(connection => connection.ProtectedCredentials).IsRequired();
             entity.Property(connection => connection.DefaultRegion).HasMaxLength(64).IsRequired();
+            entity.Property(connection => connection.DefaultProjectId).HasMaxLength(64).IsRequired();
             entity.Property(connection => connection.AuthMethod).HasMaxLength(32).IsRequired();
             entity.Property(connection => connection.AccountHint).HasMaxLength(256).IsRequired();
         });

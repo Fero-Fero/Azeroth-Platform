@@ -41,5 +41,8 @@ public sealed class CloudOAuthStateDto
 
     public string? Label { get; set; }
 
+    /// <summary>Exact OAuth redirect_uri used at /start; required at token exchange.</summary>
+    public string? RedirectUri { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 }

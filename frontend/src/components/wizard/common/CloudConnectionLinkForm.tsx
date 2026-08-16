@@ -270,18 +270,24 @@ export function CloudConnectionLinkForm({
       {!simple ? (
         provider === CloudProvider.DigitalOcean ? (
         <p className="text-xs text-gray-700">
-          Personal access token from DigitalOcean → API → Tokens/Keys. Read scope lists droplets; write
-          scope is required for Launch via platform.
+          Personal access token from DigitalOcean → API → Tokens/Keys. Prefer Sign in with DigitalOcean
+          when an OAuth app is configured. If you paste a token, use a <span className="font-medium">dedicated</span>{' '}
+          token (not the team owner&apos;s unrestricted key). Read lists droplets; write is required to
+          launch and attach a Cloud Firewall.
         </p>
       ) : provider === CloudProvider.Hetzner ? (
         <p className="text-xs text-gray-700">
-          API token from Hetzner Cloud Console → Security → API tokens. Read permission lists servers;
-          read/write is required for Launch via platform.
+          Connect Hetzner project with a <span className="font-medium">Read & Write</span> token from
+          Console → Security → API tokens. Read-only tokens cannot manage Cloud Firewalls. Use a{' '}
+          <span className="font-medium">dedicated project token</span> — not the Hetzner account password.
+          Launch and pick apply firewall <span className="font-mono">azeroth-platform-{'{id}'}</span>{' '}
+          (never MySQL 3306 or SOAP 7878).
         </p>
       ) : provider === CloudProvider.Vultr ? (
         <p className="text-xs text-gray-700">
-          API key from Vultr → Account → API. Read permission lists instances; read/write is required for
-          Launch via platform.
+          API key from Vultr → Account → API. Prefer Sign in with Vultr when an OAuth app is configured.
+          If you paste a key, use a <span className="font-medium">dedicated</span> key (not the account
+          root key). Read lists instances; write is required to launch and attach a firewall group.
         </p>
       ) : provider === CloudProvider.Aws ? (
         <p className="text-xs text-gray-700">
@@ -289,19 +295,27 @@ export function CloudConnectionLinkForm({
         </p>
       ) : provider === CloudProvider.Azure ? (
         <p className="text-xs text-gray-700">
-          Azure AD app registration (service principal) with read access to list VMs. For Run Command
-          bootstrap, grant <span className="font-mono">Microsoft.Compute/virtualMachines/runCommand/action</span>{' '}
-          (Virtual Machine Contributor on the VM or resource group).
+          Prefer Sign in with Microsoft when an Entra app is configured. Use a dedicated service principal
+          for Advanced — not the tenant Global Admin. NSG write needs Network Contributor (or equivalent)
+          on the VM resource group. Create VM from the platform is coming soon; pick an existing Linux VM
+          to Run Command bootstrap and apply NSG rules (never MySQL 3306 or SOAP 7878).
         </p>
       ) : (
         <p className="text-xs text-gray-700">
-          Service account JSON with Compute Engine access. Read scope lists VMs; create scope is required
-          for Launch via platform.
+          Prefer Sign in with Google Cloud when an OAuth client is configured. Use a dedicated service
+          account JSON for Advanced — not your org owner key. Compute Engine must be enabled on the
+          customer project. Launch tags the VM <span className="font-mono">azeroth-platform</span> and
+          applies VPC firewall rules.
         </p>
       )
       ) : provider === CloudProvider.Aws ? (
         <p className="text-xs text-gray-700">
           Log in to AWS, create an access key, then paste it below. Nothing is stored in appsettings.
+        </p>
+      ) : provider === CloudProvider.Hetzner ? (
+        <p className="text-xs text-gray-700">
+          Click <span className="font-medium">Connect Hetzner project</span> and paste a Read & Write
+          project token. This is an API token connection, not OAuth.
         </p>
       ) : (
         <p className="text-xs text-gray-700">

@@ -1,7 +1,7 @@
 # Windows Operating System Support — Plan
 
 **Status:** Planning (Aug 2026)  
-**Implementation order:** **#11** — after **#02** and **#09**. See [00-implementation-order.md](./00-implementation-order.md).
+**Implementation order:** **#11** — after Linux cloud login is stable. See [00-implementation-order.md](./00-implementation-order.md).
 
 ---
 
@@ -129,7 +129,6 @@ IRemoteHostSetupStrategy
 ### Documentation
 
 - [ ] README section: manual Windows Server prep checklist (OpenSSH, Docker, WSL2, firewall ports)
-- [ ] Cross-link Windows status in [`01-cloud-integration-completed.md`](./01-cloud-integration-completed.md) when Phase 1 ships
 
 **Exit criteria:** Create external stack on pre-configured Windows Server; test connection passes; build/start stack over remote Docker context.
 
@@ -292,9 +291,7 @@ Automated CI for Windows hosts is expensive; recommend **manual QA matrix** + on
 
 ## Dependencies & related plans
 
-- [`01-cloud-integration-completed.md`](./01-cloud-integration-completed.md) — cloud wizard (Phases 1–5 shipped); Windows blocked until this plan Phase 3
-- [`plans/02-cloud-oauth-login-master-plan.md`](../plans/02-cloud-oauth-login-master-plan.md) — login flows; Windows launch adds OS dimension to setup dialog
-- [`09-cloud-security-group-providers.md`](./09-cloud-security-group-providers.md) — cloud firewall guide tabs + API sync for all six providers (Windows stacks need NSG/SG + host firewall parity)
+- [`../plans/13-cloud-followups-and-test.md`](../plans/13-cloud-followups-and-test.md) — leftover Linux cloud work; Windows launch is a separate OS track
 - Player **launcher** remains a Windows **client** artifact — unchanged by this plan
 
 ---
@@ -319,4 +316,4 @@ Automated CI for Windows hosts is expensive; recommend **manual QA matrix** + on
 | Remote engine | `RemoteEngineService.cs`, `IRemoteEngineService.cs` |
 | Cloud | `CloudLaunchService.cs`, `AwsEc2Client.cs`, `AzureComputeClient.cs`, `GcpComputeClient.cs` |
 | Frontend | `DeploymentStep.tsx`, `VpcConnectionMethodTabs.tsx`, `ExternalVpcSecurityPanel.tsx`, `wizard.schemas.ts` |
-| Docs | `README.md`, [`01-cloud-integration-completed.md`](./01-cloud-integration-completed.md) |
+| Docs | `README.md` |

@@ -20,6 +20,9 @@ public sealed class CloudProviderConnectionDto
 
     public string? DefaultRegion { get; set; }
 
+    /// <summary>GCP project id for user OAuth connections (and SA JSON when known).</summary>
+    public string? DefaultProjectId { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 
     public CloudAuthMethod AuthMethod { get; set; } = CloudAuthMethod.Manual;
@@ -30,6 +33,15 @@ public sealed class CloudProviderConnectionDto
     public DateTime? TokenExpiresAtUtc { get; set; }
 
     public bool NeedsReauth { get; set; }
+}
+
+public sealed class CloudConnectionVerifyResultDto
+{
+    public bool Ok { get; set; }
+
+    public string Message { get; set; } = string.Empty;
+
+    public CloudProviderConnectionDto Connection { get; set; } = new();
 }
 
 public sealed class CreateCloudProviderConnectionRequestDto
@@ -82,6 +94,8 @@ public sealed class UpsertCloudOAuthConnectionRequestDto
 
     public string? DefaultRegion { get; set; }
 
+    public string? DefaultProjectId { get; set; }
+
     public CloudAuthMethod AuthMethod { get; set; } = CloudAuthMethod.OAuth;
 }
 
@@ -102,4 +116,7 @@ public sealed class CloudInstanceDto
     public string SuggestedSshUser { get; set; } = "ubuntu";
 
     public string Image { get; set; } = string.Empty;
+
+    /// <summary>Provider size / instance type (t3.micro, s-2vcpu-2gb, cx22, …).</summary>
+    public string InstanceType { get; set; } = string.Empty;
 }

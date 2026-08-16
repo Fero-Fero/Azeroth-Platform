@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Cloud, ClipboardList, KeyRound, Loader2, Trash2 } from 'lucide-react'
+import { Cloud, ClipboardList, KeyRound, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
 import { cloudApi } from '@/services/api'
-import { CloudAuthMethod } from '@/types/stack.types'
+import { CloudAuthMethod, CloudProvider, type CloudConnectionVerifyResultDto, type CloudProviderConnectionDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 import { CloudConnectionLinkForm } from '@/components/wizard/common/CloudConnectionLinkForm'
 import { CloudProviderLoginButton } from '@/components/wizard/common/CloudProviderLoginButton'
@@ -37,6 +37,8 @@ function eventLabel(eventType: string): string {
       return 'OAuth revoked'
     case 'connection.assumed_role.linked':
       return 'AWS IAM role connected'
+    case 'connection.verified':
+      return 'Account verified'
     default:
       return eventType
   }
@@ -45,9 +47,12 @@ function eventLabel(eventType: string): string {
 export default function CloudSettingsPage() {
   const queryClient = useQueryClient()
   const [keyLabel, setKeyLabel] = useState('')
-  const [keyUser, setKeyUser] = useState('ubuntu')
+  const [keyUser, setKeyUser] = useState('azp-admin')
   const [keyPem, setKeyPem] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
+  const [verifyMessageById, setVerifyMessageById] = useState<Record<string, { ok: boolean; message: string }>>({})
+  const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [verifyingAll, setVerifyingAll] = useState(false)
 
   const { data: sshKeys, isLoading: loadingKeys } = useQuery({
     queryKey: ['cloud-ssh-keys'],
@@ -79,7 +84,7 @@ export default function CloudSettingsPage() {
         await cloudApi.createSshKey({
           label: keyLabel.trim() || 'SSH key',
           privateKey: keyPem.trim(),
-          defaultSshUser: keyUser.trim() || 'ubuntu',
+          defaultSshUser: keyUser.trim() || 'azp-admin',
         })
       ).data,
     onSuccess: async () => {
@@ -102,6 +107,58 @@ export default function CloudSettingsPage() {
     await cloudApi.revokeCloudAuth(id)
     await queryClient.invalidateQueries({ queryKey: ['cloud-connections'] })
     await refreshAuditLogs()
+  }
+
+  const applyVerifyResult = (result: CloudConnectionVerifyResultDto) => {
+    setVerifyMessageById((current) => ({
+      ...current,
+      [result.connection.id]: { ok: result.ok, message: result.message },
+    }))
+    queryClient.setQueryData(
+      ['cloud-connections'],
+      (current: CloudProviderConnectionDto[] | undefined) =>
+        current?.map((item) => (item.id === result.connection.id ? result.connection : item)),
+    )
+  }
+
+  const handleVerifyConnection = async (id: string) => {
+    setVerifyingId(id)
+    try {
+      applyVerifyResult((await cloudApi.verifyConnection(id)).data)
+      await refreshAuditLogs()
+    } catch {
+      setVerifyMessageById((current) => ({
+        ...current,
+        [id]: { ok: false, message: 'Could not reach the platform API to verify this account.' },
+      }))
+    } finally {
+      setVerifyingId(null)
+    }
+  }
+
+  const handleVerifyAll = async () => {
+    if (!connections?.length) {
+      return
+    }
+
+    setVerifyingAll(true)
+    try {
+      for (const connection of connections) {
+        setVerifyingId(connection.id)
+        try {
+          applyVerifyResult((await cloudApi.verifyConnection(connection.id)).data)
+        } catch {
+          setVerifyMessageById((current) => ({
+            ...current,
+            [connection.id]: { ok: false, message: 'Could not reach the platform API to verify this account.' },
+          }))
+        }
+      }
+      await refreshAuditLogs()
+    } finally {
+      setVerifyingId(null)
+      setVerifyingAll(false)
+    }
   }
 
   return (
@@ -174,7 +231,7 @@ export default function CloudSettingsPage() {
             />
             <input
               type="text"
-              placeholder="Default SSH user (e.g. ubuntu)"
+              placeholder="Default SSH user (e.g. azp-admin)"
               value={keyUser}
               onChange={(event) => setKeyUser(event.target.value)}
               className="rounded-md border border-gray-300 px-3 py-2 text-sm"
@@ -205,14 +262,33 @@ export default function CloudSettingsPage() {
       </section>
 
       <section className="rounded-lg border border-gray-200 bg-white p-5">
-        <div className="flex items-center gap-2">
-          <Cloud className="h-5 w-5 text-gray-600" aria-hidden="true" />
-          <h2 className="text-lg font-semibold text-gray-900">Linked cloud accounts</h2>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <Cloud className="h-5 w-5 text-gray-600" aria-hidden="true" />
+              <h2 className="text-lg font-semibold text-gray-900">Linked cloud accounts</h2>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              DigitalOcean, AWS, and GCP accounts linked for instance pickers and launch-via-platform in the
+              Create Stack wizard. Verify checks that stored credentials still work against the provider API.
+            </p>
+          </div>
+          {(connections?.length ?? 0) > 0 ? (
+            <button
+              type="button"
+              disabled={verifyingAll || verifyingId !== null}
+              onClick={() => void handleVerifyAll()}
+              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              {verifyingAll ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Verify all
+            </button>
+          ) : null}
         </div>
-        <p className="mt-1 text-xs text-gray-500">
-          DigitalOcean, AWS, and GCP accounts linked for instance pickers and launch-via-platform in the
-          Create Stack wizard.
-        </p>
 
         {loadingConnections ? (
           <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
@@ -235,14 +311,43 @@ export default function CloudSettingsPage() {
                         · Default: <span className="font-mono">{connection.defaultRegion}</span>
                       </>
                     ) : null}
+                    {connection.defaultProjectId ? (
+                      <>
+                        {' '}
+                        · {connection.provider === CloudProvider.Azure ? 'Subscription' : 'Project'}:{' '}
+                        <span className="font-mono">{connection.defaultProjectId}</span>
+                      </>
+                    ) : null}
                     {' '}
                     · {connectionStatusLine(connection)}
                     {connection.needsReauth ? (
                       <span className="ml-1 font-medium text-amber-700">Needs reconnect</span>
                     ) : null}
                   </p>
+                  {verifyMessageById[connection.id] ? (
+                    <p
+                      className={`mt-1 text-xs ${
+                        verifyMessageById[connection.id].ok ? 'text-green-700' : 'text-red-700'
+                      }`}
+                    >
+                      {verifyMessageById[connection.id].message}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={verifyingAll || verifyingId !== null}
+                    onClick={() => void handleVerifyConnection(connection.id)}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {verifyingId === connection.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    Verify
+                  </button>
                   {connection.authMethod === CloudAuthMethod.OAuth
                   || connection.authMethod === CloudAuthMethod.AssumedRole ? (
                     <CloudProviderLoginButton

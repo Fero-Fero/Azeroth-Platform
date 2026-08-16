@@ -17,6 +17,7 @@ public class CloudController : ControllerBase
     private readonly ICloudAuditService _cloudAuditService;
     private readonly ICloudSetupDialogService _cloudSetupDialogService;
     private readonly ICloudFirewallService _cloudFirewallService;
+    private readonly ICloudAuthOrchestrator _cloudAuthOrchestrator;
 
     public CloudController(
         ICloudSshKeyService cloudSshKeyService,
@@ -24,7 +25,8 @@ public class CloudController : ControllerBase
         ICloudLaunchService cloudLaunchService,
         ICloudAuditService cloudAuditService,
         ICloudSetupDialogService cloudSetupDialogService,
-        ICloudFirewallService cloudFirewallService)
+        ICloudFirewallService cloudFirewallService,
+        ICloudAuthOrchestrator cloudAuthOrchestrator)
     {
         _cloudSshKeyService = cloudSshKeyService;
         _cloudProviderConnectionService = cloudProviderConnectionService;
@@ -32,6 +34,7 @@ public class CloudController : ControllerBase
         _cloudAuditService = cloudAuditService;
         _cloudSetupDialogService = cloudSetupDialogService;
         _cloudFirewallService = cloudFirewallService;
+        _cloudAuthOrchestrator = cloudAuthOrchestrator;
     }
 
     /// <summary>Lists saved SSH keys (metadata only — private key material is never returned).</summary>
@@ -118,18 +121,42 @@ public class CloudController : ControllerBase
         }
     }
 
-    /// <summary>Removes a linked cloud provider account.</summary>
+    /// <summary>Removes a linked cloud provider account and revokes OAuth tokens when present.</summary>
     [HttpDelete("connections/{id}")]
     public async Task<IActionResult> DeleteConnection(string id, CancellationToken cancellationToken)
     {
         try
         {
-            await _cloudProviderConnectionService.DeleteAsync(id, cancellationToken);
+            await _cloudAuthOrchestrator.RevokeAsync(id, cancellationToken);
             return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+    }
+
+    /// <summary>Re-validates stored credentials against the provider API.</summary>
+    [HttpPost("connections/{id}/verify")]
+    public async Task<ActionResult<CloudConnectionVerifyResultDto>> VerifyConnection(
+        string id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _cloudProviderConnectionService.VerifyAsync(id, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 

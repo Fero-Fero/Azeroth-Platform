@@ -426,8 +426,13 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Message = sudoMessage
             });
 
-            var (remoteDockerReady, remoteDockerOut, remoteDockerErr) = await TryRemoteDockerInfoAsync(
+            var dockerUser = await ResolveRemoteSshUserAsync(contextName, user, cancellationToken);
+            await EnsureRemoteDockerGroupAsync(contextName, dockerUser, cancellationToken);
+
+            var (remoteDockerReady, remoteDockerOut, remoteDockerErr) = await EnsureRemoteDockerForVerifyAsync(
                 contextName,
+                dockerUser,
+                prerequisites,
                 cancellationToken);
 
             if (!remoteDockerReady)
@@ -441,14 +446,14 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return new RemoteConnectionTestResultDto
                 {
                     Success = false,
-                    Message = "SSH works, but the remote Docker engine is not available. Wait for launch " +
-                              "user-data to finish, then verify again. If this host was not launched from " +
-                              "the wizard, use Repair host setup.",
+                    Message = "SSH works, but the remote Docker engine is not available. Verify waits for " +
+                              "launch user-data and will install Docker if it is still missing. If this " +
+                              "keeps failing, use Repair host setup.",
                     Prerequisites = prerequisites
                 };
             }
 
-            var version = remoteDockerOut.Trim();
+            var version = ExtractDockerVersion(remoteDockerOut);
             prerequisites.Add(new RemotePrerequisiteCheckDto
             {
                 Name = "Docker Engine",
@@ -479,7 +484,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     ? (string.IsNullOrWhiteSpace(version)
                         ? "Remote host is ready for deployment."
                         : $"Remote host is ready (Docker {version}). Host firewall and OS baselines look good.")
-                    : "SSH and Docker work, but host firewall or OS baselines are not ready yet. Wait for launch user data to finish, then verify again.",
+                    : "SSH and Docker work, but host firewall or OS baselines could not be applied. Use Repair host setup.",
                 Prerequisites = prerequisites
             };
         }
@@ -689,6 +694,219 @@ public sealed class RemoteEngineService : IRemoteEngineService
         string privateKey,
         CancellationToken cancellationToken = default)
         => ProvisionRemoteHostAsync(host, sshPort, user, privateKey, new RemoteSetupOptionsDto { SshPort = sshPort <= 0 ? 22 : sshPort }, cancellationToken);
+
+    public async Task<RemoteSetupResultDto> FinalizeSshHardeningAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        bool enableAwsInstanceConnect,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
+        {
+            return new RemoteSetupResultDto { Success = false, Message = "Host and SSH user are required." };
+        }
+
+        if (string.IsNullOrWhiteSpace(privateKey))
+        {
+            return new RemoteSetupResultDto { Success = false, Message = "SSH private key is required." };
+        }
+
+        host = host.Trim();
+        user = user.Trim();
+        var port = sshPort <= 0 ? 22 : sshPort;
+
+        if (VpcBootstrapUserData.IsForbiddenSshUser(user) || VpcBootstrapUserData.IsImageDefaultSshUser(user))
+        {
+            return new RemoteSetupResultDto
+            {
+                Success = false,
+                Message =
+                    $"SSH user '{user}' cannot be used for hardening. Create and connect as a dedicated operator user " +
+                    $"such as {VpcBootstrapUserData.DefaultOperatorUser} first.",
+            };
+        }
+
+        if (await IsDisallowedRemoteHostAsync(host, cancellationToken))
+        {
+            return new RemoteSetupResultDto
+            {
+                Success = false,
+                Message = "The specified host is not an allowed remote engine target (loopback and " +
+                          "link-local/metadata addresses are blocked)."
+            };
+        }
+
+        var contextName = $"acore-ext-harden-{Guid.NewGuid():N}";
+        var steps = new List<RemotePrerequisiteCheckDto>();
+        try
+        {
+            WriteSshConfig(contextName, host, port, user, privateKey);
+
+            var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Verify SSH as operator",
+                Passed = sshExit == 0,
+                Message = sshExit == 0
+                    ? $"Connected as {user}."
+                    : FormatSshError(sshStderr, host, user, port)
+            });
+            if (sshExit != 0)
+            {
+                return FailSetup(steps, GetSshSetupFailureSummary(sshStderr));
+            }
+
+            var (sudoPassed, sudoMessage) = await EnsurePasswordlessSudoAsync(contextName, user, cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Passwordless sudo",
+                Passed = sudoPassed,
+                Message = sudoMessage,
+            });
+            if (!sudoPassed)
+            {
+                return FailSetup(steps, "Hardening stopped — could not use passwordless sudo as the operator user.");
+            }
+
+            if (enableAwsInstanceConnect)
+            {
+                var (pkgExit, pkgOut, pkgErr) = await RunSshRemoteShellAsync(
+                    contextName,
+                    SudoAptGet("install -y ec2-instance-connect"),
+                    cancellationToken,
+                    connectTimeoutSeconds: 180,
+                    allowTtyRetry: true);
+                steps.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "EC2 Instance Connect package",
+                    Passed = pkgExit == 0,
+                    Message = pkgExit == 0
+                        ? "ec2-instance-connect is installed for console break-glass."
+                        : FormatRemoteShellError(pkgErr, pkgOut),
+                });
+                if (pkgExit != 0)
+                {
+                    return FailSetup(steps, "Hardening stopped — could not install ec2-instance-connect.");
+                }
+            }
+
+            var dropIn = VpcBootstrapUserData.BuildSshHardeningDropIn(user, enableAwsInstanceConnect);
+            var dropInB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(dropIn));
+            var writeSshd = RemotePathSetup
+                + "set -e; "
+                + "TMP=$(mktemp); "
+                + $"echo {ShellQuote(dropInB64)} | /usr/bin/base64 -d > \"$TMP\"; "
+                + "sudo -n mkdir -p /etc/ssh/sshd_config.d; "
+                + "sudo -n install -o root -g root -m 644 \"$TMP\" /etc/ssh/sshd_config.d/99-azeroth-platform-hardening.conf; "
+                + "rm -f \"$TMP\"";
+            var (writeExit, writeOut, writeErr) = await RunSshBashWithSudoPtyFallbacksAsync(
+                contextName,
+                writeSshd,
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Write sshd hardening drop-in",
+                Passed = writeExit == 0,
+                Message = writeExit == 0
+                    ? "Root login and password auth disabled."
+                    : FormatRemoteShellError(writeErr, writeOut),
+            });
+            if (writeExit != 0)
+            {
+                return FailSetup(steps, "Hardening stopped — could not write sshd config.");
+            }
+
+            var clearKeys = RemotePathSetup
+                + "set -e; "
+                + "for src in ubuntu debian azureuser ec2-user admin centos fedora; do "
+                + "  if [ \"$src\" != " + ShellQuote(user) + " ] && [ -f \"/home/$src/.ssh/authorized_keys\" ]; then "
+                + "    sudo -n truncate -s 0 \"/home/$src/.ssh/authorized_keys\"; "
+                + "  fi; "
+                + "done; "
+                + "if [ -f /root/.ssh/authorized_keys ]; then sudo -n truncate -s 0 /root/.ssh/authorized_keys; fi";
+            var (clearExit, clearOut, clearErr) = await RunSshBashWithSudoPtyFallbacksAsync(
+                contextName,
+                clearKeys,
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Remove static keys from image-default users",
+                Passed = clearExit == 0,
+                Message = clearExit == 0
+                    ? "ubuntu/root authorized_keys cleared. EC2 Instance Connect is unchanged."
+                    : FormatRemoteShellError(clearErr, clearOut),
+            });
+            if (clearExit != 0)
+            {
+                return FailSetup(steps, "Hardening stopped — could not clear default-user SSH keys.");
+            }
+
+            var reload = RemotePathSetup
+                + "if sudo -n systemctl reload ssh 2>/dev/null || sudo -n systemctl reload sshd 2>/dev/null "
+                + "|| sudo -n service ssh reload 2>/dev/null || sudo -n service sshd reload 2>/dev/null; then exit 0; fi; "
+                + "echo 'Could not reload sshd' >&2; exit 1";
+            var (reloadExit, reloadOut, reloadErr) = await RunSshBashWithSudoPtyFallbacksAsync(
+                contextName,
+                reload,
+                cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Reload sshd",
+                Passed = reloadExit == 0,
+                Message = reloadExit == 0
+                    ? "sshd reloaded."
+                    : FormatRemoteShellError(reloadErr, reloadOut),
+            });
+            if (reloadExit != 0)
+            {
+                return FailSetup(steps, "Hardening stopped — could not reload sshd.");
+            }
+
+            var (verifyExit, _, verifyErr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Re-test operator SSH",
+                Passed = verifyExit == 0,
+                Message = verifyExit == 0
+                    ? $"Still connected as {user} after hardening."
+                    : FormatSshError(verifyErr, host, user, port),
+            });
+            if (verifyExit != 0)
+            {
+                return FailSetup(steps, "Hardening applied but operator SSH failed afterwards. Use the provider console to recover.");
+            }
+
+            var marker = RemotePathSetup
+                + "sudo -n mkdir -p /var/lib/azeroth-platform && date -u +%Y-%m-%dT%H:%M:%SZ | "
+                + "sudo -n tee /var/lib/azeroth-platform/ssh-hardening-complete >/dev/null";
+            await RunSshBashWithSudoPtyFallbacksAsync(contextName, marker, cancellationToken);
+
+            return new RemoteSetupResultDto
+            {
+                Success = true,
+                Message = enableAwsInstanceConnect
+                    ? $"SSH hardening complete. Daily access is {user}. Break-glass: AWS console → EC2 Instance Connect as ubuntu."
+                    : $"SSH hardening complete. Daily access is {user}. Break-glass is the provider console only.",
+                Steps = steps,
+            };
+        }
+        catch (Exception ex)
+        {
+            steps.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Finalize SSH hardening",
+                Passed = false,
+                Message = ex.Message,
+            });
+            return FailSetup(steps, ex.Message);
+        }
+        finally
+        {
+            RemoveSshConfigBlock(contextName);
+        }
+    }
 
     public async Task<RemoteSetupResultDto> ProvisionRemoteHostAsync(
         string host,
@@ -1259,7 +1477,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 contextName,
                 command,
                 cancellationToken,
-                allowTtyRetry: false);
+                allowTtyRetry: true);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = label,
@@ -1311,6 +1529,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return FailSetup(steps, "Automatic Docker setup is not supported on this operating system.");
         }
 
+        await WaitForRemoteAptLockAsync(contextName, cancellationToken, TimeSpan.FromSeconds(90));
+
         var setupCommands = new (string Label, string Command, int TimeoutSeconds)[]
         {
             ("Update package lists", SudoAptGet("update -qq"), 180),
@@ -1324,7 +1544,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 command,
                 cancellationToken,
                 connectTimeoutSeconds: timeoutSeconds,
-                allowTtyRetry: false);
+                allowTtyRetry: true);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = label,
@@ -1376,7 +1596,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             SudoAptGet("install -y docker-compose-v2"),
             cancellationToken,
             connectTimeoutSeconds: 300,
-            allowTtyRetry: false);
+            allowTtyRetry: true);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "Install Docker Compose (optional)",
@@ -1405,7 +1625,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             contextName,
             SudoNonInteractive($"usermod -aG docker {user}"),
             cancellationToken,
-            allowTtyRetry: false);
+            allowTtyRetry: true);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "Grant Docker access to SSH user",
@@ -1437,7 +1657,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
             Name = "Verify Docker Engine",
             Passed = verifyReady,
             Message = verifyReady
-                ? (string.IsNullOrWhiteSpace(verifyOut.Trim()) ? "Docker engine is responding." : $"Docker {verifyOut.Trim()} is running.")
+                ? (string.IsNullOrWhiteSpace(ExtractDockerVersion(verifyOut))
+                    ? "Docker engine is responding."
+                    : $"Docker {ExtractDockerVersion(verifyOut)} is running.")
                 : FormatRemoteDockerError(verifyErr, string.Empty, user, 22)
         });
         if (!verifyReady)
@@ -1474,15 +1696,24 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return;
         }
 
+        await WaitForRemoteAptLockAsync(contextName, cancellationToken, TimeSpan.FromSeconds(60));
         var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
             contextName,
-            $"{SudoAptGet("install -y unattended-upgrades")} && {SudoNonInteractive("systemctl enable unattended-upgrades")}",
-            cancellationToken);
+            $"{SudoAptGet("install -y unattended-upgrades")} && " +
+            "printf '%s\\n' 'APT::Periodic::Update-Package-Lists \"1\";' 'APT::Periodic::Unattended-Upgrade \"1\";' | " +
+            SudoNonInteractive("tee /etc/apt/apt.conf.d/20auto-upgrades") +
+            " >/dev/null && " +
+            $"{SudoNonInteractive("systemctl enable --now apt-daily.timer apt-daily-upgrade.timer")} || true; " +
+            $"{SudoNonInteractive("systemctl enable unattended-upgrades")} || true; true",
+            cancellationToken,
+            connectTimeoutSeconds: 300,
+            allowTtyRetry: true);
+        var ready = await IsUnattendedUpgradesEnabledAsync(contextName, cancellationToken);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "OS security baselines",
-            Passed = exit == 0,
-            Message = exit == 0
+            Passed = ready,
+            Message = ready
                 ? "Unattended upgrades enabled."
                 : FormatRemoteShellError(stderr, stdout)
         });
@@ -1652,32 +1883,159 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private static RemoteSetupResultDto FailSetup(List<RemotePrerequisiteCheckDto> steps, string message)
         => new() { Success = false, Message = message, Steps = steps };
 
+    private const string RemoteDockerLocate =
+        "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"; "
+        + "DOCKER=\"$(command -v docker 2>/dev/null || true)\"; "
+        + "if [ -z \"$DOCKER\" ]; then "
+        + "for c in /usr/bin/docker /usr/local/bin/docker /snap/bin/docker; do "
+        + "[ -x \"$c\" ] && DOCKER=\"$c\" && break; done; fi; "
+        + "if [ -z \"$DOCKER\" ]; then echo 'docker: No such file or directory' >&2; exit 127; fi; ";
+
+    private async Task<(bool Ready, string Version, string Error)> EnsureRemoteDockerForVerifyAsync(
+        string contextName,
+        string user,
+        List<RemotePrerequisiteCheckDto> prerequisites,
+        CancellationToken cancellationToken)
+    {
+        var (ready, version, error) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+        if (ready)
+        {
+            return (true, version, string.Empty);
+        }
+
+        if (await IsRemoteBootstrapStillRunningAsync(contextName, cancellationToken))
+        {
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Launch user-data",
+                Passed = true,
+                Message = "Launch user-data is still installing packages. Waiting for Docker..."
+            });
+
+            await WaitForRemoteDockerWhileBootstrapRunsAsync(
+                contextName,
+                cancellationToken,
+                TimeSpan.FromSeconds(90));
+            (ready, version, error) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+            if (ready)
+            {
+                return (true, version, string.Empty);
+            }
+        }
+
+        await WaitForRemoteAptLockAsync(contextName, cancellationToken, TimeSpan.FromSeconds(60));
+
+        var started = await TryStartRemoteDockerAsync(contextName, user, prerequisites, cancellationToken);
+        if (!started)
+        {
+            var installFailure = await InstallLinuxDockerAsync(contextName, user, prerequisites, cancellationToken);
+            if (installFailure is not null)
+            {
+                return (false, string.Empty, installFailure.Message ?? error);
+            }
+        }
+
+        await EnsureRemoteDockerGroupAsync(contextName, user, cancellationToken);
+        return await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+    }
+
+    private async Task<bool> IsRemoteBootstrapStillRunningAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var (exit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup
+                + "if test -f /var/lib/azeroth-platform/bootstrap-ready; then exit 1; fi; "
+                + "if cloud-init status 2>/dev/null | grep -qi running; then exit 0; fi; "
+                + "if command -v fuser >/dev/null 2>&1 "
+                + "&& fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then exit 0; fi; "
+                + "exit 1",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        return exit == 0;
+    }
+
+    private async Task WaitForRemoteDockerWhileBootstrapRunsAsync(
+        string contextName,
+        CancellationToken cancellationToken,
+        TimeSpan maxWait)
+    {
+        var deadline = DateTime.UtcNow + maxWait;
+        while (DateTime.UtcNow < deadline)
+        {
+            var (ready, _, _) = await TryRemoteDockerInfoAsync(contextName, cancellationToken);
+            if (ready || !await IsRemoteBootstrapStillRunningAsync(contextName, cancellationToken))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+    }
+
+    private async Task WaitForRemoteAptLockAsync(
+        string contextName,
+        CancellationToken cancellationToken,
+        TimeSpan maxWait)
+    {
+        var deadline = DateTime.UtcNow + maxWait;
+        while (DateTime.UtcNow < deadline)
+        {
+            var (exit, _, _) = await RunSshRemoteShellAsync(
+                contextName,
+                RemotePathSetup
+                    + "if command -v fuser >/dev/null 2>&1 "
+                    + "&& { fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 "
+                    + "|| sudo -n fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; }; then exit 1; fi; "
+                    + "exit 0",
+                cancellationToken,
+                connectTimeoutSeconds: 30,
+                allowTtyRetry: true);
+            if (exit == 0)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+    }
+
     private async Task<(bool Ready, string Version, string Error)> TryRemoteDockerInfoAsync(
         string contextName,
         CancellationToken cancellationToken)
     {
+        const string dockerInfo =
+            RemoteDockerLocate + "\"$DOCKER\" info --format '{{.ServerVersion}}'";
         var lastError = string.Empty;
-        foreach (var command in new[]
+        string? dockerError = null;
+
+        foreach (var (command, allowTtyRetry) in new (string Command, bool AllowTtyRetry)[]
                  {
-                     "/usr/bin/docker info --format '{{.ServerVersion}}'",
-                     "sg docker -c \"/usr/bin/docker info --format '{{.ServerVersion}}'\"",
-                     "sudo -n /usr/bin/docker info --format '{{.ServerVersion}}'",
+                     (dockerInfo, false),
+                     (RemoteDockerLocate + "sg docker -c \"$DOCKER info --format '{{.ServerVersion}}'\"", false),
+                     (RemoteDockerLocate + "sudo -n \"$DOCKER\" info --format '{{.ServerVersion}}'", true),
                  })
         {
             var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
                 contextName,
                 command,
                 cancellationToken,
-                allowTtyRetry: false);
-            if (exit == 0)
+                allowTtyRetry: allowTtyRetry);
+            if (exit == 0 && !LooksLikeSudoFailure(stderr, stdout))
             {
-                return (true, stdout.Trim(), string.Empty);
+                return (true, ExtractDockerVersion(stdout), string.Empty);
             }
 
             lastError = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            if (!LooksLikeSudoFailure(stderr, stdout) && string.IsNullOrWhiteSpace(dockerError))
+            {
+                dockerError = lastError;
+            }
         }
 
-        return (false, string.Empty, lastError);
+        return (false, string.Empty, string.IsNullOrWhiteSpace(dockerError) ? lastError : dockerError);
     }
 
     private async Task<(bool Ready, string? Version, string? ComposeVersion)> IsRemoteDockerReadyAsync(
@@ -1725,14 +2083,19 @@ public sealed class RemoteEngineService : IRemoteEngineService
         CancellationToken cancellationToken)
     {
         var baselinesReady = await IsUnattendedUpgradesEnabledAsync(contextName, cancellationToken);
-        prerequisites.Add(new RemotePrerequisiteCheckDto
+        if (!baselinesReady)
         {
-            Name = "OS security baselines",
-            Passed = baselinesReady,
-            Message = baselinesReady
-                ? "Automatic security updates are enabled."
-                : "unattended-upgrades is not enabled yet. Wait for launch user data, or run Repair host setup."
-        });
+            await RunLinuxSecurityBaselinesAsync(contextName, prerequisites, cancellationToken);
+        }
+        else
+        {
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "OS security baselines",
+                Passed = true,
+                Message = "Automatic security updates are enabled."
+            });
+        }
 
         var (_, statusOut, _) = await RunSshRemoteShellAsync(
             contextName,
@@ -1791,10 +2154,22 @@ public sealed class RemoteEngineService : IRemoteEngineService
         string contextName,
         CancellationToken cancellationToken)
     {
+        // Ubuntu ships unattended-upgrades.service as static (no [Install] section), so
+        // `systemctl is-enabled` exits 1 even when the package is installed and apt timers run it.
         var (exit, _, _) = await RunSshRemoteShellAsync(
             contextName,
-            "dpkg -s unattended-upgrades >/dev/null 2>&1 && systemctl is-enabled unattended-upgrades >/dev/null 2>&1",
-            cancellationToken);
+            RemotePathSetup
+                + "if dpkg -s unattended-upgrades >/dev/null 2>&1; then "
+                + "if systemctl is-enabled unattended-upgrades >/dev/null 2>&1; then exit 0; fi; "
+                + "state=$(systemctl is-enabled unattended-upgrades 2>/dev/null || true); "
+                + "[ \"$state\" = static ] && exit 0; "
+                + "fi; "
+                + "systemctl is-enabled apt-daily-upgrade.timer >/dev/null 2>&1 && "
+                + "dpkg -s unattended-upgrades >/dev/null 2>&1 && exit 0; "
+                + "grep -RqsE 'Unattended-Upgrade[[:space:]]+\"?1\"?' /etc/apt/apt.conf.d/ 2>/dev/null && exit 0; "
+                + "exit 1",
+            cancellationToken,
+            allowTtyRetry: false);
         return exit == 0;
     }
 
@@ -1912,27 +2287,103 @@ public sealed class RemoteEngineService : IRemoteEngineService
         CancellationToken cancellationToken)
     {
         var sudoersB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        // Validate the fragment as the SSH user first so visudo does not need a TTY.
+        // Then copy it with sudo -n. Ubuntu 24.04 Defaults use_pty makes sudo -n fail
+        // without a PTY, so retry over ssh -tt and util-linux script(1).
         var installCommand = RemotePathSetup
             + "set -e; "
             + "TMP=$(mktemp); "
             + $"echo {ShellQuote(sudoersB64)} | /usr/bin/base64 -d > \"$TMP\"; "
-            + $"sudo install -o root -g root -m 440 \"$TMP\" {PlatformSudoersFile}; "
+            + $"sudo -n install -o root -g root -m 440 \"$TMP\" {PlatformSudoersFile}; "
             + "rm -f \"$TMP\"; "
-            + $"sudo /usr/sbin/visudo -c -f {PlatformSudoersFile}";
+            + $"if ! sudo -n /usr/sbin/visudo -c -f {PlatformSudoersFile}; then "
+            + $"sudo -n rm -f {PlatformSudoersFile}; exit 1; fi";
 
-        var (exit, stdout, stderr) = await RunSshAsync(
+        var (exit, stdout, stderr) = await RunSshBashWithSudoPtyFallbacksAsync(
             contextName,
-            ["bash", "-c", installCommand],
+            installCommand,
             cancellationToken,
-            connectTimeoutSeconds: 60,
-            forceTty: true);
+            connectTimeoutSeconds: 60);
 
-        if (exit != 0)
+        if (exit != 0 || LooksLikeSudoFailure(stderr, stdout))
         {
             return (false, FormatRemoteShellError(stderr, stdout));
         }
 
         return (true, string.Empty);
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunSshBashWithSudoPtyFallbacksAsync(
+        string contextName,
+        string bashCommand,
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds = 60)
+    {
+        var (exit, stdout, stderr) = await RunSshAsync(
+            contextName,
+            ["bash", "-c", bashCommand],
+            cancellationToken,
+            connectTimeoutSeconds);
+        if (IsSuccessfulRemoteCommand(exit, stdout, stderr))
+        {
+            return (exit, stdout, stderr);
+        }
+
+        (exit, stdout, stderr) = await RunSshAsync(
+            contextName,
+            ["bash", "-c", bashCommand],
+            cancellationToken,
+            connectTimeoutSeconds,
+            forceTty: true);
+        if (IsSuccessfulRemoteCommand(exit, stdout, stderr))
+        {
+            return (exit, stdout, stderr);
+        }
+
+        var scriptCommand = "script -qefc " + ShellQuote("bash -c " + ShellQuote(bashCommand)) + " /dev/null";
+        return await RunSshAsync(
+            contextName,
+            ["bash", "-c", scriptCommand],
+            cancellationToken,
+            connectTimeoutSeconds);
+    }
+
+    private static bool IsSuccessfulRemoteCommand(int exit, string stdout, string stderr)
+        => exit == 0 && !LooksLikeSudoFailure(stderr, stdout);
+
+    private async Task EnsureRemoteDockerGroupAsync(
+        string contextName,
+        string user,
+        CancellationToken cancellationToken)
+    {
+        var (inGroupExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup + "id -nG | grep -qw docker",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        if (inGroupExit == 0)
+        {
+            return;
+        }
+
+        var (groupExit, _, _) = await RunSshRemoteShellAsync(
+            contextName,
+            RemotePathSetup + "getent group docker >/dev/null",
+            cancellationToken,
+            connectTimeoutSeconds: 30,
+            allowTtyRetry: false);
+        if (groupExit != 0)
+        {
+            return;
+        }
+
+        await RunSshRemoteShellAsync(
+            contextName,
+            SudoNonInteractive($"usermod -aG docker {user}"),
+            cancellationToken,
+            connectTimeoutSeconds: 60,
+            allowTtyRetry: true);
     }
 
     private Task<(int ExitCode, string StdOut, string StdErr)> TestNonInteractiveSudoAsync(
@@ -2040,6 +2491,32 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return string.IsNullOrWhiteSpace(usefulLine) ? $"{fallback} completed." : usefulLine;
     }
 
+    private static string ExtractDockerVersion(string stdout)
+    {
+        var lines = (stdout ?? string.Empty)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines.Reverse())
+        {
+            if (LooksLikeDockerVersion(line))
+            {
+                return line;
+            }
+        }
+
+        return lines.LastOrDefault(IsUsefulRemoteOutputLine) ?? string.Empty;
+    }
+
+    private static bool LooksLikeDockerVersion(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line) || line.Length > 32 || !char.IsAsciiDigit(line[0]))
+        {
+            return false;
+        }
+
+        var dot = line.IndexOf('.');
+        return dot > 0 && dot < line.Length - 1 && char.IsAsciiDigit(line[dot + 1]);
+    }
+
     private static bool IsUsefulRemoteOutputLine(string value)
         => !string.IsNullOrWhiteSpace(value)
            && !value.StartsWith("SHELL=", StringComparison.Ordinal)
@@ -2081,7 +2558,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 command,
                 cancellationToken,
                 connectTimeoutSeconds: 300,
-                allowTtyRetry: false);
+                allowTtyRetry: true);
             if (exit != 0)
             {
                 return (false, FormatRemoteShellError(stderr, stdout));
@@ -2093,7 +2570,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             SudoAptGet("install -y docker.io"),
             cancellationToken,
             connectTimeoutSeconds: 600,
-            allowTtyRetry: false);
+            allowTtyRetry: true);
         steps.Add(new RemotePrerequisiteCheckDto
         {
             Name = "Install Docker Engine",
@@ -2543,12 +3020,12 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return (exit, stdout, stderr);
         }
 
-        // Some images set sudo requiretty — retry with a TTY for short commands (apt, etc.).
-        // Never use this path for systemctl: it drops the SSH session when the service starts.
-        var ttyCommand = effectiveCommand.Replace("sudo -n ", "sudo ", StringComparison.Ordinal);
+        // Ubuntu 24.04 Defaults use_pty: sudo -n needs a PTY. Keep -n so BatchMode never
+        // hangs on a password prompt. Do not use this path for systemctl start (it can
+        // drop the SSH session when the service comes up).
         return await RunSshAsync(
             contextName,
-            ["bash", "-c", ttyCommand],
+            ["bash", "-c", effectiveCommand],
             cancellationToken,
             connectTimeoutSeconds,
             forceTty: true);
@@ -4046,6 +4523,12 @@ public sealed class RemoteEngineService : IRemoteEngineService
         {
             message += " Non-interactive sudo is not ready yet (common on Ubuntu 24.04). Wait for launch " +
                        "user-data, or use Repair host setup so the platform can write NOPASSWD and disable sudo use_pty.";
+        }
+        else if (message.Contains("No such file", StringComparison.OrdinalIgnoreCase)
+                 || message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            message += " Docker is not installed on the VPC yet. Wait for launch user-data to finish, then " +
+                       "verify again. If this host was not launched from the wizard, use Repair host setup.";
         }
         else if (message.Contains("permission denied", StringComparison.OrdinalIgnoreCase))
         {

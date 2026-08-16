@@ -119,6 +119,18 @@ public interface IRemoteEngineService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Locks root and image-default users out of internet SSH. Platform access stays on the operator user.
+    /// AWS keeps <c>ubuntu</c> for EC2 Instance Connect only.
+    /// </summary>
+    Task<RemoteSetupResultDto> FinalizeSshHardeningAsync(
+        string host,
+        int sshPort,
+        string user,
+        string privateKey,
+        bool enableAwsInstanceConnect,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs the VPC bootstrap shell script on a remote host over SSH (<c>bash -s</c> stdin). Prefer this
     /// over pasting into the browser terminal, which can drop newlines or exit early on errors.
     /// </summary>

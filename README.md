@@ -262,7 +262,7 @@ Optionally apply AWS security group rules from the same panel when using a linke
 6. Manage saved SSH keys, linked accounts, and the [audit log](#cloud-wizard-digitalocean-aws-gcp) under **Cloud**
    in the nav (`/admin/cloud`).
 
-See [`plans_support/00-implementation-order.md`](plans_support/00-implementation-order.md) for **numbered implementation order**. Shipped baseline: [`plans_support/01-cloud-integration-completed.md`](plans_support/01-cloud-integration-completed.md). Active work starts at [`plans/02-cloud-oauth-login-master-plan.md`](plans/02-cloud-oauth-login-master-plan.md).
+See [`plans_support/00-implementation-order.md`](plans_support/00-implementation-order.md) for remaining work. Cloud login for DigitalOcean, Hetzner, Vultr, AWS, GCP, and Azure is shipped. Follow-ups and a live test matrix: [`plans/13-cloud-followups-and-test.md`](plans/13-cloud-followups-and-test.md).
 
 > The SSH key that reaches a remote host is powerful. Keep the manager machine and its
 > `azeroth-platform-data` volume secure, use a dedicated least-privilege key, and prefer a non-root
@@ -299,31 +299,87 @@ Grant **only** the permissions you need. Link accounts in the wizard or on `/adm
 
 **DigitalOcean**
 
-| Use case | Token scope |
+Prefer **Sign in with DigitalOcean** (OAuth). Register an OAuth application at
+[cloud.digitalocean.com/account/api/applications/new](https://cloud.digitalocean.com/account/api/applications/new)
+with callback URL:
+
+```text
+https://{platform-host}/api/cloud/auth/DigitalOcean/callback
+```
+
+Local development uses the API listen address, for example
+`http://localhost:5080/api/cloud/auth/DigitalOcean/callback` (the registered URL must match
+`redirect_uri` exactly, including scheme and port). Then set:
+
+```text
+CloudOAuth:DigitalOcean:ClientId
+CloudOAuth:DigitalOcean:ClientSecret
+```
+
+Requested scopes are `read write` (droplets, SSH keys, and Cloud Firewalls). Leave ClientId blank
+on air-gapped installs and use **Advanced → paste API token** instead.
+
+| Use case | OAuth / token scope |
 | --- | --- |
 | List droplets (pick existing) | Read |
-| Launch new droplet | Read + Write |
+| Launch droplet + Cloud Firewall | Read + Write |
 
-Create a personal access token under **API → Tokens/Keys**. Read scope is enough to list droplets;
-write scope is required for **Launch via platform**.
+Create a **dedicated** personal access token under **API → Tokens/Keys** for the Advanced fallback —
+do not persist the team owner's unrestricted root key for daily API use. Launch attaches Cloud Firewall
+`azeroth-platform-{dropletId}` (SSH, auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306
+or SOAP 7878). Verify VPC probes that firewall.
 
 **Hetzner Cloud**
+
+Hetzner has no OAuth. Use **Connect Hetzner project** and paste a **Read & Write** project token from
+**Security → API tokens** (not the account password). Connect probes write access by creating and deleting
+a short-lived Cloud Firewall; a read-only token fails at connect, not at Verify VPC. There is no refresh
+token — Reconnect with a new token if the current one is revoked.
 
 | Use case | Token permission |
 | --- | --- |
 | List servers (pick existing) | Read |
-| Launch new server | Read + Write |
+| Launch / pick + Cloud Firewall | **Read & Write** |
 
-Create an API token under **Security → API tokens** in the Hetzner Cloud Console. Optional default **location** (e.g. `nbg1`) limits instance listing.
+Launch and pick apply Cloud Firewall `azeroth-platform-{serverId}` (SSH, auth 3724, world 8085, armory 8100,
+client 8101; never MySQL 3306 or SOAP 7878). Verify VPC probes that firewall. Break-glass after Finalize SSH
+is **Hetzner KVM Console**. Optional default **location** (e.g. `nbg1`) limits instance listing.
 
 **Vultr**
 
-| Use case | API key permission |
+Prefer **Sign in with Vultr** (OAuth). Register an OIDC provider and OAuth application with a root-user
+API key (one-time platform setup, not stored as a stack connection). Callback URL:
+
+```text
+https://{platform-host}/api/cloud/auth/Vultr/callback
+```
+
+Local development uses the API listen address, for example
+`http://localhost:5080/api/cloud/auth/Vultr/callback`. Attach an IAM policy as an OAuth scope that can
+list/create instances, manage SSH keys, and **read/write firewall groups**. Then set:
+
+```text
+CloudOAuth:Vultr:ClientId
+CloudOAuth:Vultr:ClientSecret
+CloudOAuth:Vultr:ProviderId
+```
+
+Optional `CloudOAuth:Vultr:AuthorizeUrl` overrides OIDC discovery for the consent page. Draft-mode
+applications can only be authorized by users on the app allowlist until Vultr approves the app
+(funded account, HTTPS callback, at least one scope). Access tokens last one hour and rotate on
+refresh — the platform refreshes them before launch and Verify VPC.
+
+Leave ClientId blank on air-gapped installs and use **Advanced → paste API key** instead.
+
+| Use case | OAuth / API key |
 | --- | --- |
 | List instances (pick existing) | Read |
-| Launch new instance | Read + Write |
+| Launch instance + firewall group | Read + Write (including firewall) |
 
-Create an API key under **Account → API**. Optional default **region** (e.g. `ewr`) limits instance listing.
+Create a **dedicated** API key under **Account → API** for the Advanced fallback — do not persist the
+account root key for daily API use. Launch attaches firewall group `azeroth-platform-{instanceId}`
+(SSH, auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306 or SOAP 7878). Verify VPC
+probes that group.
 
 **AWS**
 
@@ -425,24 +481,82 @@ rules are skipped. Requires:
 
 **Google Cloud (GCP)**
 
-| Use case | Service account role / scope |
-| --- | --- |
-| List VMs (pick existing) | `roles/compute.viewer` or `compute.readonly` OAuth scope |
-| Launch new VM | `roles/compute.instanceAdmin.v1` (or `compute` write scope) on the project |
+Prefer **Sign in with Google Cloud** (OAuth + PKCE). Create an OAuth client in a platform GCP project
+(APIs & Services → Credentials → Create credentials → OAuth client ID → Web application) with callback
+URL:
 
-Download a JSON key for a service account with the roles above and paste it when linking the account.
-Launch injects a startup script and optional SSH public key via instance metadata.
+```text
+https://{platform-host}/api/cloud/auth/Gcp/callback
+```
+
+Local development uses the API listen address, for example
+`http://localhost:5080/api/cloud/auth/Gcp/callback` (the registered URL must match `redirect_uri`
+exactly, including scheme and port). Configure the OAuth consent screen in **Testing** first; moving
+to Production may require Google verification for the `compute` scope. Then set:
+
+```text
+CloudOAuth:Gcp:ClientId
+CloudOAuth:Gcp:ClientSecret
+```
+
+Requested scopes are `compute` (VMs + VPC firewalls) and `cloudplatformprojects.readonly` (project
+picker). The platform does **not** request `cloud-platform` full scope. After sign-in, pick the
+customer project (auto-selected when there is only one). Compute Engine API must be enabled on that
+**customer** project.
+
+Leave ClientId blank on air-gapped installs and use **Advanced → paste service account JSON** instead.
+
+| Use case | OAuth scope / SA role |
+| --- | --- |
+| List VMs (pick existing) | `compute.readonly` or `roles/compute.viewer` |
+| Launch VM + VPC firewall | `compute` or `roles/compute.instanceAdmin.v1` plus `compute.firewalls.create` / `compute.instances.setTags` |
+| List projects | `cloudplatformprojects.readonly` |
+
+Create a **dedicated** service account for the Advanced fallback — do not persist the Google Cloud org
+owner key. Launch tags the VM `azeroth-platform` and creates ingress rules `azp-{name}-p{port}` (SSH,
+auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306 or SOAP 7878). Verify VPC probes the
+tag and those firewall rules. Break-glass after Finalize SSH is serial console or IAP.
 
 **Azure**
 
-Create an app registration (service principal) in Azure AD and assign it roles on your subscription or resource group.
+Prefer **Sign in with Microsoft** (Entra ID authorization code + PKCE). Register a multi-tenant app
+(Azure Portal → Microsoft Entra ID → App registrations) as a Web application with callback URL:
 
-| Use case | RBAC |
+```text
+https://{platform-host}/api/cloud/auth/Azure/callback
+```
+
+Local development uses the API listen address, for example
+`http://localhost:5080/api/cloud/auth/Azure/callback` (the registered URL must match `redirect_uri`
+exactly, including scheme and port). Enable **Allow public client flows** if operators will use
+**Use device code** (headless / SSH-only). Then set:
+
+```text
+CloudOAuth:Azure:ClientId
+CloudOAuth:Azure:ClientSecret
+CloudOAuth:Azure:TenantId
+```
+
+Leave `TenantId` blank to use the `organizations` endpoint (work/school accounts). Requested scopes are
+`openid profile offline_access` plus `https://management.azure.com/.default` (ARM, not Microsoft Graph).
+Customer tenants may need admin consent. After sign-in, pick the Azure subscription (auto-selected when
+there is only one). The subscription id is stored on the connection (`DefaultProjectId`).
+
+Leave ClientId blank on air-gapped installs and use **Advanced → paste a service principal**
+(tenant + client ID + secret + subscription). Do **not** persist the tenant Global Admin secret.
+
+| Use case | ARM permission / RBAC |
 | --- | --- |
-| List VMs (pick existing) | `Microsoft.Compute/virtualMachines/read`, `Microsoft.Network/networkInterfaces/read`, `Microsoft.Network/publicIPAddresses/read` |
-| Bootstrap existing VM (Run Command) | Above plus `Microsoft.Compute/virtualMachines/runCommand/action` (Virtual Machine Contributor on the VM or resource group) |
+| List VMs (pick existing) | `Microsoft.Compute/virtualMachines/read`, `Microsoft.Network/*/read` |
+| Bootstrap existing VM (Run Command) | Above plus `Microsoft.Compute/virtualMachines/runCommand/action` |
+| NSG inbound at pick / Verify VPC | `Microsoft.Network/networkSecurityGroups/write`, `.../securityRules/write`, `.../networkInterfaces/join/action` |
 
-When linking, provide **tenant ID**, **application (client) ID**, **client secret**, and **subscription ID**. Optional default **location** (e.g. `eastus`) speeds up instance listing.
+Documented minimum: **Virtual Machine Contributor** + **Network Contributor** on the resource group.
+Pick existing applies host bootstrap (operator user, Docker, ufw) via Run Command and NSG inbound
+`azp-tcp-{port}` (SSH from admin CIDR; auth 3724, world 8085, armory 8100, client 8101; never MySQL
+3306 or SOAP 7878). Verify VPC probes those NSG rules. **Create VM from the platform is coming soon** —
+create the Linux VM in Azure Portal first, then pick it. Break-glass after Finalize SSH is Bastion,
+serial console, or Run Command.
 
 **Manual / other providers (bare metal)**
 

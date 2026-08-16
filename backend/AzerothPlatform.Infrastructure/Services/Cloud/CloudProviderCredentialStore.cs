@@ -95,6 +95,9 @@ internal static class CloudProviderCredentialStore
         public string? Scope { get; set; }
 
         public string? Subject { get; set; }
+
+        /// <summary>Entra tenant id for Azure user OAuth refresh.</summary>
+        public string? TenantId { get; set; }
     }
 
     internal static string ProtectOAuthTokens(ISecretProtector protector, OAuthCredentialEnvelope envelope)
@@ -194,7 +197,13 @@ internal static class CloudProviderCredentialStore
 
     internal static AzureCredentials UnprotectAzureCredentials(ISecretProtector protector, string protectedValue)
     {
-        var json = protector.Unprotect(protectedValue);
+        var json = protector.Unprotect(protectedValue).Trim();
+        if (TryParseOAuthEnvelope(json, out _))
+        {
+            throw new InvalidOperationException(
+                "This Azure connection uses Microsoft sign-in. Resolve credentials with the Azure credential resolver.");
+        }
+
         var credentials = JsonSerializer.Deserialize<AzureCredentials>(json, JsonOptions)
                           ?? throw new InvalidOperationException("Stored Azure credentials are invalid.");
         if (string.IsNullOrWhiteSpace(credentials.TenantId)
@@ -217,6 +226,12 @@ internal static class CloudProviderCredentialStore
         if (string.IsNullOrWhiteSpace(json))
         {
             throw new InvalidOperationException("Stored GCP credentials could not be decrypted.");
+        }
+
+        if (TryParseOAuthEnvelope(json, out _))
+        {
+            throw new InvalidOperationException(
+                "This Google Cloud connection uses user OAuth. Resolve credentials with the GCP credential resolver.");
         }
 
         return json;

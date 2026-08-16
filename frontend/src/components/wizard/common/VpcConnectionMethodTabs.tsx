@@ -5,6 +5,7 @@ import { CloudAccountStep } from '@/components/wizard/common/CloudAccountStep'
 import { VpcConnectionTestFooter } from '@/components/wizard/common/VpcConnectionTestFooter'
 import type { CloudLaunchResultDto, CloudInstanceDto, RemoteConnectionTestResultDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
+import { sshUserWarning } from '@/lib/ssh-user'
 import type { FieldErrors, UseFormRegister } from 'react-hook-form'
 import type { ReactNode } from 'react'
 import type { WizardFormData } from '@/schemas/wizard.schemas'
@@ -15,6 +16,8 @@ interface VpcConnectionMethodTabsProps {
   disabled?: boolean
   cloudConnectionId: string
   onCloudConnectionIdChange: (id: string) => void
+  cloudProvider?: string
+  onCloudProviderChange?: (provider: string) => void
   externalHost: string
   externalSshUser: string
   savedSshKeyId: string
@@ -36,6 +39,8 @@ export function VpcConnectionMethodTabs({
   disabled = false,
   cloudConnectionId,
   onCloudConnectionIdChange,
+  cloudProvider,
+  onCloudProviderChange,
   externalHost,
   externalSshUser,
   savedSshKeyId,
@@ -147,13 +152,13 @@ export function VpcConnectionMethodTabs({
               label="SSH user"
               htmlFor="external-ssh-user"
               error={errors.deployment?.externalSshUser?.message}
-              hint="Often ubuntu, root, azureuser, or ec2-user"
+              hint="Dedicated operator user created at launch (azp-admin). Not root."
               required
             >
               <input
                 id="external-ssh-user"
                 type="text"
-                placeholder="e.g. ubuntu"
+                placeholder="azp-admin"
                 className={cn(
                   'block w-full rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
                   errors.deployment?.externalSshUser ? 'border-red-400' : 'border-gray-300'
@@ -161,12 +166,17 @@ export function VpcConnectionMethodTabs({
                 {...register('deployment.externalSshUser')}
               />
             </FormField>
+            {sshUserWarning(externalSshUser) ? (
+              <p className="text-[11px] text-amber-800">{sshUserWarning(externalSshUser)}</p>
+            ) : null}
           </div>
         ) : (
           <CloudAccountStep
             disabled={disabled}
             connectionId={cloudConnectionId}
             onConnectionIdChange={onCloudConnectionIdChange}
+            cloudProvider={cloudProvider}
+            onCloudProviderChange={onCloudProviderChange}
             externalHost={externalHost}
             externalSshUser={externalSshUser}
             savedSshKeyId={savedSshKeyId}

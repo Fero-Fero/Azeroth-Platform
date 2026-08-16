@@ -74,6 +74,7 @@ public sealed class StackService : IStackService
     private readonly IArmoryDatabaseProvisioningService _armoryDatabase;
     private readonly IMySqlConnectionFactory _connectionFactory;
     private readonly ICloudSshKeyService _cloudSshKeyService;
+    private readonly ICloudInstanceLifecycleService _cloudInstanceLifecycle;
 
     public StackService(
         AzerothCoreDbContext dbContext, 
@@ -99,7 +100,8 @@ public sealed class StackService : IStackService
         IStackImageShippingService stackImageShipping,
         IArmoryDatabaseProvisioningService armoryDatabase,
         IMySqlConnectionFactory connectionFactory,
-        ICloudSshKeyService cloudSshKeyService)
+        ICloudSshKeyService cloudSshKeyService,
+        ICloudInstanceLifecycleService cloudInstanceLifecycle)
     {
         _dbContext = dbContext;
         _dockerService = dockerService;
@@ -125,6 +127,7 @@ public sealed class StackService : IStackService
         _armoryDatabase = armoryDatabase;
         _connectionFactory = connectionFactory;
         _cloudSshKeyService = cloudSshKeyService;
+        _cloudInstanceLifecycle = cloudInstanceLifecycle;
     }
 
     /// <summary>
@@ -187,9 +190,13 @@ public sealed class StackService : IStackService
             await probeGate.WaitAsync(cancellationToken);
             try
             {
-                var dto = await MapAsync(stack, probeRuntime: true, cancellationToken);
+                var probeRuntime = stack.Status != StackStatus.SetupIncomplete;
+                var dto = await MapAsync(stack, probeRuntime, cancellationToken);
                 StackListStatusCaches[stack.Id] = dto;
-                await PersistProbedStackStatusAsync(stack.Id, dto.Status, cancellationToken);
+                if (probeRuntime)
+                {
+                    await PersistProbedStackStatusAsync(stack.Id, dto.Status, cancellationToken);
+                }
                 stackDtos[index] = dto;
             }
             finally
@@ -212,7 +219,7 @@ public sealed class StackService : IStackService
             return null;
         }
 
-        var dto = await MapAsync(stack, probeRuntime: true, cancellationToken);
+        var dto = await MapAsync(stack, probeRuntime: true, cancellationToken, preferCachedRuntimeProbe: true);
         StackListStatusCaches[stackId] = dto;
         await TryReconcileStaleFailedStatusAsync(stackId, dto.Status, cancellationToken);
         return dto;
@@ -235,7 +242,7 @@ public sealed class StackService : IStackService
 
         var stack = await _dbContext.ManagedStacks
             .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
-        if (stack is null || stack.Status == probedStatus)
+        if (stack is null || stack.Status == probedStatus || stack.Status == StackStatus.SetupIncomplete)
         {
             return;
         }
@@ -274,7 +281,8 @@ public sealed class StackService : IStackService
 
     public async Task<StackDetailsDto> CreateAsync(StackConfigurationDto configuration, CancellationToken cancellationToken = default)
     {
-        var stackId = Guid.NewGuid().ToString("N");
+        var existingDraft = await TryGetSetupDraftEntityAsync(configuration.DraftStackId, cancellationToken);
+        var stackId = existingDraft?.Id ?? Guid.NewGuid().ToString("N");
         var deployment = configuration.Deployment ?? new DeploymentConfigDto();
         var externalHost = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost ?? string.Empty);
 
@@ -292,8 +300,12 @@ public sealed class StackService : IStackService
             realmlistHost = RealmlistHostResolver.ResolveForRealmAddress(realmlistHost, cancellationToken);
         }
 
-        var armoryPort = await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultArmoryPort);
-        var clientPort = await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultClientPort, armoryPort);
+        var armoryPort = existingDraft is { ArmoryPort: > 0 }
+            ? existingDraft.ArmoryPort
+            : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultArmoryPort);
+        var clientPort = existingDraft is { ClientPort: > 0 }
+            ? existingDraft.ClientPort
+            : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultClientPort, armoryPort);
 
         var (serviceEnvJson, worldserverEnvJson) = BuildEnvJson(configuration.Advanced);
 
@@ -304,37 +316,44 @@ public sealed class StackService : IStackService
             protectedSshPrivateKey = _secretProtector.Protect(resolvedPrivateKey);
         }
 
-        var stack = new ManagedStackEntity
+        var stack = existingDraft ?? new ManagedStackEntity { Id = stackId, CreatedAt = DateTime.UtcNow };
+        stack.Id = stackId;
+        stack.StackName = configuration.StackName.Trim();
+        stack.NormalizedStackName = NormalizeStackName(configuration.StackName);
+        stack.ServerType = configuration.ServerType;
+        stack.Status = StackStatus.Stopped;
+        stack.ModuleIdsJson = JsonSerializer.Serialize(configuration.ModuleIds, JsonOptions);
+        stack.DatabaseRootPassword = configuration.Database.RootPassword;
+        stack.DatabasePort = configuration.Database.Port;
+        stack.AuthServerPort = configuration.Ports.AuthServer;
+        stack.WorldServerPort = configuration.Ports.WorldServer;
+        stack.SoapPort = configuration.Ports.SoapPort;
+        stack.ArmoryPort = armoryPort;
+        stack.ClientPort = clientPort;
+        stack.ClientEnabled = true;
+        stack.MaxPlayers = configuration.Advanced.MaxPlayers;
+        stack.RealmName = configuration.Advanced.RealmName.Trim();
+        stack.CustomEnvVarsJson = worldserverEnvJson;
+        stack.ServiceEnvVarsJson = serviceEnvJson;
+        stack.RealmlistHostOverride = realmlistHost;
+        stack.DeploymentTarget = deployment.Target;
+        stack.ExternalHost = externalHost;
+        stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
+        stack.ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim();
+        stack.WizardDraftJson = string.Empty;
+        stack.WizardStepId = string.Empty;
+        if (existingDraft is null)
         {
-            Id = stackId,
-            StackName = configuration.StackName.Trim(),
-            NormalizedStackName = NormalizeStackName(configuration.StackName),
-            ServerType = configuration.ServerType,
-            Status = StackStatus.Stopped,
-            ModuleIdsJson = JsonSerializer.Serialize(configuration.ModuleIds, JsonOptions),
-            DatabaseRootPassword = configuration.Database.RootPassword,
-            DatabasePort = configuration.Database.Port,
-            AuthServerPort = configuration.Ports.AuthServer,
-            WorldServerPort = configuration.Ports.WorldServer,
-            SoapPort = configuration.Ports.SoapPort,
-            ArmoryPort = armoryPort,
-            // Every stack runs a client-server container that serves client files to launchers.
-            ClientPort = clientPort,
-            ClientEnabled = true,
-            MaxPlayers = configuration.Advanced.MaxPlayers,
-            RealmName = configuration.Advanced.RealmName.Trim(),
-            CustomEnvVarsJson = worldserverEnvJson,
-            ServiceEnvVarsJson = serviceEnvJson,
-            SoapUsername = GenerateSoapUsername(stackId),
-            SoapPassword = GenerateSecureSoapPassword(),
-            RealmlistHostOverride = realmlistHost,
-            DeploymentTarget = deployment.Target,
-            ExternalHost = externalHost,
-            ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort,
-            ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim(),
-            ExternalSshPrivateKey = protectedSshPrivateKey,
-            CreatedAt = DateTime.UtcNow
-        };
+            stack.SoapUsername = GenerateSoapUsername(stackId);
+            stack.SoapPassword = GenerateSecureSoapPassword();
+            stack.ExternalSshPrivateKey = protectedSshPrivateKey;
+            _dbContext.ManagedStacks.Add(stack);
+        }
+        else if (!string.IsNullOrWhiteSpace(protectedSshPrivateKey))
+        {
+            stack.ExternalSshPrivateKey = protectedSshPrivateKey;
+        }
+        ApplyCloudBinding(stack, deployment, replaceEmpty: true);
 
         ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
 
@@ -395,6 +414,319 @@ public sealed class StackService : IStackService
 
         await RepushRegistrySafeAsync(cancellationToken);
         return await MapAsync(stack, probeRuntime: true, cancellationToken);
+    }
+
+    public async Task<StackDetailsDto> SaveSetupDraftAsync(
+        StackSetupDraftRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var deployment = request.Deployment ?? new DeploymentConfigDto();
+        if (deployment.Target != DeploymentTarget.External)
+        {
+            throw new InvalidOperationException("Unfinished VPC stacks are only created for external deployments.");
+        }
+
+        var host = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost ?? string.Empty);
+        var instanceId = (deployment.CloudInstanceId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(host) && string.IsNullOrWhiteSpace(instanceId))
+        {
+            throw new InvalidOperationException("Launch or select a VPC instance before saving an unfinished stack.");
+        }
+
+        var requestedId = (request.StackId ?? string.Empty).Trim();
+        ManagedStackEntity? stack = null;
+        if (!string.IsNullOrWhiteSpace(requestedId))
+        {
+            stack = await _dbContext.ManagedStacks
+                .SingleOrDefaultAsync(item => item.Id == requestedId, cancellationToken);
+            if (stack is not null && stack.Status != StackStatus.SetupIncomplete)
+            {
+                throw new InvalidOperationException("That stack is already set up.");
+            }
+        }
+
+        if (stack is null && !string.IsNullOrWhiteSpace(instanceId))
+        {
+            stack = await _dbContext.ManagedStacks
+                .SingleOrDefaultAsync(
+                    item => item.Status == StackStatus.SetupIncomplete && item.CloudInstanceId == instanceId,
+                    cancellationToken);
+        }
+
+        var isNew = stack is null;
+        stack ??= new ManagedStackEntity
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            CreatedAt = DateTime.UtcNow,
+            Status = StackStatus.SetupIncomplete,
+            ServerType = ServerType.Standard,
+            ModuleIdsJson = "[]",
+            CustomEnvVarsJson = "{}",
+            ServiceEnvVarsJson = "{}",
+            AppliedPatchesJson = "[]",
+            ClientEnabled = true,
+            RealmName = "AzerothCore",
+            MaxPlayers = 100,
+            ExternalSshPort = 22,
+        };
+
+        if (string.IsNullOrWhiteSpace(deployment.CloudProvider)
+            && !string.IsNullOrWhiteSpace(deployment.CloudConnectionId))
+        {
+            var connection = await _dbContext.CloudProviderConnections.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == deployment.CloudConnectionId, cancellationToken);
+            if (connection is not null)
+            {
+                deployment.CloudProvider = connection.Provider;
+            }
+        }
+
+        var stackName = await ResolveDraftStackNameAsync(stack, request.StackName, cancellationToken);
+
+        stack.StackName = stackName;
+        stack.NormalizedStackName = NormalizeStackName(stackName);
+        stack.Status = StackStatus.SetupIncomplete;
+        stack.DeploymentTarget = DeploymentTarget.External;
+        stack.ExternalHost = host;
+        stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
+        stack.ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim();
+        stack.WizardStepId = NormalizeWizardStepId(request.WizardStepId);
+        stack.WizardDraftJson = RedactWizardDraftPrivateKey(request.WizardDraftJson);
+        ApplyCloudBinding(stack, deployment, replaceEmpty: true);
+
+        if (!string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey)
+            || !string.IsNullOrWhiteSpace(deployment.SavedSshKeyId))
+        {
+            try
+            {
+                var resolved = await ResolveAndMaybeVaultDeploymentKeyAsync(deployment, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(resolved))
+                {
+                    stack.ExternalSshPrivateKey = _secretProtector.Protect(resolved);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not resolve SSH key while saving setup draft {StackId}.", stack.Id);
+            }
+        }
+
+        if (isNew)
+        {
+            stack.SoapUsername = GenerateSoapUsername(stack.Id);
+            stack.SoapPassword = GenerateSecureSoapPassword();
+            _dbContext.ManagedStacks.Add(stack);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return await MapAsync(stack, probeRuntime: false, cancellationToken);
+    }
+
+    public async Task<StackSetupDraftDto?> GetSetupDraftAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+        if (stack is null || stack.Status != StackStatus.SetupIncomplete)
+        {
+            return null;
+        }
+
+        var privateKey = string.Empty;
+        if (!string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            try
+            {
+                privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not decrypt SSH key for setup draft {StackId}.", stack.Id);
+            }
+        }
+
+        return new StackSetupDraftDto
+        {
+            StackId = stack.Id,
+            StackName = stack.StackName,
+            WizardStepId = string.IsNullOrWhiteSpace(stack.WizardStepId) ? "deployment" : stack.WizardStepId,
+            WizardDraftJson = string.IsNullOrWhiteSpace(stack.WizardDraftJson) ? "{}" : stack.WizardDraftJson,
+            ExternalSshPrivateKey = privateKey,
+            Deployment = new DeploymentConfigDto
+            {
+                Target = DeploymentTarget.External,
+                ExternalHost = stack.ExternalHost,
+                ExternalSshPort = stack.ExternalSshPort == 0 ? 22 : stack.ExternalSshPort,
+                ExternalSshUser = stack.ExternalSshUser,
+                CloudConnectionId = stack.CloudConnectionId,
+                CloudInstanceId = stack.CloudInstanceId,
+                CloudRegion = stack.CloudRegion,
+                CloudProvider = stack.CloudProvider,
+                CloudInstanceType = stack.CloudInstanceType,
+            },
+        };
+    }
+
+    private async Task<ManagedStackEntity?> TryGetSetupDraftEntityAsync(
+        string? draftStackId,
+        CancellationToken cancellationToken)
+    {
+        var id = (draftStackId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (stack is null || stack.Status != StackStatus.SetupIncomplete)
+        {
+            throw new InvalidOperationException("The unfinished VPC stack was not found or is already set up.");
+        }
+
+        return stack;
+    }
+
+    private static string NormalizeWizardStepId(string? stepId)
+    {
+        var id = (stepId ?? string.Empty).Trim().ToLowerInvariant();
+        return id is "deployment" or "server-config" or "modules" or "database" or "ports"
+            or "advanced" or "email" or "review"
+            ? id
+            : "deployment";
+    }
+
+    private async Task<string> ResolveDraftStackNameAsync(
+        ManagedStackEntity stack,
+        string? requestedName,
+        CancellationToken cancellationToken)
+    {
+        var userName = TrySanitizeDraftStackName(requestedName);
+        if (userName is not null && IsPlaceholderDraftStackName(userName))
+        {
+            userName = null;
+        }
+
+        string stackName;
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            stackName = userName;
+        }
+        else if (!string.IsNullOrWhiteSpace(stack.StackName) && !IsPlaceholderDraftStackName(stack.StackName))
+        {
+            stackName = stack.StackName;
+        }
+        else
+        {
+            stackName = $"unnamed-instance-{stack.Id[..8]}";
+        }
+
+        var nameTaken = await _dbContext.ManagedStacks.AnyAsync(
+            item => item.Id != stack.Id && item.NormalizedStackName == NormalizeStackName(stackName),
+            cancellationToken);
+        if (nameTaken)
+        {
+            stackName = $"unnamed-instance-{stack.Id[..8]}";
+        }
+
+        return stackName;
+    }
+
+    private static bool IsPlaceholderDraftStackName(string? value)
+    {
+        var name = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return name.StartsWith("unnamed-instance", StringComparison.Ordinal)
+               || (name.StartsWith("vpc-", StringComparison.Ordinal) && name.Length <= 12);
+    }
+
+    private static string DisplayNameFor(ManagedStackEntity stack)
+        => stack.Status == StackStatus.SetupIncomplete && IsPlaceholderDraftStackName(stack.StackName)
+            ? "Unnamed instance"
+            : stack.StackName;
+
+    private static string? TrySanitizeDraftStackName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var chars = value.Trim().ToLowerInvariant()
+            .Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : '-')
+            .ToArray();
+        var slug = new string(chars).Trim('-');
+        while (slug.Contains("--", StringComparison.Ordinal))
+        {
+            slug = slug.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        if (slug.Length > 50)
+        {
+            slug = slug[..50].TrimEnd('-');
+        }
+
+        return slug.Length >= 3 ? slug : null;
+    }
+
+    private static string RedactWizardDraftPrivateKey(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return "{}";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                WriteJsonRedactingSshKey(doc.RootElement, writer);
+            }
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch (JsonException)
+        {
+            return "{}";
+        }
+    }
+
+    private static void WriteJsonRedactingSshKey(JsonElement element, Utf8JsonWriter writer)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    if (property.NameEquals("externalSshPrivateKey"))
+                    {
+                        writer.WriteStringValue(string.Empty);
+                    }
+                    else
+                    {
+                        WriteJsonRedactingSshKey(property.Value, writer);
+                    }
+                }
+
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteJsonRedactingSshKey(item, writer);
+                }
+
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
     }
 
     public async Task<StackDetailsDto?> UpdateAsync(string stackId, StackConfigurationDto configuration, CancellationToken cancellationToken = default)
@@ -466,6 +798,8 @@ public sealed class StackService : IStackService
             {
                 stack.ExternalSshPrivateKey = _secretProtector.Protect(d.ExternalSshPrivateKey);
             }
+
+            ApplyCloudBinding(stack, d, replaceEmpty: false);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -567,6 +901,8 @@ public sealed class StackService : IStackService
         {
             stack.ExternalSshPrivateKey = _secretProtector.Protect(privateKey);
         }
+
+        ApplyCloudBinding(stack, deployment, replaceEmpty: false);
 
         if (string.IsNullOrWhiteSpace(overrideHost)
             || string.Equals(overrideHost, previousExternalHost, StringComparison.OrdinalIgnoreCase)
@@ -1029,7 +1365,10 @@ public sealed class StackService : IStackService
         return value.Trim() is "1" or "true" or "True" or "yes" or "on";
     }
 
-    public async Task<bool> DeleteAsync(string stackId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteAsync(
+        string stackId,
+        bool terminateCloudInstance = false,
+        CancellationToken cancellationToken = default)
     {
         var stack = await _dbContext.ManagedStacks
             .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
@@ -1040,6 +1379,26 @@ public sealed class StackService : IStackService
         }
 
         var isExternal = stack.DeploymentTarget == DeploymentTarget.External;
+        if (terminateCloudInstance)
+        {
+            if (!isExternal)
+            {
+                throw new InvalidOperationException("Only external VPC stacks can terminate a cloud VM.");
+            }
+
+            await _cloudInstanceLifecycle.TerminateStackInstanceAsync(
+                new ManagedStackCloudTarget
+                {
+                    StackId = stack.Id,
+                    StackName = stack.StackName,
+                    PublicHost = stack.ExternalHost,
+                    CloudConnectionId = stack.CloudConnectionId,
+                    CloudInstanceId = stack.CloudInstanceId,
+                    CloudRegion = stack.CloudRegion,
+                },
+                cancellationToken);
+        }
+
         var stackPath = GetStackPath(stackId);
         var repoPath = Path.Combine(stackPath, "azerothcore-wotlk");
 
@@ -2595,7 +2954,8 @@ public sealed class StackService : IStackService
     private async Task<StackDetailsDto> MapAsync(
         ManagedStackEntity stack,
         bool probeRuntime,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool preferCachedRuntimeProbe = false)
     {
         // Get cached update status
         var outdatedModules = string.IsNullOrEmpty(stack.OutdatedModulesJson)
@@ -2652,12 +3012,29 @@ public sealed class StackService : IStackService
         // A lifecycle job hammers the remote Docker engine over SSH; skip the live probe so detail
         // refreshes stay fast and the UI can show job progress instead of hanging on docker ps.
         var activeJob = _stackJobService.GetStatus(stack.Id);
-        var skipRuntimeProbe = activeJob is { IsRunning: true };
+        var skipRuntimeProbe = activeJob is { IsRunning: true }
+            || stack.Status == StackStatus.SetupIncomplete;
 
         if (probeRuntime && !skipRuntimeProbe)
         {
             RuntimeProbeResult probeResult;
-            if (ShouldServeCachedExternalProbeOnly(stack)
+            if (preferCachedRuntimeProbe
+                && TryRestoreExternalRuntimeProbeCache(
+                    stack.Id,
+                    out var reusedContainers,
+                    out var reusedServices,
+                    out var reusedRuntimeStatus,
+                    out var reusedEngineAvailable,
+                    out var reusedEngineError))
+            {
+                probeResult = new RuntimeProbeResult(
+                    reusedContainers,
+                    reusedServices,
+                    reusedRuntimeStatus,
+                    reusedEngineAvailable,
+                    reusedEngineError);
+            }
+            else if (ShouldServeCachedExternalProbeOnly(stack)
                 && TryRestoreExternalRuntimeProbeCache(
                     stack.Id,
                     out var cachedContainers,
@@ -2766,6 +3143,7 @@ public sealed class StackService : IStackService
         {
             StackId = stack.Id,
             StackName = stack.StackName,
+            DisplayName = DisplayNameFor(stack),
             ServerType = stack.ServerType,
             Status = runtimeStatus,
             CreatedAt = stack.CreatedAt,
@@ -2805,7 +3183,12 @@ public sealed class StackService : IStackService
                     ExternalSshPort = stack.ExternalSshPort == 0 ? 22 : stack.ExternalSshPort,
                     ExternalSshUser = stack.ExternalSshUser,
                     // Never return the private key material to clients.
-                    ExternalSshPrivateKey = string.Empty
+                    ExternalSshPrivateKey = string.Empty,
+                    CloudConnectionId = stack.CloudConnectionId,
+                    CloudInstanceId = stack.CloudInstanceId,
+                    CloudRegion = stack.CloudRegion,
+                    CloudProvider = stack.CloudProvider,
+                    CloudInstanceType = stack.CloudInstanceType,
                 },
                 // Surface the user-supplied fork for custom-repository server types so the UI can show it.
                 CustomFork = _serverTypeCatalog.AllowsCustomRepository(stack.ServerType)
@@ -2828,6 +3211,10 @@ public sealed class StackService : IStackService
             DockerEngineAvailable = dockerEngineAvailable,
             DockerEngineUnavailableReason = dockerEngineUnavailableReason,
             HasCompletedBuild = stack.LastBuiltAt.HasValue || !string.IsNullOrEmpty(stack.CoreCommitSha),
+            WizardStepId = stack.Status == StackStatus.SetupIncomplete
+                ? (string.IsNullOrWhiteSpace(stack.WizardStepId) ? "deployment" : stack.WizardStepId)
+                : null,
+            SshHardeningCompletedAt = stack.SshHardeningCompletedAt,
         };
     }
 
@@ -4364,6 +4751,12 @@ public sealed class StackService : IStackService
         {
             throw new InvalidOperationException($"Cannot {operation} stack '{stack.StackName}' while it is building.");
         }
+
+        if (stack.Status == StackStatus.SetupIncomplete)
+        {
+            throw new InvalidOperationException(
+                $"Cannot {operation} '{stack.StackName}' until you finish Create stack.");
+        }
     }
 
     private static T? Deserialize<T>(string json)
@@ -4459,6 +4852,39 @@ public sealed class StackService : IStackService
         {
             yield return _clientServerOptions.ImageName;
         }
+    }
+
+    private static void ApplyCloudBinding(
+        ManagedStackEntity stack,
+        DeploymentConfigDto deployment,
+        bool replaceEmpty)
+    {
+        if (stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            stack.CloudConnectionId = string.Empty;
+            stack.CloudInstanceId = string.Empty;
+            stack.CloudRegion = string.Empty;
+            stack.CloudProvider = string.Empty;
+            stack.CloudInstanceType = string.Empty;
+            return;
+        }
+
+        SetIfProvided(value => stack.CloudConnectionId = value, deployment.CloudConnectionId, replaceEmpty);
+        SetIfProvided(value => stack.CloudInstanceId = value, deployment.CloudInstanceId, replaceEmpty);
+        SetIfProvided(value => stack.CloudRegion = value, deployment.CloudRegion, replaceEmpty);
+        SetIfProvided(value => stack.CloudProvider = value, deployment.CloudProvider, replaceEmpty);
+        SetIfProvided(value => stack.CloudInstanceType = value, deployment.CloudInstanceType, replaceEmpty);
+    }
+
+    private static void SetIfProvided(Action<string> assign, string? value, bool replaceEmpty)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        if (!replaceEmpty && string.IsNullOrWhiteSpace(trimmed))
+        {
+            return;
+        }
+
+        assign(trimmed);
     }
 
     private void CleanupManagerPersistentData(string stackId)
@@ -5228,6 +5654,48 @@ public sealed class StackService : IStackService
         if (result.Success)
         {
             await _remoteEngine.EnsureContextAsync(stack, cancellationToken);
+        }
+
+        return result;
+    }
+
+    public async Task<RemoteSetupResultDto?> FinalizeSshHardeningAsync(
+        string stackId,
+        CancellationToken cancellationToken = default)
+    {
+        var stack = await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
+        if (stack is null || stack.DeploymentTarget != DeploymentTarget.External)
+        {
+            return null;
+        }
+
+        if (stack.Status == StackStatus.SetupIncomplete)
+        {
+            throw new InvalidOperationException("Finish stack setup before SSH hardening.");
+        }
+
+        if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
+        {
+            throw new InvalidOperationException("External stack is missing SSH credentials.");
+        }
+
+        var privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
+        var enableAwsInstanceConnect = string.Equals(stack.CloudProvider, "Aws", StringComparison.OrdinalIgnoreCase);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+        var result = await _remoteEngine.FinalizeSshHardeningAsync(
+            stack.ExternalHost,
+            stack.ExternalSshPort,
+            stack.ExternalSshUser,
+            privateKey,
+            enableAwsInstanceConnect,
+            timeoutCts.Token);
+
+        if (result.Success)
+        {
+            stack.SshHardeningCompletedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         return result;

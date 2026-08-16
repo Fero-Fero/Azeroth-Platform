@@ -76,16 +76,22 @@ export const authApi = {
 export const stackApi = {
   // List all stacks
   list: () => apiClient.get<StackDetailsDto[]>('/stacks'),
-  probeAllStatus: () =>
-    apiClient.post<StackDetailsDto[]>('/stacks/probe-status', undefined, { timeout: 300_000 }),
+  probeAllStatus: (signal?: AbortSignal) =>
+    apiClient.post<StackDetailsDto[]>('/stacks/probe-status', undefined, { timeout: 300_000, signal }),
   
   // Get stack details
-  get: (stackId: string) =>
-    apiClient.get<StackDetailsDto>(`/stacks/${stackId}`, { timeout: 90_000 }),
+  get: (stackId: string, signal?: AbortSignal) =>
+    apiClient.get<StackDetailsDto>(`/stacks/${stackId}`, { timeout: 90_000, signal }),
   
   // Create stack
   create: (config: StackConfigurationDto) => 
     apiClient.post<{ stackId: string; status: string }>('/stacks', config),
+
+  saveSetupDraft: (request: import('@/types/stack.types').StackSetupDraftRequestDto) =>
+    apiClient.post<StackDetailsDto>('/stacks/setup-draft', request),
+
+  getSetupDraft: (stackId: string) =>
+    apiClient.get<import('@/types/stack.types').StackSetupDraftDto>(`/stacks/${stackId}/setup-draft`),
   
   // Update stack configuration
   updateConfig: (stackId: string, config: StackConfigurationDto) => 
@@ -94,8 +100,11 @@ export const stackApi = {
   reconnectExternal: (stackId: string, deployment: DeploymentConfigDto) =>
     apiClient.post<StackDetailsDto>(`/stacks/${stackId}/reconnect-external`, deployment),
   
-  // Delete stack
-  delete: (stackId: string) => apiClient.delete(`/stacks/${stackId}`),
+  // Delete stack. terminateCloudInstance also destroys the linked cloud VM.
+  delete: (stackId: string, options?: { terminateCloudInstance?: boolean }) =>
+    apiClient.delete(`/stacks/${stackId}`, {
+      params: options?.terminateCloudInstance ? { terminateCloudInstance: true } : undefined,
+    }),
   
   // Control operations. These run as detached background jobs and return the initial job status so the
   // UI can reattach (see jobStatus + the /hubs/stack-progress stream).
@@ -161,6 +170,12 @@ export const stackApi = {
   provisionVpcDocker: (stackId: string) =>
     apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
       `/stacks/${stackId}/provision-vpc-docker`,
+      undefined,
+      { timeout: 300_000 },
+    ),
+  finalizeSshHardening: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
+      `/stacks/${stackId}/finalize-ssh-hardening`,
       undefined,
       { timeout: 300_000 },
     ),
@@ -442,6 +457,12 @@ export const cloudApi = {
   createConnection: (request: import('@/types/stack.types').CreateCloudProviderConnectionRequestDto) =>
     apiClient.post<import('@/types/stack.types').CloudProviderConnectionDto>('/cloud/connections', request),
   deleteConnection: (id: string) => apiClient.delete(`/cloud/connections/${id}`),
+  verifyConnection: (id: string) =>
+    apiClient.post<import('@/types/stack.types').CloudConnectionVerifyResultDto>(
+      `/cloud/connections/${id}/verify`,
+      undefined,
+      { timeout: 45_000 },
+    ),
   listInstances: (connectionId: string, region?: string) =>
     apiClient.get<import('@/types/stack.types').CloudInstanceDto[]>(
       `/cloud/connections/${connectionId}/instances`,

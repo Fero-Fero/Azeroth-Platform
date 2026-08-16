@@ -40,6 +40,7 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
         ValidateDatabase(configuration, existingStackId, result);
         ValidatePorts(configuration, result);
         ValidateAdvanced(configuration, result);
+        ValidateDeployment(configuration, result);
         ValidateArmoryAccounts(configuration, result);
         ValidateCustomFork(configuration, result);
         await ValidateModulesAsync(configuration, result, cancellationToken);
@@ -126,6 +127,28 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
         if (configuration.Advanced.CustomEnvVars.Any(entry => string.IsNullOrWhiteSpace(entry.Key)))
         {
             AddError(result, "advanced.customEnvVars", "Custom environment variable keys cannot be empty.");
+        }
+    }
+
+    private static void ValidateDeployment(StackConfigurationDto configuration, ValidationResultDto result)
+    {
+        if (configuration.Deployment.Target != DeploymentTarget.External)
+        {
+            return;
+        }
+
+        var sshUser = (configuration.Deployment.ExternalSshUser ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(sshUser))
+        {
+            return;
+        }
+
+        if (VpcBootstrapUserData.IsForbiddenSshUser(sshUser))
+        {
+            AddError(
+                result,
+                "deployment.externalSshUser",
+                $"Do not use '{sshUser}' as the stack SSH user. Create a dedicated operator user such as {VpcBootstrapUserData.DefaultOperatorUser}.");
         }
     }
 
@@ -234,10 +257,18 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
             AddError(result, "stackName", "A stack with this name already exists.");
         }
 
-        ValidatePortConflict(existingStacks, configuration.Database.Port, "database.port", result);
-        ValidatePortConflict(existingStacks, configuration.Ports.AuthServer, "ports.authServer", result);
-        ValidatePortConflict(existingStacks, configuration.Ports.WorldServer, "ports.worldServer", result);
-        ValidatePortConflict(existingStacks, configuration.Ports.SoapPort, "ports.soapPort", result);
+        ValidatePortConflict(
+            existingStacks.Where(stack => stack.Status != StackStatus.SetupIncomplete),
+            configuration.Database.Port, "database.port", result);
+        ValidatePortConflict(
+            existingStacks.Where(stack => stack.Status != StackStatus.SetupIncomplete),
+            configuration.Ports.AuthServer, "ports.authServer", result);
+        ValidatePortConflict(
+            existingStacks.Where(stack => stack.Status != StackStatus.SetupIncomplete),
+            configuration.Ports.WorldServer, "ports.worldServer", result);
+        ValidatePortConflict(
+            existingStacks.Where(stack => stack.Status != StackStatus.SetupIncomplete),
+            configuration.Ports.SoapPort, "ports.soapPort", result);
         SuggestAvailablePorts(existingStacks, configuration, result);
     }
 

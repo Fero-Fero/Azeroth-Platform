@@ -80,22 +80,56 @@ public class StacksController : ControllerBase
         [FromBody] StackConfigurationDto configuration,
         CancellationToken cancellationToken)
     {
-        var validationResult = await _stackConfigurationValidator.ValidateAsync(configuration, cancellationToken: cancellationToken);
+        var validationResult = await _stackConfigurationValidator.ValidateAsync(
+            configuration,
+            existingStackId: configuration.DraftStackId,
+            cancellationToken: cancellationToken);
         if (!validationResult.IsValid)
         {
             return BadRequest(validationResult);
         }
 
-        var stack = await _stackService.CreateAsync(configuration, cancellationToken);
+        try
+        {
+            var stack = await _stackService.CreateAsync(configuration, cancellationToken);
+            return CreatedAtAction(
+                nameof(GetById),
+                new { stackId = stack.StackId },
+                new CreateStackResponse
+                {
+                    StackId = stack.StackId,
+                    Status = stack.Status.ToString()
+                });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 
-        return CreatedAtAction(
-            nameof(GetById),
-            new { stackId = stack.StackId },
-            new CreateStackResponse
-            {
-                StackId = stack.StackId,
-                Status = stack.Status.ToString()
-            });
+    [HttpPost("setup-draft")]
+    public async Task<ActionResult<StackDetailsDto>> SaveSetupDraft(
+        [FromBody] StackSetupDraftRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stack = await _stackService.SaveSetupDraftAsync(request, cancellationToken);
+            return Ok(stack);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{stackId}/setup-draft")]
+    public async Task<ActionResult<StackSetupDraftDto>> GetSetupDraft(
+        string stackId,
+        CancellationToken cancellationToken)
+    {
+        var draft = await _stackService.GetSetupDraftAsync(stackId, cancellationToken);
+        return draft is null ? NotFound() : Ok(draft);
     }
 
     [HttpPut("{stackId}")]
@@ -224,11 +258,45 @@ public class StacksController : ControllerBase
         }
     }
 
-    [HttpDelete("{stackId}")]
-    public async Task<IActionResult> Delete(string stackId, CancellationToken cancellationToken)
+    [HttpPost("{stackId}/finalize-ssh-hardening")]
+    public async Task<ActionResult<RemoteSetupResultDto>> FinalizeSshHardening(
+        string stackId,
+        CancellationToken cancellationToken)
     {
-        var deleted = await _stackService.DeleteAsync(stackId, cancellationToken);
-        return deleted ? NoContent() : NotFound();
+        try
+        {
+            var result = await _stackService.FinalizeSshHardeningAsync(stackId, cancellationToken);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("{stackId}")]
+    public async Task<IActionResult> Delete(
+        string stackId,
+        [FromQuery] bool terminateCloudInstance = false,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var deleted = await _stackService.DeleteAsync(stackId, terminateCloudInstance, cancellationToken);
+            return deleted ? NoContent() : NotFound();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPost("validate")]

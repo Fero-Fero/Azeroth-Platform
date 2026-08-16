@@ -14,6 +14,11 @@ public class StackDetailsDto
     /// Stack name
     /// </summary>
     public string StackName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Name shown in lists. Unfinished VPC drafts without a server name use "Unnamed instance".
+    /// </summary>
+    public string DisplayName { get; set; } = string.Empty;
     
     /// <summary>
     /// Server type (Standard or Playerbots)
@@ -102,4 +107,10 @@ public class StackDetailsDto
     /// rebuilds do not clear this flag.
     /// </summary>
     public bool HasCompletedBuild { get; set; }
+
+    /// <summary>Wizard step to resume when <see cref="Status"/> is <see cref="StackStatus.SetupIncomplete"/>.</summary>
+    public string? WizardStepId { get; set; }
+
+    /// <summary>When SSH hardening last succeeded (root / image-default users locked out of internet SSH).</summary>
+    public DateTime? SshHardeningCompletedAt { get; set; }
 }

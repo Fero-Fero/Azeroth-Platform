@@ -14,7 +14,17 @@ public interface ICloudProviderConnectionService
         UpsertCloudOAuthConnectionRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<CloudProviderConnectionDto> SetDefaultProjectAsync(
+        string id,
+        string projectId,
+        CancellationToken cancellationToken = default);
+
     Task DeleteAsync(string id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-validates stored credentials against the provider API (same checks used at link time).
+    /// </summary>
+    Task<CloudConnectionVerifyResultDto> VerifyAsync(string id, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<CloudInstanceDto>> ListInstancesAsync(
         string connectionId,

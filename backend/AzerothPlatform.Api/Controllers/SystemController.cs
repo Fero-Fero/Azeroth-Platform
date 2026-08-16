@@ -329,8 +329,9 @@ public class SystemController : ControllerBase
     /// Docker and platform sudo access are ready before the operator connects.
     /// </summary>
     [HttpGet("vpc-launch-user-data")]
-    public ActionResult<VpcLaunchUserDataDto> GetVpcLaunchUserData([FromQuery] string? sshUser = "ubuntu")
-        => Ok(VpcBootstrapUserData.CreateDto(sshUser ?? "ubuntu"));
+    public ActionResult<VpcLaunchUserDataDto> GetVpcLaunchUserData(
+        [FromQuery] string? sshUser = VpcBootstrapUserData.DefaultOperatorUser)
+        => Ok(VpcBootstrapUserData.CreateDto(sshUser ?? VpcBootstrapUserData.DefaultOperatorUser));
 
     /// <summary>Runs the VPC bootstrap script on a remote host over SSH (preferred over terminal paste).</summary>
     [HttpPost("run-vpc-bootstrap")]

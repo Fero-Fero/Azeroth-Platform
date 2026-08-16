@@ -8,12 +8,12 @@ public enum CloudLaunchMode
 
 public sealed class CloudLaunchRequestDto
 {
-    /// <summary>Create a new VM (DO/GCP) or bootstrap an existing instance (AWS SSM).</summary>
+    /// <summary>Create a new VM, or apply bootstrap/firewall on an existing instance.</summary>
     public CloudLaunchMode Mode { get; set; } = CloudLaunchMode.Create;
 
     public string Name { get; set; } = string.Empty;
 
-    public string SshUser { get; set; } = "ubuntu";
+    public string SshUser { get; set; } = VpcBootstrapUserData.DefaultOperatorUser;
 
     /// <summary>DO region slug, AWS region, or GCP zone/region prefix.</summary>
     public string? Region { get; set; }
@@ -84,7 +84,7 @@ public sealed class CloudLaunchDefaultsDto
 
     public string Image { get; set; } = string.Empty;
 
-    public string SshUser { get; set; } = "ubuntu";
+    public string SshUser { get; set; } = VpcBootstrapUserData.DefaultOperatorUser;
 
     public bool SupportsCreate { get; set; }
 

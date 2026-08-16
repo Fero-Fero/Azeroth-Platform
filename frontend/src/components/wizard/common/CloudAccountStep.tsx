@@ -23,10 +23,16 @@ const PROVIDER_OPTIONS: Array<{ id: CloudProvider; label: string }> = [
   { id: CloudProvider.Azure, label: 'Azure' },
 ]
 
+function parseCloudProvider(value?: string): CloudProvider | null {
+  return PROVIDER_OPTIONS.find((option) => option.id === value)?.id ?? null
+}
+
 interface CloudAccountStepProps {
   disabled?: boolean
   connectionId: string
   onConnectionIdChange: (id: string) => void
+  cloudProvider?: string
+  onCloudProviderChange?: (provider: string) => void
   externalHost: string
   externalSshUser: string
   savedSshKeyId: string
@@ -40,6 +46,8 @@ export function CloudAccountStep({
   disabled = false,
   connectionId,
   onConnectionIdChange,
+  cloudProvider,
+  onCloudProviderChange,
   externalHost,
   externalSshUser,
   savedSshKeyId,
@@ -48,7 +56,9 @@ export function CloudAccountStep({
   onSelectInstance,
   onLaunched,
 }: CloudAccountStepProps) {
-  const [provider, setProvider] = useState<CloudProvider>(CloudProvider.Aws)
+  const [provider, setProvider] = useState<CloudProvider>(
+    () => parseCloudProvider(cloudProvider) ?? CloudProvider.Aws
+  )
   const [setupOpen, setSetupOpen] = useState(false)
   const [pendingConnection, setPendingConnection] = useState<CloudProviderConnectionDto | null>(null)
   const [launchedKey, setLaunchedKey] = useState<{
@@ -72,16 +82,30 @@ export function CloudAccountStep({
   )
 
   useEffect(() => {
-    const matches = (connections ?? []).filter((connection) => connection.provider === provider)
+    const saved = parseCloudProvider(cloudProvider)
+    if (saved) {
+      setProvider((current) => (current === saved ? current : saved))
+    }
+  }, [cloudProvider])
+
+  useEffect(() => {
+    if (!connections) {
+      return
+    }
+
+    const matches = connections.filter((connection) => connection.provider === provider)
     if (matches.some((connection) => connection.id === connectionId)) {
       return
     }
 
     const nextId = matches[0]?.id ?? ''
     if (nextId !== connectionId) {
+      if (nextId) {
+        onCloudProviderChange?.(provider)
+      }
       onConnectionIdChange(nextId)
     }
-  }, [connectionId, connections, onConnectionIdChange, provider])
+  }, [connectionId, connections, onCloudProviderChange, onConnectionIdChange, provider])
 
   const selectedConnection = useMemo(() => {
     if (pendingConnection && pendingConnection.provider === provider) {
@@ -95,6 +119,7 @@ export function CloudAccountStep({
 
   const handleLinked = (created: CloudProviderConnectionDto) => {
     setPendingConnection(created)
+    onCloudProviderChange?.(created.provider)
     onConnectionIdChange(created.id)
     setSetupOpen(true)
   }
@@ -171,7 +196,10 @@ export function CloudAccountStep({
             role="tab"
             aria-selected={provider === option.id}
             disabled={disabled}
-            onClick={() => setProvider(option.id)}
+            onClick={() => {
+              setProvider(option.id)
+              onCloudProviderChange?.(option.id)
+            }}
             className={cn(
               'rounded-md border px-2.5 py-1 text-[11px] font-medium',
               provider === option.id

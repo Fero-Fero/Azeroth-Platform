@@ -10,12 +10,13 @@ import {
   type CloudOAuthMessage,
 } from '@/lib/cloud-auth'
 import { AwsConnectWizard } from '@/components/wizard/common/AwsConnectWizard'
+import { HetznerConnectWizard } from '@/components/wizard/common/HetznerConnectWizard'
 import {
   CloudAuthMethod,
   CloudLoginMode,
+  CloudProvider,
   type CloudAuthProviderStatusDto,
   type CloudAuthStartResultDto,
-  type CloudProvider,
   type CloudProviderConnectionDto,
 } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
@@ -57,14 +58,17 @@ export function CloudProviderLoginButton({
   const queryClient = useQueryClient()
   const [popupError, setPopupError] = useState<string | null>(null)
   const [awsStart, setAwsStart] = useState<CloudAuthStartResultDto | null>(null)
+  const [hetznerStart, setHetznerStart] = useState<CloudAuthStartResultDto | null>(null)
+  const [deviceStart, setDeviceStart] = useState<CloudAuthStartResultDto | null>(null)
 
   const startMutation = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (useDeviceCode?: boolean) =>
       (
         await cloudApi.startCloudAuth(provider, {
           reconnectConnectionId,
           label,
           externalId: awsStart?.externalId,
+          useDeviceCode: useDeviceCode === true,
         })
       ).data,
     onSuccess: async (result) => {
@@ -76,6 +80,19 @@ export function CloudProviderLoginButton({
 
       if (result.externalId && (result.awsTemplates?.length ?? 0) > 0) {
         setAwsStart(result)
+        return
+      }
+
+      if (result.deviceCode && result.userCode) {
+        setDeviceStart(result)
+        return
+      }
+
+      if (
+        status?.loginMode === CloudLoginMode.GuidedToken
+        || provider === CloudProvider.Hetzner
+      ) {
+        setHetznerStart(result)
         return
       }
 
@@ -94,7 +111,9 @@ export function CloudProviderLoginButton({
         error,
         status?.loginMode === CloudLoginMode.AssumedRole
           ? 'Failed to start AWS account connect.'
-          : 'Failed to start cloud sign-in.'
+          : status?.loginMode === CloudLoginMode.GuidedToken || provider === CloudProvider.Hetzner
+            ? 'Connection failed — check token.'
+            : 'Failed to start cloud sign-in.'
       ))
     },
   })
@@ -152,9 +171,68 @@ export function CloudProviderLoginButton({
     return () => window.removeEventListener('message', handleMessage)
   }, [onLinked, provider, queryClient])
 
+  useEffect(() => {
+    if (!deviceStart?.deviceCode) {
+      return
+    }
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const intervalMs = Math.max(3, deviceStart.intervalSeconds ?? 5) * 1000
+
+    const poll = async () => {
+      try {
+        const response = await cloudApi.completeCloudAuth(provider, {
+          deviceCode: deviceStart.deviceCode,
+          label,
+          reconnectConnectionId,
+        })
+        if (cancelled) {
+          return
+        }
+
+        setDeviceStart(null)
+        setPopupError(null)
+        await queryClient.invalidateQueries({ queryKey: ['cloud-connections'] })
+        await queryClient.invalidateQueries({ queryKey: ['cloud-audit-logs'] })
+        onLinked?.(response.data)
+      } catch (error: unknown) {
+        if (cancelled) {
+          return
+        }
+
+        const message = extractErrorMessage(error, 'Device sign-in failed.')
+        const pending =
+          message.includes('authorization_pending')
+          || message.toLowerCase().includes('slow_down')
+        if (pending) {
+          timer = setTimeout(() => {
+            void poll()
+          }, intervalMs)
+          return
+        }
+
+        setPopupError(message)
+        setDeviceStart(null)
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) {
+        clearTimeout(timer)
+      }
+    }
+  }, [deviceStart, label, onLinked, provider, queryClient, reconnectConnectionId])
+
   if (linkedConnection && !linkedConnection.needsReauth && !reconnectConnectionId) {
     const connected =
-      linkedConnection.authMethod === CloudAuthMethod.AssumedRole ? 'Connected as' : 'Signed in as'
+      linkedConnection.authMethod === CloudAuthMethod.AssumedRole
+        ? 'Connected as'
+        : provider === CloudProvider.Hetzner
+          ? 'Project connected'
+          : 'Signed in as'
     return (
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -183,6 +261,58 @@ export function CloudProviderLoginButton({
   const canStart = Boolean(status?.isImplemented && (!requiresPlatformConfig || status.isConfigured))
   const reason = status?.unavailableReason
 
+  if (deviceStart) {
+    const verificationUri = deviceStart.verificationUri || 'https://microsoft.com/devicelogin'
+    return (
+      <div className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-3">
+        <p className="text-xs font-medium text-blue-950">Sign in with a device code</p>
+        <p className="text-xs text-blue-900">
+          Open{' '}
+          <a
+            href={verificationUri}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium underline underline-offset-2"
+          >
+            {verificationUri}
+          </a>
+          {' '}and enter:
+        </p>
+        <p className="font-mono text-lg font-semibold tracking-wider text-blue-950">
+          {deviceStart.userCode}
+        </p>
+        <p className="text-[11px] text-blue-800">
+          Waiting for Microsoft to confirm this sign-in…
+        </p>
+        <button
+          type="button"
+          onClick={() => setDeviceStart(null)}
+          className="text-xs font-medium text-blue-900 underline-offset-2 hover:underline"
+        >
+          Cancel
+        </button>
+        {popupError ? <p className="text-xs text-red-700">{popupError}</p> : null}
+      </div>
+    )
+  }
+
+  if (hetznerStart) {
+    return (
+      <HetznerConnectWizard
+        provider={provider}
+        start={hetznerStart}
+        label={label ?? ''}
+        reconnectConnectionId={reconnectConnectionId}
+        disabled={disabled}
+        onLinked={(connection) => {
+          setHetznerStart(null)
+          onLinked?.(connection)
+        }}
+        onCancel={() => setHetznerStart(null)}
+      />
+    )
+  }
+
   if (awsStart) {
     return (
       <AwsConnectWizard
@@ -206,7 +336,7 @@ export function CloudProviderLoginButton({
         type="button"
         disabled={disabled || startMutation.isPending || !canStart}
         title={!canStart ? reason || undefined : undefined}
-        onClick={() => void startMutation.mutate()}
+        onClick={() => void startMutation.mutate(false)}
         className={cn(
           'inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60'
         )}
@@ -218,6 +348,16 @@ export function CloudProviderLoginButton({
         )}
         {reconnectConnectionId ? 'Reconnect' : status?.signInLabel || 'Sign in'}
       </button>
+      {provider === CloudProvider.Azure && canStart ? (
+        <button
+          type="button"
+          disabled={disabled || startMutation.isPending}
+          onClick={() => void startMutation.mutate(true)}
+          className="text-xs font-medium text-gray-700 underline-offset-2 hover:underline disabled:opacity-60"
+        >
+          Use device code
+        </button>
+      ) : null}
       {!canStart && reason ? <p className="text-[11px] text-gray-600">{reason}</p> : null}
       {popupError ? <p className="text-xs text-red-700">{popupError}</p> : null}
       <span className="sr-only" data-oauth-message-type={CLOUD_OAUTH_MESSAGE_TYPE} />

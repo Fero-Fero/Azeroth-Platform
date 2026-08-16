@@ -10,6 +10,7 @@ import {
 } from '@/types/stack.types'
 import { cn, apiErrorMessage } from '@/lib/utils'
 import { downloadPemFile } from '@/lib/ssh-key-download'
+import { DEFAULT_OPERATOR_SSH_USER, isForbiddenSshUser, sshUserWarning } from '@/lib/ssh-user'
 
 interface CloudLaunchPanelProps {
   disabled?: boolean
@@ -145,6 +146,11 @@ export function CloudLaunchPanel({
   const [generateSshKey, setGenerateSshKey] = useState(true)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [launchMessage, setLaunchMessage] = useState<string | null>(null)
+  const [operatorUser, setOperatorUser] = useState(() => {
+    const current = sshUser.trim()
+    return current && current !== 'root' ? current : DEFAULT_OPERATOR_SSH_USER
+  })
+  const operatorWarning = sshUserWarning(operatorUser)
 
   const { data: connections, isLoading: loadingConnections } = useQuery({
     queryKey: ['cloud-connections'],
@@ -286,7 +292,7 @@ export function CloudLaunchPanel({
         await cloudApi.launch(connectionId, {
           mode,
           name: name.trim(),
-          sshUser: sshUser.trim() || defaults?.sshUser || 'ubuntu',
+          sshUser: operatorUser.trim() || defaults?.sshUser || DEFAULT_OPERATOR_SSH_USER,
           region: region.trim() || undefined,
           instanceId: instanceId.trim() || undefined,
           size: size.trim() || undefined,
@@ -559,9 +565,9 @@ export function CloudLaunchPanel({
                     {isAzureAccount ? (
                       <>
                         Bootstrap an <span className="font-medium">existing</span> Azure Linux VM via Run Command (does
-                        not create a new VM). The service principal needs{' '}
-                        <span className="font-mono">Microsoft.Compute/virtualMachines/runCommand/action</span> on the
-                        target VM.
+                        not create a new VM). Sign in with Microsoft or a dedicated service principal needs{' '}
+                        <span className="font-mono">Microsoft.Compute/virtualMachines/runCommand/action</span> and
+                        NSG write on the NIC. Create VM from the platform is coming soon.
                       </>
                     ) : (
                       <>
@@ -615,6 +621,25 @@ export function CloudLaunchPanel({
                 </p>
               ) : null}
 
+              <div>
+                <label htmlFor="launch-ssh-user" className="block text-xs font-medium text-gray-800">
+                  Operator SSH user
+                </label>
+                <input
+                  id="launch-ssh-user"
+                  type="text"
+                  value={operatorUser}
+                  disabled={disabled || launchMutation.isPending}
+                  onChange={(event) => setOperatorUser(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-600">
+                  Created on first boot. Not root. After the stack is working, Finalize SSH hardening locks ubuntu out of
+                  internet SSH (AWS console Instance Connect remains for break-glass).
+                </p>
+                {operatorWarning ? <p className="mt-1 text-[11px] text-amber-800">{operatorWarning}</p> : null}
+              </div>
+
               {!savedSshKeyId && showCreateForm && !embedded ? (
                 <label className="flex items-start gap-2 text-sm text-gray-700">
                   <input
@@ -641,6 +666,7 @@ export function CloudLaunchPanel({
                 disabled={
                   disabled
                   || launchMutation.isPending
+                  || isForbiddenSshUser(operatorUser)
                   || (isBootstrapMode
                     ? instanceId.trim().length === 0
                     : name.trim().length === 0

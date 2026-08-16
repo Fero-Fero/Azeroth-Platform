@@ -12,6 +12,9 @@ public class CloudProviderConnectionEntity
 
     public string DefaultRegion { get; set; } = string.Empty;
 
+    /// <summary>GCP project id selected after user OAuth (or extracted from a service account JSON).</summary>
+    public string DefaultProjectId { get; set; } = string.Empty;
+
     public DateTime CreatedAtUtc { get; set; }
 
     /// <summary>Stored as enum name: Manual, OAuth, or AssumedRole.</summary>
