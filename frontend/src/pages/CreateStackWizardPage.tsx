@@ -20,6 +20,7 @@ import { useCreateStack, useStacks, stackKeys } from '@/hooks/useStacks'
 import { wizardSchema, WIZARD_DEFAULTS, STEP_TRIGGER_FIELDS_BY_ID, EMAIL_STEP_TRIGGER_FIELDS, type WizardFormData } from '@/schemas/wizard.schemas'
 import { DEFAULT_ARMORY_EMAIL } from '@/lib/armory-email-defaults'
 import { validationApi, buildApi, stackApi } from '@/services/api'
+import { apiErrorMessage } from '@/lib/utils'
 import { ServerType, DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type {
   DeploymentConfigDto,
@@ -288,7 +289,16 @@ export default function CreateStackWizardPage() {
 
   useEffect(() => {
     const subscription = form.watch((values, info) => {
-      if (info.name !== 'deployment.connectionVerified' || !values.deployment?.connectionVerified) {
+      const persistBootstrapCache =
+        info.name === 'deployment.bootstrapUserSecured' && Boolean(values.deployment?.bootstrapUserSecured)
+      const persistBootstrapKey =
+        info.name === 'deployment.bootstrapSshKeyId'
+        && (Boolean(values.deployment?.bootstrapSshKeyId) || Boolean(values.deployment?.bootstrapUserSecured))
+      if (
+        (info.name !== 'deployment.connectionVerified' || !values.deployment?.connectionVerified)
+        && !persistBootstrapCache
+        && !persistBootstrapKey
+      ) {
         return
       }
 
@@ -457,10 +467,7 @@ export default function CreateStackWizardPage() {
       navigate(`/stacks/${stackId}/build`)
     } catch (error: unknown) {
       console.error('[WIZARD] Error during stack creation:', error)
-      const message = error instanceof Error
-        ? error.message
-        : 'Failed to create stack. Please try again.'
-      setSubmitError(message)
+      setSubmitError(apiErrorMessage(error, 'Failed to create stack. Please try again.'))
     }
   })
 
@@ -628,6 +635,8 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
           cloudRegion: values.deployment.cloudRegion ?? '',
           cloudProvider: values.deployment.cloudProvider ?? '',
           cloudInstanceType: values.deployment.cloudInstanceType ?? '',
+          bootstrapSshKeyId: values.deployment.bootstrapSshKeyId ?? '',
+          bootstrapUserSecured: values.deployment.bootstrapUserSecured ?? false,
         }
       : undefined,
     customFork: values.serverType === ServerType.Custom
@@ -716,6 +725,8 @@ function toDraftDeploymentDto(values: WizardFormData): DeploymentConfigDto {
     cloudRegion: values.deployment.cloudRegion ?? '',
     cloudProvider: values.deployment.cloudProvider ?? '',
     cloudInstanceType: values.deployment.cloudInstanceType ?? '',
+    bootstrapSshKeyId: values.deployment.bootstrapSshKeyId ?? '',
+    bootstrapUserSecured: values.deployment.bootstrapUserSecured ?? false,
   }
 }
 
@@ -756,8 +767,20 @@ function mergeSetupDraft(draft: StackSetupDraftDto): WizardFormData {
       cloudRegion: draft.deployment.cloudRegion || parsed.deployment?.cloudRegion || '',
       cloudProvider: draft.deployment.cloudProvider || parsed.deployment?.cloudProvider || '',
       cloudInstanceType: draft.deployment.cloudInstanceType || parsed.deployment?.cloudInstanceType || '',
-      savedSshKeyId: parsed.deployment?.savedSshKeyId || '',
+      savedSshKeyId: parsed.deployment?.savedSshKeyId || draft.deployment.savedSshKeyId || '',
+      bootstrapSshKeyId: parsed.deployment?.bootstrapSshKeyId || draft.deployment.bootstrapSshKeyId || '',
+      bootstrapUserSecured:
+        parsed.deployment?.bootstrapUserSecured === true || draft.deployment.bootstrapUserSecured === true,
       externalSshPrivateKey: draft.externalSshPrivateKey || parsed.deployment?.externalSshPrivateKey || '',
+      // PEM confirmation lives in wizard component state. After Finish setup that UI is gone,
+      // so a stored vault key or decrypted draft key is enough to show Verify VPC again.
+      sshCertificateVerified:
+        Boolean(
+          (parsed.deployment?.savedSshKeyId ?? '').trim()
+          || (draft.externalSshPrivateKey ?? '').trim()
+          || (parsed.deployment?.externalSshPrivateKey ?? '').trim()
+        )
+        || parsed.deployment?.sshCertificateVerified !== false,
     },
   }
 }

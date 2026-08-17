@@ -15,7 +15,6 @@ import { isStackJobRunning } from '@/lib/stackJob'
 import { lazyWithRetry } from '@/lib/lazyWithRetry'
 import PageLoader from '@/components/PageLoader'
 import type { ConfigMigrationMode } from '@/components/config/ConfigMigrationModeChoice'
-import { useClientBaseInfo } from '@/hooks/useClient'
 import { useArmoryAssetsInfo } from '@/hooks/useArmoryAssets'
 import { useRealms, realmKeys } from '@/hooks/useRealms'
 import { useDockerDiskUsage } from '@/hooks/useStackDocker'
@@ -502,17 +501,13 @@ function StackDetailsPageContent() {
   })
 
   // Volume probes over SSH are slow on external stacks — only fetch when a tab needs them.
-  const needsClientUploadStatus = activeTab === 'overview' || activeTab === 'client'
   const needsArmoryUploadStatus =
     activeTab === 'overview' ||
     activeTab === 'armory' ||
     activeTab === 'armory-styling' ||
     activeTab === 'armory-layout' ||
     activeTab === 'armory-email'
-  const clientBaseInfoQuery = useClientBaseInfo(stackId!, needsClientUploadStatus)
   const armoryAssetsInfoQuery = useArmoryAssetsInfo(stackId!, needsArmoryUploadStatus)
-  const clientDataMissing = clientBaseInfoQuery.data ? !clientBaseInfoQuery.data.exists : false
-  const armoryDataMissing = armoryAssetsInfoQuery.data ? !armoryAssetsInfoQuery.data.dataUploaded : false
   const isArmoryTab =
     activeTab === 'armory' || activeTab === 'armory-styling' || activeTab === 'armory-layout' || activeTab === 'armory-email'
 
@@ -1116,8 +1111,6 @@ function StackDetailsPageContent() {
           isExternalStack={isExternalStack}
           isLiveStatusRefreshing={isLiveStatusRefreshing}
           diskUsage={diskUsage}
-          clientDataMissing={clientDataMissing}
-          armoryDataMissing={armoryDataMissing}
           armoryRebuildPending={armoryAssetsInfoQuery.data?.staticRebuildPending}
           checkUpdatesPending={checkUpdatesMutation.isPending}
           onSelectTab={selectTab}

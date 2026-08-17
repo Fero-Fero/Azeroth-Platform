@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzerothPlatform.Core.Contracts;
 
 namespace AzerothPlatform.Infrastructure.Services.Cloud;
 
@@ -200,7 +201,11 @@ public sealed class VultrClient
         return await ListFirewallRulesAsync(accessToken, instance.FirewallGroupId, cancellationToken);
     }
 
-    internal static bool FirewallRuleCovers(VultrFirewallInboundRule actual, int port, string expectedCidr)
+    internal static bool FirewallRuleCovers(
+        VultrFirewallInboundRule actual,
+        int port,
+        string expectedCidr,
+        bool adminSshUnpinned = false)
     {
         if (!string.Equals(actual.Protocol, "tcp", StringComparison.OrdinalIgnoreCase))
         {
@@ -212,10 +217,10 @@ public sealed class VultrClient
             return false;
         }
 
-        var actualCidr = ToCidr(actual.Subnet, actual.SubnetSize);
-        var expected = (expectedCidr ?? string.Empty).Trim();
-        return string.Equals(actualCidr, expected, StringComparison.OrdinalIgnoreCase)
-               || actualCidr is "0.0.0.0/0" or "::/0";
+        return VpcSecurityCatalog.ProbeIngressSourceSatisfied(
+            expectedCidr,
+            ToCidr(actual.Subnet, actual.SubnetSize),
+            adminSshUnpinned);
     }
 
     internal static bool FirewallRuleOpensPortPublicly(VultrFirewallInboundRule rule, int port)

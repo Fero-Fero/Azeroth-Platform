@@ -312,10 +312,10 @@ export function useSavePatchLauncherTheme(stackId: string) {
   })
 }
 
-export function useBootstrapIndividualProgression(stackId: string) {
+export function useBootstrapServerWideProgression(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => patchApi.bootstrapIndividualProgression(stackId),
+    mutationFn: () => patchApi.bootstrapServerWideProgression(stackId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: patchKeys.all })
       queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId) })
@@ -323,7 +323,7 @@ export function useBootstrapIndividualProgression(stackId: string) {
   })
 }
 
-export function useValidateIndividualProgressionPatches(stackId: string) {
+export function useValidateServerWideProgressionPatches(stackId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => patchApi.validatePatches(stackId),

@@ -1,4 +1,4 @@
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using FluentAssertions;
 using Xunit;
 

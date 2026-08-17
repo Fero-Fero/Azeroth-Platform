@@ -118,6 +118,9 @@ export interface DeploymentConfigDto {
   cloudRegion?: string
   cloudProvider?: string
   cloudInstanceType?: string
+  bootstrapSshKeyId?: string
+  bootstrapUserSecured?: boolean
+  remoteOs?: RemoteHostOs
 }
 
 export interface CloudSshKeyDto {
@@ -287,9 +290,11 @@ export interface CloudLaunchRequestDto {
   mode: CloudLaunchMode
   name: string
   sshUser: string
+  targetOs?: RemoteHostOs
   region?: string
   instanceId?: string
   size?: string
+  diskSizeGb?: number
   image?: string
   savedSshKeyId?: string
   generateSshKey?: boolean
@@ -300,7 +305,10 @@ export interface CloudLaunchRequestDto {
 export interface CloudLaunchResultDto {
   instance: CloudInstanceDto
   savedSshKeyId?: string
+  bootstrapSshKeyId?: string
+  bootstrapSshUser?: string
   privateKeyPem?: string
+  bootstrapPrivateKeyPem?: string
   message: string
   bootstrapCommandId?: string
 }
@@ -315,16 +323,22 @@ export interface CloudLaunchDefaultsDto {
   provider: CloudProvider
   region: string
   size: string
+  diskSizeGb?: number
+  supportsCustomDiskSize?: boolean
   image: string
   sshUser: string
   supportsCreate: boolean
   supportsBootstrapExisting: boolean
+  supportsWindowsLaunch?: boolean
+  targetOs?: RemoteHostOs
 }
 
 export interface CloudLaunchCatalogOptionDto {
   value: string
   label: string
   description?: string
+  vcpus?: number
+  diskGb?: number
 }
 
 export interface CloudLaunchCatalogDto {
@@ -332,6 +346,10 @@ export interface CloudLaunchCatalogDto {
   regions: CloudLaunchCatalogOptionDto[]
   sizes: CloudLaunchCatalogOptionDto[]
   images: CloudLaunchCatalogOptionDto[]
+  supportsCustomDiskSize?: boolean
+  defaultDiskSizeGb?: number
+  minDiskSizeGb?: number
+  maxDiskSizeGb?: number
 }
 
 export interface CloudAuditLogDto {
@@ -417,6 +435,8 @@ export interface RemoteConnectionTestResultDto {
   message: string
   serverVersion?: string
   prerequisites?: RemotePrerequisiteCheckDto[]
+  bootstrapUserSecured?: boolean
+  detectedOs?: RemoteHostOs
 }
 
 export interface RemoteSetupResultDto {
@@ -434,8 +454,8 @@ export interface RemoteBootstrapResultDto {
 }
 
 export enum RemoteHostOs {
-  Linux = 0,
-  Windows = 1,
+  Linux = 'Linux',
+  Windows = 'Windows',
 }
 
 export interface RemoteSetupOptionsDto {
@@ -474,6 +494,8 @@ export interface VpcLaunchUserDataDto {
   sshUser: string
   script: string
   instructions: string
+  remoteOs?: RemoteHostOs
+  scriptKind?: string
 }
 
 export interface VpcSecurityRuleDto {
@@ -510,6 +532,7 @@ export interface VpcFirewallStatusDto {
   ufwInstalled: boolean
   ufwActive: boolean
   ufwStatusSummary?: string
+  firewallProduct?: string
   checks: VpcSecurityCheckDto[]
 }
 

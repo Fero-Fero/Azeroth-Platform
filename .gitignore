@@ -10,7 +10,7 @@
 /data/
 
 # Planning and analysis documents
-./plans/*
+/plans/*
 
 # IDE
 .vs/

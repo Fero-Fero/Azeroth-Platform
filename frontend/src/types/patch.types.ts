@@ -25,7 +25,7 @@ export interface PatchSummaryDto {
   incrementsProgression?: boolean | null
 }
 
-import type { PatchProgressionMetadata } from '@/types/individual-progression.types'
+import type { PatchProgressionMetadata } from '@/types/server-wide-progression.types'
 
 export interface PatchDetailsDto {
   key: string
@@ -93,12 +93,12 @@ export interface MigrationOverviewDto {
   applyingPatchKey?: string | null
   patches: PatchSummaryDto[]
   hasIndividualProgressionModule: boolean
-  individualProgressionBootstrapped: boolean
-  individualProgressionValidationRequired: boolean
-  individualProgressionValidationCurrent: boolean
-  individualProgressionValidationPassedAt?: string | null
-  individualProgressionPatchCount: number
-  individualProgressionExpectedPatchCount: number
+  serverWideProgressionBootstrapped: boolean
+  serverWideProgressionValidationRequired: boolean
+  serverWideProgressionValidationCurrent: boolean
+  serverWideProgressionValidationPassedAt?: string | null
+  serverWideProgressionPatchCount: number
+  serverWideProgressionExpectedPatchCount: number
 }
 
 export interface ApplyPatchResultDto {

@@ -54,6 +54,7 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.RealmlistHostOverride).HasMaxLength(255).IsRequired();
             entity.Property(stack => stack.LauncherTemplate).HasMaxLength(32).IsRequired();
             entity.Property(stack => stack.DeploymentTarget).HasConversion<string>().HasMaxLength(16).IsRequired();
+            entity.Property(stack => stack.RemoteOs).HasConversion<string>().HasMaxLength(16).IsRequired();
             entity.Property(stack => stack.ExternalHost).HasMaxLength(255).IsRequired();
             entity.Property(stack => stack.ExternalSshUser).HasMaxLength(64).IsRequired();
             entity.Property(stack => stack.ExternalSshPrivateKey).IsRequired();

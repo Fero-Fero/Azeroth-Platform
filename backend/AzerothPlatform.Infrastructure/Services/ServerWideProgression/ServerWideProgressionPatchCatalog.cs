@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 public sealed record ProgressionPatchDefinition(
     int State,
@@ -13,9 +13,9 @@ public sealed record ProgressionPatchDefinition(
     bool IncrementsProgression);
 
 /// <summary>Maps mod-individual-progression ProgressionState values to patch folder templates.</summary>
-public static class IndividualProgressionPatchCatalog
+public static class ServerWideProgressionPatchCatalog
 {
-    /// <summary>Number of progression patches seeded for Individual Progression stacks (Classic + TBC + WotLK).</summary>
+    /// <summary>Number of progression patches seeded for Server Wide Progression (Classic + TBC + WotLK).</summary>
     public const int ExpectedPatchCount = 18;
 
     private static readonly IReadOnlyList<ProgressionPatchDefinition> BuiltIn =
@@ -50,7 +50,7 @@ public static class IndividualProgressionPatchCatalog
 
     public static IReadOnlyList<ProgressionPatchDefinition> ResolveDefinitions(string stackRoot)
     {
-        var parsed = IndividualProgressionHeaderParser.TryParseFromStack(stackRoot);
+        var parsed = ServerWideProgressionHeaderParser.TryParseFromStack(stackRoot);
         if (parsed is null || parsed.Count == 0)
         {
             return BuiltIn;
@@ -70,7 +70,7 @@ public static class IndividualProgressionPatchCatalog
     }
 }
 
-internal static partial class IndividualProgressionHeaderParser
+internal static partial class ServerWideProgressionHeaderParser
 {
     private const string HeaderFileName = "IndividualProgression.h";
 

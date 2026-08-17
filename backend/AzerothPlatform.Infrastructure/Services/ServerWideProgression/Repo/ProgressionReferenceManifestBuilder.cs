@@ -1,7 +1,7 @@
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Captures the Azeroth-Platform-Progression layout during sync for later validation.

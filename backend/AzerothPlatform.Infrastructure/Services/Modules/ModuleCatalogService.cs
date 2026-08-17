@@ -142,7 +142,7 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
             Id = "mod-individual-progression",
             Name = "Individual Progression",
             Description = "This module simulates progress through expansions and expansion tiers for individual players.",
-            Repository = "https://github.com/ZhengPeiRu21/mod-individual-progression",
+            Repository = "https://github.com/Grimfeather/mod-individual-progression",
             Branch = "master",
             IsBuiltIn = true
         },

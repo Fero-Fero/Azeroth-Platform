@@ -1,26 +1,26 @@
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 using FluentAssertions;
 using Xunit;
 
 namespace AzerothPlatform.Tests;
 
-public sealed class IndividualProgressionPatchCatalogTests
+public sealed class ServerWideProgressionPatchCatalogTests
 {
     [Fact]
     public void Catalog_contains_expected_progression_patch_count()
     {
-        IndividualProgressionPatchCatalog.All.Should().HaveCount(IndividualProgressionPatchCatalog.ExpectedPatchCount);
-        IndividualProgressionPatchCatalog.ExpectedPatchCount.Should().Be(18);
-        IndividualProgressionPatchCatalog.FindByState(0)!.Slug.Should().Be("START");
-        IndividualProgressionPatchCatalog.FindByState(0)!.IncrementsProgression.Should().BeFalse();
-        IndividualProgressionPatchCatalog.FindByState(11).Should().BeNull();
+        ServerWideProgressionPatchCatalog.All.Should().HaveCount(ServerWideProgressionPatchCatalog.ExpectedPatchCount);
+        ServerWideProgressionPatchCatalog.ExpectedPatchCount.Should().Be(18);
+        ServerWideProgressionPatchCatalog.FindByState(0)!.Slug.Should().Be("START");
+        ServerWideProgressionPatchCatalog.FindByState(0)!.IncrementsProgression.Should().BeFalse();
+        ServerWideProgressionPatchCatalog.FindByState(11).Should().BeNull();
     }
 
     [Fact]
     public void FindByIndex_resolves_1_0_as_START()
     {
-        var start = IndividualProgressionPatchCatalog.FindByIndex("1.0");
+        var start = ServerWideProgressionPatchCatalog.FindByIndex("1.0");
         start.Should().NotBeNull();
         start!.State.Should().Be(0);
         start.IncrementsProgression.Should().BeFalse();

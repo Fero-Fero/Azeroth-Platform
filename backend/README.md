@@ -213,7 +213,7 @@ Api → Core
 ## Security Notes
 
 The platform is hardened to be safe even when exposed to an untrusted network (see
-[README.md](../README.md#security-hardening) for the full guide). Key
+[README.technical.md](../README.technical.md#security-hardening) for the full guide). Key
 points for backend developers:
 
 - **Deny-by-default authorization**: `Program.cs` sets a `FallbackPolicy` requiring an authenticated

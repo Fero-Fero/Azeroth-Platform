@@ -5,8 +5,18 @@ const scopeKey = (stackId: string) => stackId
 
 export const addonKeys = {
   all: ['addons'] as const,
+  globalCatalog: () => [...addonKeys.all, 'catalog', 'global'] as const,
   list: (stackId: string) => [...addonKeys.all, scopeKey(stackId)] as const,
   catalog: (stackId: string) => [...addonKeys.all, 'catalog', scopeKey(stackId)] as const,
+}
+
+/** Built-in addon catalog (wizard / id lookup; not stack-scoped). */
+export function useGlobalAddonCatalog() {
+  return useQuery({
+    queryKey: addonKeys.globalCatalog(),
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => (await addonApi.globalCatalog()).data,
+  })
 }
 
 export function useAddons(stackId: string) {

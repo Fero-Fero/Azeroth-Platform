@@ -2,7 +2,7 @@ using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Creates stack patch folders from the on-disk layout of Azeroth-Platform-Progression.
@@ -27,8 +27,8 @@ internal static class ProgressionRepoPatchSeeder
             return 0;
         }
 
-        var headerStates = IndividualProgressionHeaderParser.TryParseFromStack(stackRoot);
-        var catalog = IndividualProgressionPatchCatalog.All;
+        var headerStates = ServerWideProgressionHeaderParser.TryParseFromStack(stackRoot);
+        var catalog = ServerWideProgressionPatchCatalog.All;
         var created = 0;
 
         foreach (var expansionDir in Directory.EnumerateDirectories(repoDir))
@@ -99,7 +99,7 @@ internal static class ProgressionRepoPatchSeeder
     private static void WriteProgressionMetadata(
         string stackPatchDir,
         ProgressionPatchDefinition? definition,
-        IReadOnlyList<IndividualProgressionHeaderParser.ParsedState>? headerStates,
+        IReadOnlyList<ServerWideProgressionHeaderParser.ParsedState>? headerStates,
         string expansion,
         string repoPatchFolderName,
         string patchKey)
@@ -126,7 +126,7 @@ internal static class ProgressionRepoPatchSeeder
     private static PatchProgressionMetadataDto BuildMetadataFromHeader(
         string slug,
         string expansion,
-        IReadOnlyList<IndividualProgressionHeaderParser.ParsedState>? headerStates)
+        IReadOnlyList<ServerWideProgressionHeaderParser.ParsedState>? headerStates)
     {
         var headerMatch = headerStates?.FirstOrDefault(entry =>
             string.Equals(entry.Slug, slug, StringComparison.OrdinalIgnoreCase));

@@ -1,6 +1,6 @@
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Maps patch <c>config/*.json</c> file names to live server <c>.conf</c> paths under the stack etc dir.

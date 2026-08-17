@@ -4,6 +4,7 @@ import { FormField } from '@/components/wizard/common/FormField'
 import { CloudAccountStep } from '@/components/wizard/common/CloudAccountStep'
 import { VpcConnectionTestFooter } from '@/components/wizard/common/VpcConnectionTestFooter'
 import type { CloudLaunchResultDto, CloudInstanceDto, RemoteConnectionTestResultDto } from '@/types/stack.types'
+import { RemoteHostOs } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 import { sshUserWarning } from '@/lib/ssh-user'
 import type { FieldErrors, UseFormRegister } from 'react-hook-form'
@@ -14,6 +15,7 @@ type ConnectionMethod = 'manual' | 'cloud'
 
 interface VpcConnectionMethodTabsProps {
   disabled?: boolean
+  remoteOs?: RemoteHostOs
   cloudConnectionId: string
   onCloudConnectionIdChange: (id: string) => void
   cloudProvider?: string
@@ -21,6 +23,7 @@ interface VpcConnectionMethodTabsProps {
   externalHost: string
   externalSshUser: string
   savedSshKeyId: string
+  bootstrapSshKeyId?: string
   register: UseFormRegister<WizardFormData>
   errors: FieldErrors<WizardFormData>
   sshCertificateVerified: boolean
@@ -32,11 +35,13 @@ interface VpcConnectionMethodTabsProps {
   sshTesting: boolean
   onTestConnection: () => void
   sshTestResult: RemoteConnectionTestResultDto | null
+  onSwitchRemoteOs?: (os: RemoteHostOs) => void
   children?: ReactNode
 }
 
 export function VpcConnectionMethodTabs({
   disabled = false,
+  remoteOs,
   cloudConnectionId,
   onCloudConnectionIdChange,
   cloudProvider,
@@ -44,6 +49,7 @@ export function VpcConnectionMethodTabs({
   externalHost,
   externalSshUser,
   savedSshKeyId,
+  bootstrapSshKeyId = '',
   sshCertificateVerified,
   onSshCertificateVerifiedChange,
   register,
@@ -55,6 +61,7 @@ export function VpcConnectionMethodTabs({
   sshTesting,
   onTestConnection,
   sshTestResult,
+  onSwitchRemoteOs,
   children,
 }: VpcConnectionMethodTabsProps) {
   const [method, setMethod] = useState<ConnectionMethod>('cloud')
@@ -166,13 +173,14 @@ export function VpcConnectionMethodTabs({
                 {...register('deployment.externalSshUser')}
               />
             </FormField>
-            {sshUserWarning(externalSshUser) ? (
-              <p className="text-[11px] text-amber-800">{sshUserWarning(externalSshUser)}</p>
+            {sshUserWarning(externalSshUser, remoteOs) ? (
+              <p className="text-[11px] text-amber-800">{sshUserWarning(externalSshUser, remoteOs)}</p>
             ) : null}
           </div>
         ) : (
           <CloudAccountStep
             disabled={disabled}
+            remoteOs={remoteOs}
             connectionId={cloudConnectionId}
             onConnectionIdChange={onCloudConnectionIdChange}
             cloudProvider={cloudProvider}
@@ -180,6 +188,7 @@ export function VpcConnectionMethodTabs({
             externalHost={externalHost}
             externalSshUser={externalSshUser}
             savedSshKeyId={savedSshKeyId}
+            bootstrapSshKeyId={bootstrapSshKeyId}
             sshCertificateVerified={sshCertificateVerified}
             onSshCertificateVerifiedChange={onSshCertificateVerifiedChange}
             onSelectInstance={onSelectInstance}
@@ -200,6 +209,8 @@ export function VpcConnectionMethodTabs({
             disabled={disabled}
             onTestConnection={onTestConnection}
             testResult={sshTestResult}
+            remoteOs={remoteOs}
+            onSwitchRemoteOs={onSwitchRemoteOs}
           />
         ) : null}
       </div>

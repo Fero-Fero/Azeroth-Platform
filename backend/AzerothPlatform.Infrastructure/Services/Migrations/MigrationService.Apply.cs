@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using Microsoft.Extensions.Logging;
 
 namespace AzerothPlatform.Infrastructure.Services.Migrations;
@@ -188,7 +188,7 @@ public sealed partial class MigrationService
             return result;
         }
 
-        var (applyAllowed, applyBlockedReason) = await _individualProgression.CheckPatchApplyAllowedAsync(stackId, cancellationToken);
+        var (applyAllowed, applyBlockedReason) = await _serverWideProgression.CheckPatchApplyAllowedAsync(stackId, cancellationToken);
         if (!applyAllowed)
         {
             result.Success = false;
@@ -407,10 +407,10 @@ public sealed partial class MigrationService
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 AddLog(result, $"Recorded applied patch level {patch.Level}.");
 
-                var metadata = await _individualProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
+                var metadata = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
                 if (metadata is not null)
                 {
-                    await _individualProgression.OnPatchAppliedAsync(stackId, metadata, result.Log, cancellationToken);
+                    await _serverWideProgression.OnPatchAppliedAsync(stackId, metadata, result.Log, cancellationToken);
                 }
             }, cancellationToken);
 
@@ -584,7 +584,7 @@ public sealed partial class MigrationService
             return result;
         }
 
-        var (applyAllowed, applyBlockedReason) = await _individualProgression.CheckPatchApplyAllowedAsync(stackId, cancellationToken);
+        var (applyAllowed, applyBlockedReason) = await _serverWideProgression.CheckPatchApplyAllowedAsync(stackId, cancellationToken);
         if (!applyAllowed)
         {
             result.Success = false;

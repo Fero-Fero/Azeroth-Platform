@@ -4,7 +4,7 @@ using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Data.Entities;
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +15,7 @@ using Xunit;
 
 namespace AzerothPlatform.Tests;
 
-public sealed class IndividualProgressionRecreateTests
+public sealed class ServerWideProgressionRecreateTests
 {
     [Fact]
     public async Task RecreateMissingPatchesAsync_creates_only_missing_templates()
@@ -217,13 +217,13 @@ public sealed class IndividualProgressionRecreateTests
             var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
             var migrations = Options.Create(new MigrationOptions());
             var httpClientFactory = new Mock<IHttpClientFactory>();
-            var serviceWithConfig = new IndividualProgressionSyncService(
+            var serviceWithConfig = new ServerWideProgressionService(
                 db,
                 serverConfig.Object,
                 httpClientFactory.Object,
                 docker,
                 migrations,
-                NullLogger<IndividualProgressionSyncService>.Instance);
+                NullLogger<ServerWideProgressionService>.Instance);
 
             var result = await serviceWithConfig.ValidatePatchesAsync(stackId);
 
@@ -379,7 +379,7 @@ public sealed class IndividualProgressionRecreateTests
 
     private static void SeedTestProgressionRepo(string stackRoot)
     {
-        foreach (var definition in IndividualProgressionPatchCatalog.All)
+        foreach (var definition in ServerWideProgressionPatchCatalog.All)
         {
             var expansion = definition.Expansion switch
             {
@@ -409,7 +409,7 @@ public sealed class IndividualProgressionRecreateTests
             onlyMissing: false);
     }
 
-    private static IndividualProgressionSyncService CreateSyncService(AzerothCoreDbContext db, string buildsPath)
+    private static ServerWideProgressionService CreateSyncService(AzerothCoreDbContext db, string buildsPath)
     {
         var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
         var migrations = Options.Create(new MigrationOptions());
@@ -433,13 +433,13 @@ public sealed class IndividualProgressionRecreateTests
 
         var httpClientFactory = new Mock<IHttpClientFactory>();
 
-        return new IndividualProgressionSyncService(
+        return new ServerWideProgressionService(
             db,
             serverConfig.Object,
             httpClientFactory.Object,
             docker,
             migrations,
-            NullLogger<IndividualProgressionSyncService>.Instance);
+            NullLogger<ServerWideProgressionService>.Instance);
     }
 
     private static AzerothCoreDbContext CreateDbContext(ManagedStackEntity stack)

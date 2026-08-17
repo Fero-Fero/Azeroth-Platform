@@ -1,25 +1,25 @@
-export interface IndividualProgressionKeyMapping {
+export interface ServerWideProgressionKeyMapping {
   startingProgression: string
   progressionLimit: string
   tbcRacesUnlockProgression: string
   tbcRacesStartingProgression: string
 }
 
-export interface IndividualProgressionSettings {
+export interface ServerWideProgressionSettings {
   bootstrapped: boolean
   moduleConfPath: string
   worldserverConfPath: string
   expansionKey: string
-  keys: IndividualProgressionKeyMapping
+  keys: ServerWideProgressionKeyMapping
   values: Record<string, string>
 }
 
-export interface IndividualProgressionBootstrapResult {
+export interface ServerWideProgressionBootstrapResult {
   templatesCreated: number
   configUpdated: boolean
   expansion: number
   keysDiscovered: boolean
-  settings: IndividualProgressionSettings
+  settings: ServerWideProgressionSettings
 }
 
 export interface PatchProgressionMetadata {
@@ -29,7 +29,7 @@ export interface PatchProgressionMetadata {
   incrementsProgression: boolean
 }
 
-export interface IndividualProgressionKeyCheck {
+export interface ServerWideProgressionKeyCheck {
   key: string
   configPath: string
   patchKey?: string | null
@@ -43,7 +43,7 @@ export interface IndividualProgressionKeyCheck {
 
 export type PatchValidationMode = 'ConfigOnly' | 'Full'
 
-export interface IndividualProgressionValidationResult {
+export interface ServerWideProgressionValidationResult {
   passed: boolean
   isCurrent: boolean
   mode: PatchValidationMode
@@ -52,7 +52,7 @@ export interface IndividualProgressionValidationResult {
   patchCount: number
   expectedPatchCount: number
   errors: string[]
-  keyChecks: IndividualProgressionKeyCheck[]
+  keyChecks: ServerWideProgressionKeyCheck[]
 }
 
 export const INDIVIDUAL_PROGRESSION_MODULE_ID = 'mod-individual-progression'

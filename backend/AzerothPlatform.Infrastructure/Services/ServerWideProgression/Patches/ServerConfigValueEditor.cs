@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>Line-based read/write for AzerothCore <c>Key = Value</c> config files.</summary>
 internal static partial class ServerConfigValueEditor
@@ -136,7 +136,7 @@ internal sealed class IndividualProgressionKeyNames
 
     public string TbcRacesStartingProgression { get; set; } = "IndividualProgression.TbcRacesStartingProgression";
 
-    public IndividualProgressionKeyMappingDto ToDto() => new()
+    public ServerWideProgressionKeyMappingDto ToDto() => new()
     {
         StartingProgression = StartingProgression,
         ProgressionLimit = ProgressionLimit,
@@ -144,7 +144,7 @@ internal sealed class IndividualProgressionKeyNames
         TbcRacesStartingProgression = TbcRacesStartingProgression,
     };
 
-    public static IndividualProgressionKeyNames FromDto(IndividualProgressionKeyMappingDto dto) => new()
+    public static IndividualProgressionKeyNames FromDto(ServerWideProgressionKeyMappingDto dto) => new()
     {
         StartingProgression = dto.StartingProgression,
         ProgressionLimit = dto.ProgressionLimit,

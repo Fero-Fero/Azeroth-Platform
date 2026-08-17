@@ -28,6 +28,8 @@ frontend/
 │   ├── hooks/           # Custom React hooks
 │   ├── types/           # TypeScript type definitions
 │   │   └── stack.types.ts  # Backend DTO types
+│   ├── server-types/    # Server-type definitions, notices, and catalog registry
+│   ├── setup/           # Stack Overview setup workflows (global + custom setups + module steps)
 │   ├── lib/             # Utilities
 │   │   ├── utils.ts     # Utility functions (cn helper)
 │   │   └── queryClient.ts  # React Query configuration
@@ -192,6 +194,21 @@ export const stackApi = {
 - Use React Router for URL state
 - Use Context API sparingly for global UI state
 - Avoid prop drilling with composition patterns
+
+## Adding a setup step
+
+Stack Overview setup rows are composed in `src/setup/`. Server-type wizard copy, recommended addons, and pipeline order live in `src/server-types/` (one file per type). Do not add `if (serverType === …)` checks to `ModulesStep`, `StackOverviewStatusPanel`, or `StackSetupOverview`.
+
+1. **New module with setup steps:** create `src/setup/steps/modules/mod-foo/` (one file per step + optional hooks). Export `fooModuleSteps()` and register it in `src/setup/steps/modules/index.ts`. Default server types pick it up via `...moduleSteps`.
+2. **Custom setup called from a module** (e.g. Server Wide Progression): add `src/setup/custom-setups/<id>.ts` and call `buildSteps()` from that module’s `*ModuleSteps()`.
+3. **Generic stack operation** (start/stop/restart): add under `src/setup/steps/stack/`.
+4. **Server-type notices / addons / pipeline:** edit `src/server-types/definitions/<type>.ts`. Set `recommendedAddonIds` (addon catalog ids). For sequenced workflows, compose module steps in `buildSetupSteps` — do not import the same step factories a second time. Shared wizard UI lives in `notices/`; catalog matching lives in `registry/`.
+5. **Global onboarding:** append to `src/setup/global-steps/index.ts` **after** SOAP → upload client → upload armory DBC. Client and armory are skippable; SOAP is not.
+6. **Sequenced workflow:** mark ordered steps with `sequenced: true` and optional `dependsOn`. `resolveVisibleSteps` shows one pipeline step at a time.
+
+A frontend definition is required for every enabled API catalog id. `assertServerTypeRegistry` throws if the catalog lists a type with no file in `server-types/`.
+
+`applies` / `isComplete` must stay pure and read `ctx.status` (prefetched by `useSetupStepContext`). Put React Query and mutations in the step `Component` / `Action`.
 
 ## Troubleshooting
 

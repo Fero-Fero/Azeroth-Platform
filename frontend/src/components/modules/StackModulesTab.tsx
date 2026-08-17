@@ -17,13 +17,9 @@ import CommunityModulesBrowser from '@/components/modules/CommunityModulesBrowse
 import ModuleBrowseTabs, { type ModuleBrowseTab } from '@/components/modules/ModuleBrowseTabs'
 import StackModuleSectionTabs, { type StackModulesSectionTab } from '@/components/modules/StackModuleSectionTabs'
 import ModuleCatalogPage from '@/pages/ModuleCatalogPage'
+import { ServerTypeSlot } from '@/server-types'
+import { mergeModuleEnvDefaults } from '@/setup/steps/modules/envDefaults'
 import { cn } from '@/lib/utils'
-
-const WORLDSERVER = 'worldserver'
-
-const MODULE_ENV_DEFAULTS: Record<string, Record<string, string>> = {
-  'mod-ah-bot': { AC_AUCTION_HOUSE_BOT_GUIDS: '' },
-}
 
 interface StackModulesTabProps {
   stack: StackDetailsDto
@@ -161,11 +157,8 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
       return
     }
 
-    if (!selectedIds.includes(moduleId) && MODULE_ENV_DEFAULTS[moduleId]) {
-      setServiceEnvVars((currentEnv) => {
-        const worldserver = currentEnv[WORLDSERVER] ?? {}
-        return { ...currentEnv, [WORLDSERVER]: { ...MODULE_ENV_DEFAULTS[moduleId], ...worldserver } }
-      })
+    if (!selectedIds.includes(moduleId)) {
+      setServiceEnvVars((currentEnv) => mergeModuleEnvDefaults(moduleId, currentEnv))
     }
     setSelectedIds(next)
   }
@@ -177,11 +170,8 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
     }
 
     const next = applyModuleToggle(moduleId, selectedIds, modules) ?? [...selectedIds, moduleId]
-    if (!selectedIds.includes(moduleId) && MODULE_ENV_DEFAULTS[moduleId]) {
-      setServiceEnvVars((currentEnv) => {
-        const worldserver = currentEnv[WORLDSERVER] ?? {}
-        return { ...currentEnv, [WORLDSERVER]: { ...MODULE_ENV_DEFAULTS[moduleId], ...worldserver } }
-      })
+    if (!selectedIds.includes(moduleId)) {
+      setServiceEnvVars((currentEnv) => mergeModuleEnvDefaults(moduleId, currentEnv))
     }
     setSelectedIds(next)
   }
@@ -337,6 +327,12 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
                 curatedCount={availableModules.length}
                 communityCount={communityPreview?.total}
                 className="mb-4"
+              />
+
+              <ServerTypeSlot
+                serverType={stack.configuration.serverType}
+                selectedModuleIds={selectedIds}
+                browseTab={browseTab}
               />
 
               {browseTab === 'community' ? (

@@ -159,7 +159,7 @@ public sealed class PatchDeleteTests
         var clientDistribution = new Mock<IClientDistributionService>();
         var imageService = new Mock<IMigrationImageService>();
         var remoteEngine = new Mock<IRemoteEngineService>();
-        var ipSync = new Mock<IIndividualProgressionSyncService>();
+        var ipSync = new Mock<IServerWideProgressionService>();
         ipSync.Setup(s => s.StackHasModule(It.IsAny<IReadOnlyList<string>>())).Returns(false);
         var serverConfig = new Mock<IServerConfigService>();
         var stackRegistry = new Mock<IStackRegistryService>();

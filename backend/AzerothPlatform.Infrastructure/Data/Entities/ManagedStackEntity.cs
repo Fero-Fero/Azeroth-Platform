@@ -214,6 +214,9 @@ public class ManagedStackEntity
     /// <summary>Where this stack's containers run: local Docker engine or a remote host over SSH.</summary>
     public DeploymentTarget DeploymentTarget { get; set; } = DeploymentTarget.Local;
 
+    /// <summary>OS family of the external Docker host. Local stacks ignore this (always the manager).</summary>
+    public RemoteHostOs RemoteOs { get; set; } = RemoteHostOs.Linux;
+
     /// <summary>Remote host (IP/DNS) of the external Docker engine (External stacks only).</summary>
     public string ExternalHost { get; set; } = string.Empty;
 

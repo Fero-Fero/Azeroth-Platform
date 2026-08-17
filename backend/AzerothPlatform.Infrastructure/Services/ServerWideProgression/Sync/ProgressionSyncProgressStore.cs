@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>Persists live progression sync progress on the stack so status can be polled during long runs.</summary>
 internal sealed class ProgressionSyncProgressStore

@@ -6,9 +6,8 @@ using Microsoft.Extensions.Options;
 namespace AzerothPlatform.Infrastructure.Services;
 
 /// <summary>
-/// Configuration-driven implementation of <see cref="IServerTypeCatalog"/>. Reads the operator-editable
-/// <c>ServerTypeCatalog</c> section (falling back to <see cref="ServerTypeCatalogOptions.Defaults"/> when
-/// a section is absent) and answers repository/branch and module-visibility questions for a server type.
+/// Server-type catalog. Uses <see cref="ServerTypeCatalogOptions.Defaults"/>
+/// (<c>Configuration/ServerTypes/</c>) unless a <c>ServerTypeCatalog</c> section overrides it.
 /// </summary>
 public sealed class ServerTypeCatalog : IServerTypeCatalog
 {

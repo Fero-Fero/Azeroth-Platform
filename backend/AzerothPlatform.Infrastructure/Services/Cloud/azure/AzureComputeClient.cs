@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzerothPlatform.Core.Contracts;
 using Azure;
 using Azure.Core;
 using Azure.Identity;
@@ -254,7 +255,8 @@ public sealed class AzureComputeClient
         AzureAccess access,
         string vmResourceId,
         string script,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool powershell = false)
     {
         var resourceId = (vmResourceId ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(resourceId))
@@ -265,7 +267,7 @@ public sealed class AzureComputeClient
         RequireSubscription(access);
         var client = CreateArmClient(access);
         var vm = client.GetVirtualMachineResource(new ResourceIdentifier(resourceId));
-        var input = new RunCommandInput("RunShellScript")
+        var input = new RunCommandInput(powershell ? "RunPowerShellScript" : "RunShellScript")
         {
             Script = { script },
         };
@@ -503,7 +505,11 @@ public sealed class AzureComputeClient
         throw new InvalidOperationException(ParseHttpError(body, "Azure device login failed."));
     }
 
-    internal static bool NsgRuleCovers(AzureNsgProbeRule rule, int port, string expectedCidr)
+    internal static bool NsgRuleCovers(
+        AzureNsgProbeRule rule,
+        int port,
+        string expectedCidr,
+        bool adminSshUnpinned = false)
     {
         if (!string.Equals(rule.Access, "Allow", StringComparison.OrdinalIgnoreCase))
         {
@@ -522,10 +528,13 @@ public sealed class AzureComputeClient
             return false;
         }
 
-        var expected = (expectedCidr ?? string.Empty).Trim();
         var actual = (rule.SourceAddressPrefix ?? string.Empty).Trim();
-        return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)
-               || actual is "*" or "0.0.0.0/0" or "Internet" or "Any";
+        if (actual is "*" or "Internet" or "Any")
+        {
+            actual = "0.0.0.0/0";
+        }
+
+        return VpcSecurityCatalog.ProbeIngressSourceSatisfied(expectedCidr, actual, adminSshUnpinned);
     }
 
     internal static bool NsgRuleOpensPortPublicly(AzureNsgProbeRule rule, int port)

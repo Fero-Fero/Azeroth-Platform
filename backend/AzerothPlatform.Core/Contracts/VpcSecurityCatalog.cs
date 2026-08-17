@@ -203,4 +203,43 @@ public static class VpcSecurityCatalog
 
         return profile.CloudSecurityGroupRules;
     }
+
+    /// <summary>
+    /// True when SSH was launched with a pinned admin IP but the probe did not receive that CIDR,
+    /// so expected SSH is the fallback <c>0.0.0.0/0</c>.
+    /// </summary>
+    public static bool IsUnpinnedAdminSsh(VpcSecurityRuleDto rule)
+    {
+        if (!string.Equals(rule.RoleId, RoleAdmin, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var source = (rule.Source ?? string.Empty).Trim();
+        return string.IsNullOrEmpty(source)
+               || source is "0.0.0.0/0" or "::/0" or "your-ip/32";
+    }
+
+    /// <summary>
+    /// Launch pins SSH to the admin IP when known. Verify VPC often omits that CIDR, so any
+    /// tcp/22 source (including a /32) satisfies unpinned admin SSH. Player/web ports still
+    /// require a public CIDR or an exact match.
+    /// </summary>
+    public static bool ProbeIngressSourceSatisfied(string expectedSource, string actualCidr, bool adminSshUnpinned)
+    {
+        var actual = (actualCidr ?? string.Empty).Trim();
+        var expected = (expectedSource ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            return false;
+        }
+
+        if (adminSshUnpinned)
+        {
+            return true;
+        }
+
+        return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)
+               || actual is "0.0.0.0/0" or "::/0";
+    }
 }

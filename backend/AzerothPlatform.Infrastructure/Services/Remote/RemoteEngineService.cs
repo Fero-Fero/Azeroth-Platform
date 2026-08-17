@@ -9,6 +9,8 @@ using System.Threading.Channels;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data.Entities;
+using AzerothPlatform.Infrastructure.Services.Cloud;
+using AzerothPlatform.Infrastructure.Services.RemoteHost;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -23,7 +25,9 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// </summary>
 public sealed class RemoteEngineService : IRemoteEngineService
 {
-    private const int ConnectionTestConnectTimeoutSeconds = 10;
+    private const int ConnectionTestConnectTimeoutSeconds = 20;
+    private const int SshProbeRetryCount = 6;
+    private static readonly TimeSpan SshProbeRetryDelay = TimeSpan.FromSeconds(4);
 
     private readonly ILogger<RemoteEngineService> _logger;
     private readonly DockerOptions _dockerOptions;
@@ -87,8 +91,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         // The stored key is encrypted at rest; decrypt just-in-time to write the on-disk identity file.
         var privateKey = _secretProtector.Unprotect(stack.ExternalSshPrivateKey);
-        WriteSshConfig(contextName, stack.ExternalHost.Trim(), sshPort,
-            stack.ExternalSshUser.Trim(), privateKey);
+        await PrepareSshAsync(contextName, stack.ExternalHost.Trim(), sshPort,
+            stack.ExternalSshUser.Trim(), privateKey, cancellationToken);
         await EnsureDockerContextAsync(
             contextName,
             stack.ExternalSshUser.Trim(),
@@ -325,6 +329,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         string user,
         string privateKey,
         RemoteConnectionTestPhase phase = RemoteConnectionTestPhase.Full,
+        VpcConnectionTestOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
@@ -360,39 +365,63 @@ public sealed class RemoteEngineService : IRemoteEngineService
         // Use a throwaway context name so a pre-create test doesn't collide with a real stack context.
         var contextName = $"acore-ext-test-{Guid.NewGuid():N}";
         var prerequisites = new List<RemotePrerequisiteCheckDto>();
+        var bootstrapSecured = options?.BootstrapUserSecured ?? false;
+        RemoteHostOs? detectedOs = null;
         try
         {
-            WriteSshConfig(contextName, host, port, user, privateKey);
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
+            detectedOs = await DetectRemoteHostOsAsync(contextName, cancellationToken);
+            if (detectedOs == RemoteHostOs.Windows)
+            {
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Operating system",
+                    Passed = false,
+                    Message = "Windows Server VPC hosts are not supported. Use Ubuntu or Debian.",
+                });
+                return new RemoteConnectionTestResultDto
+                {
+                    Success = false,
+                    Message = "Windows Server VPC hosts are not supported. Use Ubuntu or Debian.",
+                    Prerequisites = prerequisites,
+                    BootstrapUserSecured = bootstrapSecured,
+                    DetectedOs = detectedOs,
+                };
+            }
+
+            if (detectedOs is not null)
+            {
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Operating system",
+                    Passed = true,
+                    Message = "Host is Linux.",
+                });
+            }
 
             if (checkSsh)
             {
-                var (sshExit, _, sshStderr) = await RunSshAsync(
+                var ssh = await RunVpcSshVerifyAsync(
                     contextName,
-                    ["echo", "ok"],
-                    cancellationToken,
-                    ConnectionTestConnectTimeoutSeconds);
-                if (sshExit != 0)
+                    host,
+                    port,
+                    user,
+                    privateKey,
+                    options,
+                    prerequisites,
+                    cancellationToken);
+                bootstrapSecured = ssh.BootstrapUserSecured;
+                if (!ssh.Passed)
                 {
-                    prerequisites.Add(new RemotePrerequisiteCheckDto
-                    {
-                        Name = "SSH",
-                        Passed = false,
-                        Message = FormatSshError(sshStderr, host, user, port)
-                    });
                     return new RemoteConnectionTestResultDto
                     {
                         Success = false,
-                        Message = GetSshSetupFailureSummary(sshStderr),
-                        Prerequisites = prerequisites
+                        Message = ssh.Message,
+                        Prerequisites = prerequisites,
+                        BootstrapUserSecured = bootstrapSecured,
+                        DetectedOs = detectedOs,
                     };
                 }
-
-                prerequisites.Add(new RemotePrerequisiteCheckDto
-                {
-                    Name = "SSH",
-                    Passed = true,
-                    Message = "Connected to the remote host."
-                });
 
                 if (phase == RemoteConnectionTestPhase.SshOnly)
                 {
@@ -400,7 +429,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     {
                         Success = true,
                         Message = "SSH connection successful.",
-                        Prerequisites = prerequisites
+                        Prerequisites = prerequisites,
+                        BootstrapUserSecured = bootstrapSecured,
+                        DetectedOs = detectedOs,
                     };
                 }
             }
@@ -411,9 +442,13 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 {
                     Success = prerequisites.All(p => p.Passed),
                     Message = prerequisites.All(p => p.Passed) ? "Connection checks passed." : "Connection checks failed.",
-                    Prerequisites = prerequisites
+                    Prerequisites = prerequisites,
+                    BootstrapUserSecured = bootstrapSecured,
+                    DetectedOs = detectedOs,
                 };
             }
+
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
 
             var (sudoPassed, sudoMessage) = await EnsurePasswordlessSudoAsync(
                 contextName,
@@ -449,7 +484,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
                     Message = "SSH works, but the remote Docker engine is not available. Verify waits for " +
                               "launch user-data and will install Docker if it is still missing. If this " +
                               "keeps failing, use Repair host setup.",
-                    Prerequisites = prerequisites
+                    Prerequisites = prerequisites,
+                    BootstrapUserSecured = bootstrapSecured,
+                    DetectedOs = detectedOs,
                 };
             }
 
@@ -485,7 +522,9 @@ public sealed class RemoteEngineService : IRemoteEngineService
                         ? "Remote host is ready for deployment."
                         : $"Remote host is ready (Docker {version}). Host firewall and OS baselines look good.")
                     : "SSH and Docker work, but host firewall or OS baselines could not be applied. Use Repair host setup.",
-                Prerequisites = prerequisites
+                Prerequisites = prerequisites,
+                BootstrapUserSecured = bootstrapSecured,
+                DetectedOs = detectedOs,
             };
         }
         catch (Exception ex)
@@ -494,13 +533,259 @@ public sealed class RemoteEngineService : IRemoteEngineService
             {
                 Success = false,
                 Message = ex.Message,
-                Prerequisites = prerequisites
+                Prerequisites = prerequisites,
+                BootstrapUserSecured = bootstrapSecured,
+                DetectedOs = detectedOs,
             };
         }
         finally
         {
             RemoveSshConfigBlock(contextName);
         }
+    }
+
+    private sealed record VpcSshVerifyResult(bool Passed, string Message, bool BootstrapUserSecured);
+
+    private static readonly string[] BootstrapLoginUsers =
+        ["ubuntu", "debian", "azureuser", "ec2-user", "admin", "centos", "fedora", "root"];
+
+    private async Task<VpcSshVerifyResult> RunVpcSshVerifyAsync(
+        string contextName,
+        string host,
+        int port,
+        string operatorUser,
+        string operatorPrivateKey,
+        VpcConnectionTestOptions? options,
+        List<RemotePrerequisiteCheckDto> prerequisites,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            SshKeyMaterialHelper.ExtractOpenSshPublicKey(operatorPrivateKey);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "azp-admin key",
+                Passed = true,
+                Message = "Operator private key is a valid PEM and matches an OpenSSH public key.",
+            });
+        }
+        catch (Exception ex)
+        {
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "azp-admin key",
+                Passed = false,
+                Message = "The azp-admin private key is not valid. Download it again and Verify certificate in Connect.",
+            });
+            return new VpcSshVerifyResult(false, ex.Message, options?.BootstrapUserSecured ?? false);
+        }
+
+        var alreadySecured = options?.BootstrapUserSecured ?? false;
+        var hasBootstrapPem = !string.IsNullOrWhiteSpace(options?.BootstrapPrivateKey);
+        var bootstrapKeyMissing = !alreadySecured
+            && !hasBootstrapPem
+            && !string.IsNullOrWhiteSpace(options?.BootstrapSshKeyId);
+        if (bootstrapKeyMissing)
+        {
+            // Vault key was deleted after a previous lock, but the wizard cache was not saved.
+            alreadySecured = true;
+        }
+
+        if (alreadySecured)
+        {
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Root SSH",
+                Passed = true,
+                Message = "Root internet SSH was already locked. That login is not retried.",
+            });
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Lock image-default SSH",
+                Passed = true,
+                Message = "Image-default users stay closed. Provider console access is unchanged.",
+            });
+        }
+        else if (hasBootstrapPem)
+        {
+            var bootstrapLogin = await TryBootstrapLoginAsync(
+                contextName,
+                host,
+                port,
+                options!.BootstrapPrivateKey!,
+                cancellationToken);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Root SSH",
+                Passed = bootstrapLogin.Ok,
+                Message = bootstrapLogin.Ok
+                    ? $"Connected as {bootstrapLogin.User} with the manager bootstrap key."
+                    : bootstrapLogin.Error,
+            });
+            if (!bootstrapLogin.Ok)
+            {
+                return new VpcSshVerifyResult(false, bootstrapLogin.Error, false);
+            }
+
+            var ensured = await EnsureOperatorUserAsync(
+                contextName,
+                operatorUser,
+                operatorPrivateKey,
+                cancellationToken);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Operator user",
+                Passed = ensured.Passed,
+                Message = ensured.Message,
+            });
+            if (!ensured.Passed)
+            {
+                return new VpcSshVerifyResult(false, ensured.Message, false);
+            }
+
+            await PrepareSshAsync(contextName, host, port, operatorUser, operatorPrivateKey, cancellationToken);
+            var preLock = await ProbeSshEchoAsync(
+                contextName,
+                cancellationToken,
+                ConnectionTestConnectTimeoutSeconds,
+                retry: true);
+            if (!SshProbe.IsEchoSuccess(preLock.ExitCode, preLock.StdOut, preLock.StdErr))
+            {
+                prerequisites.Add(new RemotePrerequisiteCheckDto
+                {
+                    Name = "Operator SSH (before lock)",
+                    Passed = false,
+                    Message = FormatSshError(
+                        preLock.ExitCode,
+                        preLock.StdOut,
+                        preLock.StdErr,
+                        host,
+                        operatorUser,
+                        port),
+                });
+                return new VpcSshVerifyResult(
+                    false,
+                    GetSshSetupFailureSummary(preLock.StdErr),
+                    false);
+            }
+
+            var harden = await FinalizeSshHardeningAsync(
+                host,
+                port,
+                operatorUser,
+                operatorPrivateKey,
+                options?.EnableAwsInstanceConnect ?? false,
+                cancellationToken);
+            prerequisites.Add(new RemotePrerequisiteCheckDto
+            {
+                Name = "Lock image-default SSH",
+                Passed = harden.Success,
+                Message = harden.Success
+                    ? "Root static keys removed. VPC provider console access is unchanged."
+                    : harden.Message,
+            });
+            if (!harden.Success)
+            {
+                return new VpcSshVerifyResult(false, harden.Message, false);
+            }
+
+            alreadySecured = true;
+        }
+
+        await PrepareSshAsync(contextName, host, port, operatorUser, operatorPrivateKey, cancellationToken);
+        var (sshExit, sshStdout, sshStderr) = await ProbeSshEchoAsync(
+            contextName,
+            cancellationToken,
+            ConnectionTestConnectTimeoutSeconds,
+            retry: true);
+        var sshOk = SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr);
+        prerequisites.Add(new RemotePrerequisiteCheckDto
+        {
+            Name = "SSH",
+            Passed = sshOk,
+            Message = sshOk
+                ? $"Connected as {operatorUser}."
+                : FormatSshError(sshExit, sshStdout, sshStderr, host, operatorUser, port),
+        });
+        if (!sshOk)
+        {
+            return new VpcSshVerifyResult(false, GetSshSetupFailureSummary(sshStderr), alreadySecured);
+        }
+
+        return new VpcSshVerifyResult(true, $"Connected as {operatorUser}.", alreadySecured);
+    }
+
+    private async Task<(bool Ok, string User, string Error)> TryBootstrapLoginAsync(
+        string contextName,
+        string host,
+        int port,
+        string privateKey,
+        CancellationToken cancellationToken)
+    {
+        var lastError = "Could not SSH as ubuntu or root with the bootstrap key.";
+        foreach (var candidate in BootstrapLoginUsers)
+        {
+            await PrepareSshAsync(contextName, host, port, candidate, privateKey, cancellationToken);
+            var probe = await ProbeSshEchoAsync(
+                contextName,
+                cancellationToken,
+                ConnectionTestConnectTimeoutSeconds,
+                retry: candidate is "ubuntu" or "root");
+            if (SshProbe.IsEchoSuccess(probe.ExitCode, probe.StdOut, probe.StdErr))
+            {
+                return (true, candidate, string.Empty);
+            }
+
+            lastError = FormatSshError(probe.ExitCode, probe.StdOut, probe.StdErr, host, candidate, port);
+        }
+
+        return (false, string.Empty, lastError);
+    }
+
+    private async Task<(bool Passed, string Message)> EnsureOperatorUserAsync(
+        string bootstrapContext,
+        string operatorUser,
+        string operatorPrivateKey,
+        CancellationToken cancellationToken)
+    {
+        string publicKey;
+        try
+        {
+            publicKey = SshKeyMaterialHelper.ExtractOpenSshPublicKey(operatorPrivateKey);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+
+        var pubB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(publicKey.Trim() + "\n"));
+        var sudoersB64 = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(VpcBootstrapUserData.BuildPasswordlessSudoers(operatorUser)));
+        var command = RemotePathSetup
+            + "set -e; "
+            + "OP=" + ShellQuote(operatorUser) + "; "
+            + "if ! id \"$OP\" >/dev/null 2>&1; then sudo -n useradd --create-home --shell /bin/bash \"$OP\"; fi; "
+            + "sudo -n usermod -aG sudo \"$OP\" 2>/dev/null || sudo -n usermod -aG wheel \"$OP\" 2>/dev/null || true; "
+            + "sudo -n mkdir -p /home/\"$OP\"/.ssh; "
+            + "sudo -n chmod 700 /home/\"$OP\"/.ssh; "
+            + "echo " + ShellQuote(pubB64) + " | sudo -n base64 -d | sudo -n tee /home/\"$OP\"/.ssh/authorized_keys >/dev/null; "
+            + "sudo -n chmod 600 /home/\"$OP\"/.ssh/authorized_keys; "
+            + "sudo -n chown -R \"$OP\":\"$OP\" /home/\"$OP\"/.ssh; "
+            + "echo " + ShellQuote(sudoersB64) + " | sudo -n base64 -d | sudo -n tee /etc/sudoers.d/99-azeroth-platform >/dev/null; "
+            + "sudo -n chmod 440 /etc/sudoers.d/99-azeroth-platform; "
+            + "sudo -n usermod -aG docker \"$OP\" 2>/dev/null || true";
+
+        var (exit, stdout, stderr) = await RunSshRemoteShellAsync(
+            bootstrapContext,
+            command,
+            cancellationToken,
+            allowTtyRetry: true);
+        if (exit != 0)
+        {
+            return (false, FormatRemoteShellError(stderr, stdout));
+        }
+
+        return (true, $"Operator user {operatorUser} exists with the downloaded public key and passwordless sudo.");
     }
 
     public async Task<RemoteBootstrapResultDto> RunVpcBootstrapScriptAsync(
@@ -540,14 +825,14 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         try
         {
-            WriteSshConfig(contextName, host, port, user, privateKey);
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
 
-            var (sshExit, _, sshStderr) = await RunSshAsync(
+            var (sshExit, sshStdout, sshStderr) = await ProbeSshEchoAsync(
                 contextName,
-                ["echo", "ok"],
                 cancellationToken,
-                connectTimeoutSeconds: 60);
-            if (sshExit != 0)
+                connectTimeoutSeconds: 60,
+                retry: true);
+            if (!SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr))
             {
                 return new RemoteBootstrapResultDto
                 {
@@ -701,7 +986,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
         string user,
         string privateKey,
         bool enableAwsInstanceConnect,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        RemoteHostOs remoteOs = RemoteHostOs.Linux)
     {
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
         {
@@ -742,18 +1028,18 @@ public sealed class RemoteEngineService : IRemoteEngineService
         var steps = new List<RemotePrerequisiteCheckDto>();
         try
         {
-            WriteSshConfig(contextName, host, port, user, privateKey);
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
 
-            var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            var (sshExit, sshStdout, sshStderr) = await ProbeSshEchoAsync(contextName, cancellationToken, retry: true);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = "Verify SSH as operator",
-                Passed = sshExit == 0,
-                Message = sshExit == 0
+                Passed = SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr),
+                Message = SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr)
                     ? $"Connected as {user}."
-                    : FormatSshError(sshStderr, host, user, port)
+                    : FormatSshError(sshExit, sshStdout, sshStderr, host, user, port)
             });
-            if (sshExit != 0)
+            if (!SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr))
             {
                 return FailSetup(steps, GetSshSetupFailureSummary(sshStderr));
             }
@@ -770,29 +1056,10 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return FailSetup(steps, "Hardening stopped — could not use passwordless sudo as the operator user.");
             }
 
-            if (enableAwsInstanceConnect)
-            {
-                var (pkgExit, pkgOut, pkgErr) = await RunSshRemoteShellAsync(
-                    contextName,
-                    SudoAptGet("install -y ec2-instance-connect"),
-                    cancellationToken,
-                    connectTimeoutSeconds: 180,
-                    allowTtyRetry: true);
-                steps.Add(new RemotePrerequisiteCheckDto
-                {
-                    Name = "EC2 Instance Connect package",
-                    Passed = pkgExit == 0,
-                    Message = pkgExit == 0
-                        ? "ec2-instance-connect is installed for console break-glass."
-                        : FormatRemoteShellError(pkgErr, pkgOut),
-                });
-                if (pkgExit != 0)
-                {
-                    return FailSetup(steps, "Hardening stopped — could not install ec2-instance-connect.");
-                }
-            }
+            var writeInstanceConnect = enableAwsInstanceConnect
+                && await TryEnsureConsoleSshHelperAsync(contextName, cancellationToken);
 
-            var dropIn = VpcBootstrapUserData.BuildSshHardeningDropIn(user, enableAwsInstanceConnect);
+            var dropIn = VpcBootstrapUserData.BuildSshHardeningDropIn(user, writeInstanceConnect);
             var dropInB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(dropIn));
             var writeSshd = RemotePathSetup
                 + "set -e; "
@@ -835,7 +1102,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Name = "Remove static keys from image-default users",
                 Passed = clearExit == 0,
                 Message = clearExit == 0
-                    ? "ubuntu/root authorized_keys cleared. EC2 Instance Connect is unchanged."
+                    ? "Root authorized_keys cleared. VPC provider console access is unchanged."
                     : FormatRemoteShellError(clearErr, clearOut),
             });
             if (clearExit != 0)
@@ -864,16 +1131,17 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return FailSetup(steps, "Hardening stopped — could not reload sshd.");
             }
 
-            var (verifyExit, _, verifyErr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            var (verifyExit, verifyStdout, verifyErr) = await ProbeSshEchoAsync(contextName, cancellationToken, retry: true);
+            var verifyOk = SshProbe.IsEchoSuccess(verifyExit, verifyStdout, verifyErr);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = "Re-test operator SSH",
-                Passed = verifyExit == 0,
-                Message = verifyExit == 0
+                Passed = verifyOk,
+                Message = verifyOk
                     ? $"Still connected as {user} after hardening."
-                    : FormatSshError(verifyErr, host, user, port),
+                    : FormatSshError(verifyExit, verifyStdout, verifyErr, host, user, port),
             });
-            if (verifyExit != 0)
+            if (!verifyOk)
             {
                 return FailSetup(steps, "Hardening applied but operator SSH failed afterwards. Use the provider console to recover.");
             }
@@ -886,9 +1154,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return new RemoteSetupResultDto
             {
                 Success = true,
-                Message = enableAwsInstanceConnect
-                    ? $"SSH hardening complete. Daily access is {user}. Break-glass: AWS console → EC2 Instance Connect as ubuntu."
-                    : $"SSH hardening complete. Daily access is {user}. Break-glass is the provider console only.",
+                Message = $"SSH hardening complete. Daily access is {user}. Break-glass is the VPC provider console.",
                 Steps = steps,
             };
         }
@@ -917,15 +1183,6 @@ public sealed class RemoteEngineService : IRemoteEngineService
         CancellationToken cancellationToken = default)
     {
         options ??= new RemoteSetupOptionsDto();
-        if (options.RemoteOs == RemoteHostOs.Windows)
-        {
-            return new RemoteSetupResultDto
-            {
-                Success = false,
-                Message = "Automated setup for Windows remote hosts is not supported yet. Use Linux (Ubuntu/Debian)."
-            };
-        }
-
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user))
         {
             return new RemoteSetupResultDto { Success = false, Message = "Host and SSH user are required." };
@@ -956,18 +1213,19 @@ public sealed class RemoteEngineService : IRemoteEngineService
         var steps = new List<RemotePrerequisiteCheckDto>();
         try
         {
-            WriteSshConfig(contextName, host, port, user, privateKey);
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
 
-            var (sshExit, _, sshStderr) = await RunSshAsync(contextName, ["echo", "ok"], cancellationToken);
+            var (sshExit, sshStdout, sshStderr) = await ProbeSshEchoAsync(contextName, cancellationToken, retry: true);
+            var sshOk = SshProbe.IsEchoSuccess(sshExit, sshStdout, sshStderr);
             steps.Add(new RemotePrerequisiteCheckDto
             {
                 Name = "Verify SSH access",
-                Passed = sshExit == 0,
-                Message = sshExit == 0
+                Passed = sshOk,
+                Message = sshOk
                     ? "Connected to the remote host."
-                    : FormatSshError(sshStderr, host, user, port)
+                    : FormatSshError(sshExit, sshStdout, sshStderr, host, user, port)
             });
-            if (sshExit != 0)
+            if (!sshOk)
             {
                 return FailSetup(steps, GetSshSetupFailureSummary(sshStderr));
             }
@@ -1065,11 +1323,6 @@ public sealed class RemoteEngineService : IRemoteEngineService
         CancellationToken cancellationToken = default)
     {
         options ??= new RemoteSetupOptionsDto();
-        if (options.RemoteOs == RemoteHostOs.Windows)
-        {
-            return new RemoteSetupResultDto { Success = false, Message = "Windows host firewall sync is not supported yet." };
-        }
-
         host = host.Trim();
         user = user.Trim();
         var port = sshPort <= 0 ? 22 : sshPort;
@@ -1078,7 +1331,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         var steps = new List<RemotePrerequisiteCheckDto>();
         try
         {
-            WriteSshConfig(contextName, host, port, user, privateKey);
+            await PrepareSshAsync(contextName, host, port, user, privateKey, cancellationToken);
             if (!options.EnableHostFirewall)
             {
                 return new RemoteSetupResultDto
@@ -2221,6 +2474,49 @@ public sealed class RemoteEngineService : IRemoteEngineService
     private static string SudoAptGet(string arguments)
         => $"env DEBIAN_FRONTEND=noninteractive {SudoNonInteractive($"apt-get {arguments}")}";
 
+    /// <summary>
+    /// Optional console SSH helper used on some cloud images. Missing package must not fail Verify VPC;
+    /// break-glass remains the VPC provider console.
+    /// </summary>
+    private async Task<bool> TryEnsureConsoleSshHelperAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        const string helperPath = "/usr/share/ec2-instance-connect/eic_run_authorized_keys";
+        var probe = RemotePathSetup + $"if test -x {helperPath}; then echo present; else echo missing; fi";
+
+        async Task<bool> HelperPresentAsync()
+        {
+            var (_, stdout, _) = await RunSshRemoteShellAsync(
+                contextName,
+                probe,
+                cancellationToken,
+                connectTimeoutSeconds: 30,
+                allowTtyRetry: false);
+            return stdout.Contains("present", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (await HelperPresentAsync())
+        {
+            return true;
+        }
+
+        await RunSshRemoteShellAsync(
+            contextName,
+            SudoAptGet("update -qq"),
+            cancellationToken,
+            connectTimeoutSeconds: 180,
+            allowTtyRetry: true);
+        await RunSshRemoteShellAsync(
+            contextName,
+            SudoAptGet("install -y ec2-instance-connect"),
+            cancellationToken,
+            connectTimeoutSeconds: 180,
+            allowTtyRetry: true);
+
+        return await HelperPresentAsync();
+    }
+
     private static string BuildFullPlatformSudoersContent(string user)
         => VpcBootstrapUserData.BuildPasswordlessSudoers(user);
 
@@ -2993,6 +3289,61 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
 
         return lastResult;
+    }
+
+    private async Task<RemoteHostOs?> DetectRemoteHostOsAsync(
+        string contextName,
+        CancellationToken cancellationToken)
+    {
+        var uname = await RunSshAsync(
+            contextName,
+            ["uname", "-s"],
+            cancellationToken,
+            connectTimeoutSeconds: 12,
+            connectionAttempts: 1,
+            serverAliveInterval: 5,
+            serverAliveCountMax: 2);
+        var fromUname = RemoteHostOsProbe.Interpret(uname.StdOut, windowsOsEnv: null);
+        if (fromUname is not null)
+        {
+            return fromUname;
+        }
+
+        var fallback = await RunSshPowerShellAsync(
+            contextName,
+            "Write-Output $env:OS",
+            cancellationToken,
+            connectTimeoutSeconds: 12);
+        if (fallback.ExitCode != 0)
+        {
+            fallback = await RunSshAsync(
+                contextName,
+                ["cmd.exe", "/c", "echo %OS%"],
+                cancellationToken,
+                connectTimeoutSeconds: 12,
+                connectionAttempts: 1,
+                serverAliveInterval: 5,
+                serverAliveCountMax: 2);
+        }
+
+        return RemoteHostOsProbe.Interpret(uname.StdOut, fallback.StdOut);
+    }
+
+    private Task<(int ExitCode, string StdOut, string StdErr)> RunSshPowerShellAsync(
+        string contextName,
+        string script,
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds = 90)
+    {
+        var wrapped =
+            "$ProgressPreference='SilentlyContinue'; $WarningPreference='SilentlyContinue'; "
+            + (script ?? string.Empty);
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(wrapped));
+        return RunSshAsync(
+            contextName,
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            cancellationToken,
+            connectTimeoutSeconds);
     }
 
     private async Task<(int ExitCode, string StdOut, string StdErr)> RunSshRemoteShellOnceAsync(
@@ -4243,6 +4594,10 @@ public sealed class RemoteEngineService : IRemoteEngineService
         var keyContent = NormalizePrivateKey(privateKey);
         File.WriteAllText(keyPath, keyContent);
         TrySetUnixMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (!File.Exists(knownHostsPath))
+        {
+            File.WriteAllText(knownHostsPath, string.Empty);
+        }
 
         // Match both the internal alias and the real hostname so `ssh alias …` (our probe) and
         // `ssh://user@hostname` (Docker context) resolve to the same key/user settings.
@@ -4252,10 +4607,15 @@ public sealed class RemoteEngineService : IRemoteEngineService
             .Append($"    HostName {host}\n")
             .Append($"    User {user}\n")
             .Append($"    Port {port}\n")
-            .Append($"    IdentityFile {keyPath}\n")
+            .Append($"    IdentityFile {SshProbe.FormatConfigPath(keyPath)}\n")
             .Append("    IdentitiesOnly yes\n")
+            .Append("    PreferredAuthentications publickey\n")
+            .Append("    PubkeyAuthentication yes\n")
+            .Append("    PubkeyAcceptedAlgorithms +ssh-rsa,rsa-sha2-256,rsa-sha2-512\n")
+            .Append("    HostkeyAlgorithms +ssh-rsa,rsa-sha2-256,rsa-sha2-512,ssh-ed25519,ecdsa-sha2-nistp256\n")
+            .Append("    IPQoS none\n")
             .Append("    StrictHostKeyChecking accept-new\n")
-            .Append($"    UserKnownHostsFile {knownHostsPath}\n")
+            .Append($"    UserKnownHostsFile {SshProbe.FormatConfigPath(knownHostsPath)}\n")
             .Append(EndMarker(contextName)).Append('\n')
             .ToString();
 
@@ -4281,7 +4641,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             File.WriteAllText(configPath, StripBlock(File.ReadAllText(configPath), contextName));
         }
 
-        foreach (var suffix in new[] { ".key", ".known_hosts" })
+        foreach (var suffix in new[] { ".key", ".key.pub", ".known_hosts" })
         {
             var path = Path.Combine(sshDir, $"{contextName}{suffix}");
             try
@@ -4349,7 +4709,122 @@ public sealed class RemoteEngineService : IRemoteEngineService
             return string.Empty;
         }
 
-        return normalized + "\n";
+        // Win32 OpenSSH is unreliable with PKCS#8 "BEGIN PRIVATE KEY" identity files. RSA keys
+        // are rewritten as PKCS#1 so ssh.exe will actually offer them.
+        try
+        {
+            using var rsa = System.Security.Cryptography.RSA.Create();
+            rsa.ImportFromPem(normalized);
+            return rsa.ExportRSAPrivateKeyPem() + "\n";
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            return normalized + "\n";
+        }
+    }
+
+    private async Task PrepareSshAsync(
+        string contextName,
+        string host,
+        int port,
+        string user,
+        string privateKey,
+        CancellationToken cancellationToken)
+    {
+        WriteSshConfig(contextName, host, port, user, privateKey);
+        var keyPath = Path.Combine(GetSshDir(), $"{contextName}.key");
+        await NormalizeSshIdentityFileAsync(keyPath, cancellationToken);
+        await SeedKnownHostsAsync(host, port, Path.Combine(GetSshDir(), $"{contextName}.known_hosts"), cancellationToken);
+    }
+
+    /// <summary>
+    /// OpenSSH reports <c>identity file … type -1</c> when it cannot parse the private key (PKCS#8,
+    /// permissions, or a non-OpenSSH PEM). Convert with ssh-keygen and pin mode 600.
+    /// </summary>
+    private async Task NormalizeSshIdentityFileAsync(string keyPath, CancellationToken cancellationToken)
+    {
+        TrySetUnixMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        int readExit;
+        string publicKey;
+        string readErr;
+        try
+        {
+            (readExit, publicKey, readErr) = await RunProcessAsync(
+                "ssh-keygen",
+                ["-y", "-f", keyPath],
+                cancellationToken,
+                throwOnError: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "ssh-keygen is not available to normalize {Path}", keyPath);
+            return;
+        }
+        if (readExit != 0)
+        {
+            throw new InvalidOperationException(
+                "OpenSSH cannot read the VPC private key (identity type -1). " +
+                "The key file is not a usable PEM/OpenSSH identity. " +
+                (string.IsNullOrWhiteSpace(readErr) ? "Re-launch so a new key is generated." : readErr.Trim()));
+        }
+
+        var pubPath = keyPath + ".pub";
+        File.WriteAllText(pubPath, publicKey.Trim() + "\n");
+        TrySetUnixMode(pubPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        var (convertExit, _, convertErr) = await RunProcessAsync(
+            "ssh-keygen",
+            ["-p", "-P", "", "-N", "", "-f", keyPath],
+            cancellationToken,
+            throwOnError: false);
+        if (convertExit != 0)
+        {
+            _logger.LogDebug("ssh-keygen could not rewrite {Path} to OpenSSH format: {Error}", keyPath, convertErr.Trim());
+        }
+
+        TrySetUnixMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
+    private async Task SeedKnownHostsAsync(
+        string host,
+        int port,
+        string knownHostsPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var args = new List<string>
+            {
+                "-4",
+                "-T", "5",
+                "-p", port.ToString(),
+                host,
+            };
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            var (exit, stdout, stderr) = await RunProcessAsync("ssh-keyscan", args, timeout.Token, throwOnError: false);
+            if (exit != 0 || string.IsNullOrWhiteSpace(stdout) || !stdout.Contains(" ssh-", StringComparison.Ordinal))
+            {
+                _logger.LogDebug(
+                    "ssh-keyscan did not seed known_hosts for {Host}:{Port} (exit {Exit}): {Error}",
+                    host,
+                    port,
+                    exit,
+                    stderr.Trim());
+                return;
+            }
+
+            File.WriteAllText(knownHostsPath, stdout);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug("ssh-keyscan timed out for {Host}:{Port}", host, port);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "ssh-keyscan is unavailable; SSH will use accept-new for {Host}", host);
+        }
     }
 
     private async Task EnsureDockerContextAsync(
@@ -4406,23 +4881,117 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return $"ssh://{user}@{host}{portSuffix}";
     }
 
+    private async Task<(int ExitCode, string StdOut, string StdErr)> ProbeSshEchoAsync(
+        string contextName,
+        CancellationToken cancellationToken,
+        int connectTimeoutSeconds = 30,
+        bool retry = false)
+    {
+        var attempts = retry ? SshProbeRetryCount : 1;
+        var last = (ExitCode: 1, StdOut: string.Empty, StdErr: string.Empty);
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            last = await RunSshAsync(
+                contextName,
+                ["echo", "ok"],
+                cancellationToken,
+                connectTimeoutSeconds,
+                connectionAttempts: 1,
+                serverAliveInterval: 5,
+                serverAliveCountMax: 2);
+            if (SshProbe.IsEchoSuccess(last.ExitCode, last.StdOut, last.StdErr))
+            {
+                return last;
+            }
+
+            _logger.LogInformation(
+                "SSH probe attempt {Attempt}/{Attempts} failed with exit {Exit}. stderr={Stderr}",
+                attempt,
+                attempts,
+                last.ExitCode,
+                last.StdErr.Trim());
+
+            if (attempt < attempts && SshProbe.ShouldRetry(last.ExitCode, last.StdOut, last.StdErr))
+            {
+                await Task.Delay(SshProbeRetryDelay, cancellationToken);
+                continue;
+            }
+
+            break;
+        }
+
+        if (!SshProbe.IsEchoSuccess(last.ExitCode, last.StdOut, last.StdErr))
+        {
+            var verbose = await RunSshAsync(
+                contextName,
+                ["echo", "ok"],
+                cancellationToken,
+                connectTimeoutSeconds,
+                connectionAttempts: 1,
+                serverAliveInterval: 5,
+                serverAliveCountMax: 2,
+                verbose: true);
+            if (SshProbe.IsEchoSuccess(verbose.ExitCode, verbose.StdOut, verbose.StdErr))
+            {
+                return verbose;
+            }
+
+            last = (
+                verbose.ExitCode,
+                verbose.StdOut,
+                MergeSshDiagnostics(last.StdErr, verbose.StdErr));
+        }
+
+        return last;
+    }
+
+    private static string MergeSshDiagnostics(string probeStderr, string verboseStderr)
+    {
+        var useful = SshProbe.ExtractUsefulVerbose(verboseStderr);
+        if (!string.IsNullOrWhiteSpace(useful))
+        {
+            return useful;
+        }
+
+        var stripped = SshProbe.StripHostKeyWarnings(verboseStderr);
+        if (string.IsNullOrWhiteSpace(stripped))
+        {
+            stripped = SshProbe.StripHostKeyWarnings(probeStderr);
+        }
+
+        return stripped;
+    }
+
     private Task<(int ExitCode, string StdOut, string StdErr)> RunSshAsync(
         string contextName,
         IReadOnlyList<string> remoteCommand,
         CancellationToken cancellationToken,
         int connectTimeoutSeconds = 30,
-        bool forceTty = false)
+        bool forceTty = false,
+        int connectionAttempts = 3,
+        int serverAliveInterval = 15,
+        int serverAliveCountMax = 10,
+        bool verbose = false)
     {
         var sshConfigPath = Path.Combine(GetSshDir(), "config");
         var args = new List<string>
         {
             "-F", sshConfigPath,
             "-o", "BatchMode=yes",
+            "-o", "PreferredAuthentications=publickey",
+            "-o", "PubkeyAuthentication=yes",
+            "-o", "IPQoS=none",
+            "-o", "NumberOfPasswordPrompts=0",
             "-o", $"ConnectTimeout={connectTimeoutSeconds}",
-            "-o", "ConnectionAttempts=3",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=10",
+            "-o", $"ConnectionAttempts={Math.Clamp(connectionAttempts, 1, 6)}",
+            "-o", $"ServerAliveInterval={Math.Clamp(serverAliveInterval, 1, 30)}",
+            "-o", $"ServerAliveCountMax={Math.Clamp(serverAliveCountMax, 1, 10)}",
         };
+        if (verbose)
+        {
+            args.Add("-v");
+        }
+
         if (forceTty)
         {
             args.Add("-tt");
@@ -4433,17 +5002,17 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return RunProcessAsync("ssh", args, cancellationToken, throwOnError: false);
     }
 
-    private static string FormatSshError(string stderr, string host, string user, int port)
+    private static string FormatSshError(int exitCode, string stdout, string stderr, string host, string user, int port)
     {
-        var message = string.IsNullOrWhiteSpace(stderr)
-            ? $"Could not connect to {user}@{host}:{port} over SSH."
-            : stderr.Trim();
+        var message = SshProbe.DescribeFailure(exitCode, stdout, stderr, host, user, port);
 
-        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
+        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("invalid format", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("no such identity", StringComparison.OrdinalIgnoreCase))
         {
             message += " Verify the private key matches the remote authorized_keys entry.";
         }
-        else if (IsSshConnectivityFailure(message))
+        else if (SshProbe.IsConnectivityFailure(message))
         {
             message += " This is usually a network or firewall issue, not bad credentials — confirm the " +
                        "instance is running, the host/IP is correct (EC2 public IPs change after stop/start " +
@@ -4454,40 +5023,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
         return message;
     }
 
-    private static bool IsSshConnectivityFailure(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return false;
-        }
-
-        return message.Contains("timed out", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("connection refused", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("no route to host", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("network is unreachable", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("could not resolve", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("banner exchange", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("connection reset", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("host is down", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string GetSshSetupFailureSummary(string stderr)
-    {
-        var message = stderr.Trim();
-        if (IsSshConnectivityFailure(message))
-        {
-            return "Cannot reach the VPC over SSH. Check that the instance is running, the host/IP is " +
-                   "correct (EC2 public IPs change after stop/start unless you use an Elastic IP), and SSH " +
-                   "port 22 is open in your cloud security group from this manager's IP.";
-        }
-
-        if (message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
-        {
-            return "SSH authentication failed. Verify the SSH user and private key on the VPC overview tab.";
-        }
-
-        return "SSH connection failed. Update the VPC connection on the VPC overview tab.";
-    }
+        => SshProbe.SetupFailureSummary(stderr);
 
     /// <summary>
     /// Rewrites Docker CLI's misleading <c>http://docker.example.com</c> placeholder (used for SSH
@@ -4893,7 +5430,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         var linkedToken = durationCts.Token;
         var contextName = $"acore-term-{Guid.NewGuid():N}";
-        WriteSshConfig(contextName, host, port, user, privateKey);
+        await PrepareSshAsync(contextName, host, port, user, privateKey, linkedToken);
 
         Process? process = null;
         try

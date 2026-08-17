@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Loader2, Wand2, XCircle } from 'lucide-react'
 import { CiBuildStatusBadge } from '@/components/CiBuildStatusBadge'
-import ModuleSetupStatusRows from '@/components/stacks/ModuleSetupStatusRows'
 import StackStatusItemRow from '@/components/stacks/StackStatusItemRow'
+import StackSetupOverview from '@/setup/StackSetupOverview'
+import { useHasActiveSetupSteps } from '@/setup/hasActiveSetupSteps'
 import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import { useArmoryJobContext } from '@/contexts/ArmoryJobContext'
 import { useLauncherBuildStatus } from '@/hooks/useLauncher'
@@ -12,7 +13,6 @@ import { stackKeys } from '@/hooks/useStacks'
 import { apiErrorMessage, isSshConnectivityError, isStaleVpcProbeCache, isVpcProbeSlow } from '@/lib/utils'
 import { stackApi } from '@/services/api'
 import type { DockerDiskUsageDto } from '@/types/docker.types'
-import { INDIVIDUAL_PROGRESSION_MODULE_ID } from '@/types/individual-progression.types'
 import {
   StackStatus,
   type RemotePrerequisiteCheckDto,
@@ -28,6 +28,7 @@ type OverviewTabId =
   | 'client'
   | 'armory'
   | 'addons'
+  | 'patches'
 
 const formatSha = (sha?: string | null): string => {
   if (!sha) return 'Not yet built'
@@ -55,8 +56,6 @@ interface StackOverviewStatusPanelProps {
   /** True while a background refetch is probing Docker (VPC SSH for external stacks). */
   isLiveStatusRefreshing?: boolean
   diskUsage?: DockerDiskUsageDto | null
-  clientDataMissing: boolean
-  armoryDataMissing: boolean
   armoryRebuildPending?: boolean
   checkUpdatesPending: boolean
   onSelectTab: (tab: OverviewTabId) => void
@@ -75,10 +74,6 @@ function panelAction(label: string, onClick: () => void, disabled = false) {
       {label}
     </button>
   )
-}
-
-function isStackServiceRunning(stack: StackDetailsDto, serviceName: string): boolean {
-  return stack.services.some((svc) => svc.service === serviceName && svc.state === 'running')
 }
 
 function RemoteSetupStepsList({ steps }: { steps: RemotePrerequisiteCheckDto[] }) {
@@ -109,8 +104,6 @@ export default function StackOverviewStatusPanel({
   isExternalStack,
   isLiveStatusRefreshing = false,
   diskUsage,
-  clientDataMissing,
-  armoryDataMissing,
   armoryRebuildPending,
   checkUpdatesPending,
   onSelectTab,
@@ -181,20 +174,7 @@ export default function StackOverviewStatusPanel({
   const dockerDaemonDown =
     dockerNotRunning && !vpcSshUnreachable && !isLiveStatusRefreshing
 
-  const clientContainerRunning = isStackServiceRunning(stack, 'client')
-  const armoryContainerRunning = stack.armoryRunning || isStackServiceRunning(stack, 'frontend-armory')
-  const showClientUploadPrompt = clientDataMissing && clientContainerRunning
-  const showArmoryUploadPrompt = armoryDataMissing && armoryContainerRunning
-
-  const ahBotGuids = stack.configuration.advanced?.serviceEnvVars?.worldserver?.AC_AUCTION_HOUSE_BOT_GUIDS
-  const hasAhBotNeedsSetup =
-    stack.configuration.moduleIds?.includes('mod-ah-bot') && !ahBotGuids
-  const soapNeedsSetup = !stack.isAdminAccountInitialized
-  const hasModuleSetup =
-    soapNeedsSetup ||
-    hasAhBotNeedsSetup ||
-    stack.configuration.moduleIds?.includes('mod-playerbot-dungeon-sim') ||
-    stack.configuration.moduleIds?.includes(INDIVIDUAL_PROGRESSION_MODULE_ID)
+  const hasSetupSteps = useHasActiveSetupSteps(stack)
 
   if (
     !diskUsage?.isWarning &&
@@ -203,11 +183,9 @@ export default function StackOverviewStatusPanel({
     !launcherBuilding &&
     !launcherNotBuilt &&
     !emailNeedsSetup &&
-    !showClientUploadPrompt &&
-    !showArmoryUploadPrompt &&
     !hasUpdates &&
     !showArmoryRebuild &&
-    !hasModuleSetup
+    !hasSetupSteps
   ) {
     return null
   }
@@ -437,7 +415,7 @@ export default function StackOverviewStatusPanel({
           />
         )}
 
-        <ModuleSetupStatusRows stack={stack} onSelectTab={onSelectTab} />
+        <StackSetupOverview stack={stack} onSelectTab={onSelectTab} />
 
         {emailNeedsSetup && (
           <StackStatusItemRow
@@ -452,38 +430,6 @@ export default function StackOverviewStatusPanel({
               </p>
             }
             action={panelAction('Configure email', () => onSelectTab('armory-email'))}
-          />
-        )}
-
-        {showClientUploadPrompt && (
-          <StackStatusItemRow
-            id="client-base"
-            level="warning"
-            title="Base client not uploaded"
-            summary="The client container has no base WoW client to serve to the launcher."
-            details={
-              <p>
-                Upload a base client archive on the Client tab. Each stack keeps its own client files, so this
-                must be done per stack.
-              </p>
-            }
-            action={panelAction('Upload client', () => onSelectTab('client'))}
-          />
-        )}
-
-        {showArmoryUploadPrompt && (
-          <StackStatusItemRow
-            id="armory-data"
-            level="warning"
-            title="Armory data not uploaded"
-            summary="The 3D model-viewer dataset is missing, so the armory viewer is disabled."
-            details={
-              <p>
-                Upload the armory static assets on the Armory tab so character previews and the model viewer
-                work correctly.
-              </p>
-            }
-            action={panelAction('Upload armory data', () => onSelectTab('armory'))}
           />
         )}
 

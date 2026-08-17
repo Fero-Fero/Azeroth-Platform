@@ -48,4 +48,16 @@ public class DeploymentConfigDto
 
     /// <summary>Label for a new vault entry when <see cref="SaveSshKeyToVault"/> is true.</summary>
     public string SaveSshKeyLabel { get; set; } = string.Empty;
+
+    /// <summary>Vault id for the manager-only ubuntu/root bootstrap key. Cleared after that user is locked.</summary>
+    public string BootstrapSshKeyId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True after Verify VPC SSHed as ubuntu/root and locked image-default users.
+    /// Resume skips the bootstrap login because that key is gone.
+    /// </summary>
+    public bool BootstrapUserSecured { get; set; }
+
+    /// <summary>Remote host OS. External stacks default to Linux.</summary>
+    public RemoteHostOs RemoteOs { get; set; } = RemoteHostOs.Linux;
 }

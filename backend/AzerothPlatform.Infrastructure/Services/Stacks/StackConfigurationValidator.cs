@@ -144,6 +144,14 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
             return;
         }
 
+        if (configuration.Deployment.RemoteOs == RemoteHostOs.Windows)
+        {
+            AddError(
+                result,
+                "deployment.remoteOs",
+                "Windows Server VPC hosts are not supported. Use Ubuntu or Debian.");
+        }
+
         if (VpcBootstrapUserData.IsForbiddenSshUser(sshUser))
         {
             AddError(

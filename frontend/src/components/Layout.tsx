@@ -1,11 +1,13 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useAssertServerTypeRegistry } from '@/server-types'
 
 const navLinkClass =
   'whitespace-nowrap text-sm text-gray-600 hover:text-gray-900 transition'
 
 export default function Layout() {
+  useAssertServerTypeRegistry()
   const { logout } = useAuth()
   const navigate = useNavigate()
 

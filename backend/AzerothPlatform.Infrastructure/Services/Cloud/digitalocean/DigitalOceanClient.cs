@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzerothPlatform.Core.Contracts;
 
 namespace AzerothPlatform.Infrastructure.Services.Cloud;
 
@@ -451,7 +452,8 @@ public sealed class DigitalOceanClient
     internal static bool InboundRuleCovers(
         DigitalOceanFirewallInboundRule rule,
         int port,
-        string expectedCidr)
+        string expectedCidr,
+        bool adminSshUnpinned = false)
     {
         if (!string.Equals(rule.Protocol, "tcp", StringComparison.OrdinalIgnoreCase))
         {
@@ -463,13 +465,8 @@ public sealed class DigitalOceanClient
             return false;
         }
 
-        var expected = (expectedCidr ?? string.Empty).Trim();
         return rule.SourceAddresses.Any(address =>
-        {
-            var actual = (address ?? string.Empty).Trim();
-            return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)
-                   || actual is "0.0.0.0/0" or "::/0";
-        });
+            VpcSecurityCatalog.ProbeIngressSourceSatisfied(expectedCidr, address, adminSshUnpinned));
     }
 
     internal static bool InboundRuleOpensPortPublicly(DigitalOceanFirewallInboundRule rule, int port)

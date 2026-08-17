@@ -1,7 +1,7 @@
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Validates stack patch folders against the on-disk layout of Azeroth-Platform-Progression.

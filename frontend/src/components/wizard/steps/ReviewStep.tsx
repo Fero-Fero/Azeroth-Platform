@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import type { WizardForm } from '@/components/wizard/types'
 import { useServerTypes } from '@/hooks/useModules'
+import { ServerTypeReviewNotes } from '@/server-types'
 import { ServerType, DeploymentTarget, type PortFieldPath, type SuggestedPorts } from '@/types/stack.types'
 
 interface ReviewStepProps {
@@ -48,8 +49,8 @@ export function ReviewStep({
 }: ReviewStepProps) {
   const values = form.getValues()
   const { data: serverTypes } = useServerTypes()
-  const serverTypeLabel =
-    serverTypes?.find((type) => type.id === values.serverType)?.displayName ?? values.serverType
+  const selectedServerType = serverTypes?.find((type) => type.id === values.serverType)
+  const serverTypeLabel = selectedServerType?.displayName ?? values.serverType
   // Flatten per-service env vars into [service, key, value] rows for the review summary.
   const serviceEnvRows = Object.entries(values.advanced.serviceEnvVars ?? {}).flatMap(
     ([service, bucket]) =>
@@ -149,7 +150,7 @@ export function ReviewStep({
             </span>
           }
         />
-        {values.serverType === ServerType.Custom && (
+        {selectedServerType?.allowCustomRepository && (
           <ReviewRow
             label="Custom Fork"
             value={
@@ -161,6 +162,12 @@ export function ReviewStep({
           />
         )}
       </Section>
+
+      <ServerTypeReviewNotes
+        serverType={values.serverType}
+        selectedModuleIds={values.moduleIds}
+        browseTab="curated"
+      />
 
       <Section title="Modules">
         <ReviewRow

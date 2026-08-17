@@ -1,9 +1,8 @@
 namespace AzerothPlatform.Core.Contracts;
 
 /// <summary>
-/// Type of AzerothCore server variant. Each value maps to a core repository/branch and a set of
-/// module-visibility rules defined in the server-type catalog configuration
-/// (see <c>ServerTypeCatalog</c> in appsettings). Add a new value here and a matching catalog entry
+/// Type of AzerothCore server variant. Each value maps to a core repository/branch and module
+/// visibility in <c>Configuration/ServerTypes/</c>. Add a new enum value and a matching catalog file
 /// to introduce a new variant.
 /// </summary>
 public enum ServerType

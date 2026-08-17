@@ -1,8 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Play, Square, RefreshCw, Plus, Loader2, Trash2, Hammer, AlertCircle, Download, Database, HardDrive, Cloud, PowerOff, Settings } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
-import DeleteStackDialog from '@/components/DeleteStackDialog'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { ImportStacksDialog } from '@/components/ImportStacksDialog'
 import { DiskUsageBar, formatBytes } from '@/components/docker/DockerDiskUsage'
 import StackListSkeleton from '@/components/stacks/StackListSkeleton'
@@ -11,11 +10,14 @@ import { useDockerDiskUsage } from '@/hooks/useStackDocker'
 import { useStackLifecycleJobs } from '@/hooks/useStackLifecycleJobs'
 import { useStacks, stackKeys } from '@/hooks/useStacks'
 import { isStackJobRunning } from '@/lib/stackJob'
+import { lazyWithRetry } from '@/lib/lazyWithRetry'
 import { getVpcListHostAlert, apiErrorMessage } from '@/lib/utils'
 import { stackApi, buildApi } from '@/services/api'
 import type { StackDetailsDto } from '@/types/stack.types'
 import { CloudProvider, DeploymentTarget, StackStatus } from '@/types/stack.types'
 import { providerDisplayName } from '@/lib/cloud-auth'
+
+const DeleteStackDialog = lazyWithRetry(() => import('@/components/DeleteStackDialog'))
 
 // Calculate stack uptime from containers
 function calculateStackUptime(stack: StackDetailsDto): string | null {
@@ -577,21 +579,23 @@ export default function StackListPage() {
 
       {/* Delete Confirmation Dialog */}
       {deletingStack && (
-        <DeleteStackDialog
-          stackName={deletingStack.name}
-          isExternal={deletingStack.isExternal}
-          onConfirm={(terminateCloudInstance) =>
-            deleteStack.mutate({ stackId: deletingStack.id, terminateCloudInstance })
-          }
-          onCancel={() => {
-            if (!deleteStack.isPending) {
-              setDeletingStack(null)
-              deleteStack.reset()
+        <Suspense fallback={null}>
+          <DeleteStackDialog
+            stackName={deletingStack.name}
+            isExternal={deletingStack.isExternal}
+            onConfirm={(terminateCloudInstance) =>
+              deleteStack.mutate({ stackId: deletingStack.id, terminateCloudInstance })
             }
-          }}
-          isDeleting={deleteStack.isPending}
-          error={deleteStack.error ? apiErrorMessage(deleteStack.error) : null}
-        />
+            onCancel={() => {
+              if (!deleteStack.isPending) {
+                setDeletingStack(null)
+                deleteStack.reset()
+              }
+            }}
+            isDeleting={deleteStack.isPending}
+            error={deleteStack.error ? apiErrorMessage(deleteStack.error) : null}
+          />
+        </Suspense>
       )}
       
       {/* Import Stacks Dialog */}

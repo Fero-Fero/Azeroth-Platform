@@ -56,11 +56,11 @@ public sealed class ServerTypeRequiredModuleTests
 
         var type = catalog.GetServerTypes().Single(item => item.Id == ServerType.IndividualProgression);
         type.RequiredModuleIds.Should().Contain("mod-individual-progression");
-        type.RequiredModuleIds.Should().Contain("mod-playerbots");
+        type.RequiredModuleIds.Should().NotContain("mod-playerbots");
         catalog.GetRequiredModuleIds(ServerType.IndividualProgression)
             .Should().Contain("mod-individual-progression");
         catalog.GetRequiredModuleIds(ServerType.IndividualProgression)
-            .Should().Contain("mod-playerbots");
+            .Should().NotContain("mod-playerbots");
     }
 
     private static StackConfigurationValidator CreateValidator(

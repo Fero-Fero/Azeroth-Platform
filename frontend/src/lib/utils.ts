@@ -43,6 +43,15 @@ export function apiErrorMessage(err: unknown, networkContext?: string): string {
       'Could not reach the manager API (connection failed or timed out). Ensure the manager is running and retry.'
     return networkContext ? `${base} ${networkContext}` : base
   }
+  const code = (err as { code?: string })?.code
+  const timedOut =
+    code === 'ECONNABORTED'
+    || code === 'ERR_CANCELED'
+    || (typeof anyErr?.message === 'string' && anyErr.message.toLowerCase().includes('timeout'))
+  if (timedOut) {
+    const base = 'The manager did not finish in time. If you just rebuilt it, wait until it is healthy, then retry. A Windows VPC Verify can take several minutes after a reboot.'
+    return networkContext ? `${base} ${networkContext}` : base
+  }
   return anyErr?.message ?? 'Something went wrong.'
 }
 

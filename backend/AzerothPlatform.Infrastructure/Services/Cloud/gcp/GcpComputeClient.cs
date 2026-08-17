@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzerothPlatform.Core.Contracts;
 using Google.Apis.Auth.OAuth2;
 using Google.Cloud.Compute.V1;
 using Grpc.Core;
@@ -105,7 +106,8 @@ public sealed class GcpComputeClient
         string sourceImage,
         string startupScript,
         string? sshPublicKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? diskSizeGb = null)
     {
         RequireProjectId(access);
         var credential = access.Credential.CreateScoped(ComputeScope);
@@ -122,10 +124,7 @@ public sealed class GcpComputeClient
                 {
                     Boot = true,
                     AutoDelete = true,
-                    InitializeParams = new AttachedDiskInitializeParams
-                    {
-                        SourceImage = sourceImage,
-                    },
+                    InitializeParams = BuildBootDisk(sourceImage, diskSizeGb),
                 },
             },
             NetworkInterfaces =
@@ -165,6 +164,20 @@ public sealed class GcpComputeClient
 
         var created = await instancesClient.GetAsync(access.ProjectId, zone, name, cancellationToken);
         return ToComputeInstance(created, zone);
+    }
+
+    private static AttachedDiskInitializeParams BuildBootDisk(string sourceImage, int? diskSizeGb)
+    {
+        var parameters = new AttachedDiskInitializeParams
+        {
+            SourceImage = sourceImage,
+        };
+        if (diskSizeGb is > 0)
+        {
+            parameters.DiskSizeGb = diskSizeGb.Value;
+        }
+
+        return parameters;
     }
 
     public async Task<GcpComputeInstance> WaitForRunningInstanceAsync(
@@ -299,6 +312,7 @@ public sealed class GcpComputeClient
                 Value = machineType.Name,
                 Label = $"{machineType.Name} ({machineType.GuestCpus} vCPU, {memoryGb:0.#} GB RAM)",
                 Description = machineType.Description,
+                Vcpus = machineType.GuestCpus,
             });
         }
 
@@ -641,7 +655,11 @@ public sealed class GcpComputeClient
         return info;
     }
 
-    internal static bool FirewallRuleCovers(GcpFirewallProbeRule rule, int port, string expectedCidr)
+    internal static bool FirewallRuleCovers(
+        GcpFirewallProbeRule rule,
+        int port,
+        string expectedCidr,
+        bool adminSshUnpinned = false)
     {
         if (!string.Equals(rule.Protocol, "tcp", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(rule.Protocol, "all", StringComparison.OrdinalIgnoreCase))
@@ -654,13 +672,8 @@ public sealed class GcpComputeClient
             return false;
         }
 
-        var expected = (expectedCidr ?? string.Empty).Trim();
         return rule.SourceRanges.Any(range =>
-        {
-            var actual = (range ?? string.Empty).Trim();
-            return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)
-                   || actual is "0.0.0.0/0" or "::/0";
-        });
+            VpcSecurityCatalog.ProbeIngressSourceSatisfied(expectedCidr, range, adminSshUnpinned));
     }
 
     internal static bool FirewallRuleOpensPortPublicly(GcpFirewallProbeRule rule, int port)
@@ -777,6 +790,11 @@ public sealed class GcpComputeClient
     internal static string SuggestSshUser(string imageHint)
     {
         var combined = (imageHint ?? string.Empty).ToLowerInvariant();
+        if (combined.Contains("windows", StringComparison.Ordinal))
+        {
+            return "Administrator";
+        }
+
         if (combined.Contains("ubuntu", StringComparison.Ordinal))
         {
             return "ubuntu";
@@ -1110,6 +1128,8 @@ public sealed class GcpComputeClient
         public string Label { get; init; } = string.Empty;
 
         public string? Description { get; init; }
+
+        public int? Vcpus { get; init; }
     }
 
     private sealed class GcpProjectListResponse

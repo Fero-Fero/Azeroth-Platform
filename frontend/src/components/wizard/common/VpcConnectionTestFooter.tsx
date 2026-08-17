@@ -1,8 +1,13 @@
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
-import type { RemoteConnectionTestResultDto } from '@/types/stack.types'
+import { RemoteHostOs, type RemoteConnectionTestResultDto } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
+import { OsMismatchNotice, osMismatchDetected } from '@/components/wizard/common/OsMismatchNotice'
 
 function sshCheckPassed(result: RemoteConnectionTestResultDto | null): boolean {
+  if (result?.prerequisites?.some((check) => check.name === 'Operating system' && !check.passed)) {
+    return false
+  }
+
   return result?.prerequisites?.some((check) => check.name === 'SSH' && check.passed) ?? false
 }
 
@@ -14,6 +19,8 @@ interface VpcConnectionTestFooterProps {
   disabled?: boolean
   onTestConnection: () => void
   testResult: RemoteConnectionTestResultDto | null
+  remoteOs?: RemoteHostOs
+  onSwitchRemoteOs?: (os: RemoteHostOs) => void
 }
 
 export function VpcConnectionTestFooter({
@@ -24,9 +31,12 @@ export function VpcConnectionTestFooter({
   disabled = false,
   onTestConnection,
   testResult,
+  remoteOs,
+  onSwitchRemoteOs,
 }: VpcConnectionTestFooterProps) {
   const canTest = credentialsReady && !disabled && !testing
-  const sshPassed = sshCheckPassed(testResult)
+  const osMismatch = osMismatchDetected(testResult, remoteOs)
+  const sshPassed = !osMismatch && sshCheckPassed(testResult)
 
   const hint = (() => {
     if (credentialsReady) {
@@ -65,6 +75,13 @@ export function VpcConnectionTestFooter({
       ) : null}
 
       {testResult && !testing ? (
+        osMismatch && onSwitchRemoteOs ? (
+          <OsMismatchNotice
+            detectedOs={osMismatch}
+            selectedOs={remoteOs}
+            onSwitchOs={onSwitchRemoteOs}
+          />
+        ) : (
         <div
           className={cn(
             'mt-2 rounded-md border px-3 py-2 text-xs',
@@ -81,13 +98,14 @@ export function VpcConnectionTestFooter({
           </p>
           {testResult.message ? <p className="mt-1 text-[11px] opacity-90">{testResult.message}</p> : null}
           {testResult.prerequisites
-            ?.filter((check) => check.name === 'SSH')
+            ?.filter((check) => check.name === 'SSH' || check.name === 'Operating system')
             .map((check) => (
               <p key={check.name} className="mt-1 text-[11px] opacity-90">
                 {check.message}
               </p>
             ))}
         </div>
+        )
       ) : null}
     </div>
   )

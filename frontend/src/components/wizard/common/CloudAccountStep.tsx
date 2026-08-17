@@ -4,12 +4,15 @@ import { useQuery } from '@tanstack/react-query'
 import { cloudApi } from '@/services/api'
 import {
   CloudProvider,
+  RemoteHostOs,
   type CloudInstanceDto,
   type CloudLaunchResultDto,
   type CloudProviderConnectionDto,
 } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
-import { normalizePem, pemFingerprint } from '@/lib/ssh-key-download'
+import { normalizePem, pemDownloadFilename, pemFingerprint } from '@/lib/ssh-key-download'
+import { DEFAULT_OPERATOR_SSH_USER, imageDefaultSshUser } from '@/lib/ssh-user'
+import { filterProvidersForRemoteOs, providerSupportsRemoteOs } from '@/lib/vpc-providers'
 import { CloudConnectionLinkForm } from '@/components/wizard/common/CloudConnectionLinkForm'
 import { CloudInstanceSetupDialog } from '@/components/wizard/common/CloudInstanceSetupDialog'
 import { SshKeyDownloadButton } from '@/components/wizard/common/SshKeyDownloadButton'
@@ -29,6 +32,7 @@ function parseCloudProvider(value?: string): CloudProvider | null {
 
 interface CloudAccountStepProps {
   disabled?: boolean
+  remoteOs?: RemoteHostOs
   connectionId: string
   onConnectionIdChange: (id: string) => void
   cloudProvider?: string
@@ -36,6 +40,7 @@ interface CloudAccountStepProps {
   externalHost: string
   externalSshUser: string
   savedSshKeyId: string
+  bootstrapSshKeyId?: string
   sshCertificateVerified: boolean
   onSshCertificateVerifiedChange: (verified: boolean) => void
   onSelectInstance: (instance: CloudInstanceDto) => void
@@ -44,6 +49,7 @@ interface CloudAccountStepProps {
 
 export function CloudAccountStep({
   disabled = false,
+  remoteOs,
   connectionId,
   onConnectionIdChange,
   cloudProvider,
@@ -51,6 +57,7 @@ export function CloudAccountStep({
   externalHost,
   externalSshUser,
   savedSshKeyId,
+  bootstrapSshKeyId = '',
   sshCertificateVerified,
   onSshCertificateVerifiedChange,
   onSelectInstance,
@@ -62,6 +69,11 @@ export function CloudAccountStep({
   const [setupOpen, setSetupOpen] = useState(false)
   const [pendingConnection, setPendingConnection] = useState<CloudProviderConnectionDto | null>(null)
   const [launchedKey, setLaunchedKey] = useState<{
+    pem: string | null
+    keyId: string
+    label: string
+  } | null>(null)
+  const [bootstrapKey, setBootstrapKey] = useState<{
     pem: string | null
     keyId: string
     label: string
@@ -81,12 +93,26 @@ export function CloudAccountStep({
     [connections, provider]
   )
 
+  const visibleProviders = useMemo(
+    () => filterProvidersForRemoteOs(PROVIDER_OPTIONS, remoteOs),
+    [remoteOs]
+  )
+
   useEffect(() => {
     const saved = parseCloudProvider(cloudProvider)
-    if (saved) {
+    if (saved && providerSupportsRemoteOs(saved, remoteOs)) {
       setProvider((current) => (current === saved ? current : saved))
+      return
     }
-  }, [cloudProvider])
+
+    if (!providerSupportsRemoteOs(provider, remoteOs)) {
+      const next = visibleProviders[0]?.id
+      if (next) {
+        setProvider(next)
+        onCloudProviderChange?.(next)
+      }
+    }
+  }, [cloudProvider, onCloudProviderChange, provider, remoteOs, visibleProviders])
 
   useEffect(() => {
     if (!connections) {
@@ -132,7 +158,12 @@ export function CloudAccountStep({
   }
 
   const handleVerifyFile = async (file: File) => {
-    if (!launchedKey) {
+    const key = launchedKey ?? (
+      savedSshKeyId.trim()
+        ? { pem: null, keyId: savedSshKeyId.trim(), label: externalSshUser.trim() || DEFAULT_OPERATOR_SSH_USER }
+        : null
+    )
+    if (!key) {
       return
     }
 
@@ -145,9 +176,11 @@ export function CloudAccountStep({
         return
       }
 
-      if (launchedKey.pem) {
-        if (normalizePem(launchedKey.pem) !== uploaded) {
-          setVerifyError('This file does not match the launched SSH key. Choose the .pem that was just downloaded.')
+      if (key.pem) {
+        if (normalizePem(key.pem) !== uploaded) {
+          setVerifyError(
+            `This file does not match ${pemDownloadFilename(key.label)}. Use that file, not ${pemDownloadFilename(bootstrapKey?.label || imageDefaultSshUser(provider, remoteOs))}.`,
+          )
           return
         }
 
@@ -155,16 +188,18 @@ export function CloudAccountStep({
         return
       }
 
-      if (!launchedKey.keyId) {
+      if (!key.keyId) {
         setVerifyError('No launched key is available to verify.')
         return
       }
 
       const keys = (await cloudApi.listSshKeys()).data
-      const expected = keys.find((key) => key.id === launchedKey.keyId)?.fingerprint
+      const expected = keys.find((item) => item.id === key.keyId)?.fingerprint
       const actual = await pemFingerprint(uploaded)
       if (!expected || expected !== actual) {
-        setVerifyError('This file does not match the launched SSH key. Choose the .pem that was just downloaded.')
+        setVerifyError(
+          `This file does not match ${pemDownloadFilename(key.label)}. Use that file, not ${pemDownloadFilename(bootstrapKey?.label || imageDefaultSshUser(provider, remoteOs))}.`,
+        )
         return
       }
 
@@ -179,17 +214,39 @@ export function CloudAccountStep({
     }
   }
 
-  const pendingCertificate = launchedKey != null && !sshCertificateVerified
+  const restoredLaunchKey =
+    !launchedKey && !sshCertificateVerified && savedSshKeyId.trim()
+      ? {
+          pem: null,
+          keyId: savedSshKeyId.trim(),
+          label: externalSshUser.trim() || DEFAULT_OPERATOR_SSH_USER,
+        }
+      : null
+  const activeLaunchKey = launchedKey ?? restoredLaunchKey
+  const pendingCertificate = activeLaunchKey != null && !sshCertificateVerified
+  const operatorPemName = pemDownloadFilename(activeLaunchKey?.label || DEFAULT_OPERATOR_SSH_USER)
+  const bootstrapPemName = pemDownloadFilename(
+    bootstrapKey?.label || imageDefaultSshUser(provider, remoteOs),
+  )
+  const activeBootstrapKey =
+    bootstrapKey
+    ?? (bootstrapSshKeyId.trim()
+      ? {
+          pem: null,
+          keyId: bootstrapSshKeyId.trim(),
+          label: imageDefaultSshUser(provider, remoteOs),
+        }
+      : null)
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-gray-600">
-        Connect the account, then set up the instance. The platform generates an SSH key, applies the
-        firewall, and fills in host and user — you do not paste a private key here.
+        Connect the account, then set up the instance. Launch downloads two keys named after the SSH users
+        (root.pem and azp-admin.pem), applies the firewall, and fills in host and user.
       </p>
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Cloud provider">
-        {PROVIDER_OPTIONS.map((option) => (
+        {visibleProviders.map((option) => (
           <button
             key={option.id}
             type="button"
@@ -266,18 +323,28 @@ export function CloudAccountStep({
               </>
             ) : null}
           </p>
-          {launchedKey && !sshCertificateVerified ? (
+          {activeLaunchKey && !sshCertificateVerified ? (
             <div className="space-y-2">
               <p className="text-[11px] text-amber-950">
-                A .pem download should have started automatically. Verify that file before continuing —
-                this step is required. After a match, the in-browser copy is deleted.
+                Launch downloaded {bootstrapPemName} (first SSH as that user) and {operatorPemName} (daily SSH).
+                Verify {operatorPemName} — not the bootstrap file.
               </p>
               <div className="flex flex-wrap items-center gap-2">
+                {activeBootstrapKey ? (
+                  <SshKeyDownloadButton
+                    label={activeBootstrapKey.label}
+                    pem={activeBootstrapKey.pem}
+                    keyId={activeBootstrapKey.keyId}
+                    disabled={disabled || verifying}
+                    buttonLabel={`${bootstrapPemName} again`}
+                  />
+                ) : null}
                 <SshKeyDownloadButton
-                  label={launchedKey.label}
-                  pem={launchedKey.pem}
-                  keyId={launchedKey.keyId}
+                  label={activeLaunchKey.label}
+                  pem={activeLaunchKey.pem}
+                  keyId={activeLaunchKey.keyId}
                   disabled={disabled || verifying}
+                  buttonLabel={`${operatorPemName} again`}
                 />
                 <input
                   ref={verifyInputRef}
@@ -343,26 +410,39 @@ export function CloudAccountStep({
         onClose={() => setSetupOpen(false)}
         connection={selectedConnection}
         disabled={disabled}
+        remoteOs={remoteOs}
         sshUser={externalSshUser}
         savedSshKeyId={savedSshKeyId}
         onSelectInstance={(instance) => {
           setLaunchedKey(null)
+          setBootstrapKey(null)
           setVerifyError(null)
           setDidVerifyLaunchKey(false)
           onSshCertificateVerifiedChange(true)
           onSelectInstance(instance)
         }}
         onLaunched={(result) => {
+          const operatorUser = result.instance.suggestedSshUser?.trim() || DEFAULT_OPERATOR_SSH_USER
+          const bootstrapUser = result.bootstrapSshUser?.trim() || imageDefaultSshUser(provider, remoteOs)
           if (result.privateKeyPem || result.savedSshKeyId) {
             setLaunchedKey({
               pem: result.privateKeyPem ?? null,
               keyId: result.savedSshKeyId ?? '',
-              label: `azeroth-${(result.savedSshKeyId ?? 'launch').slice(0, 8)}`,
+              label: operatorUser,
             })
             onSshCertificateVerifiedChange(false)
           } else {
             setLaunchedKey(null)
             onSshCertificateVerifiedChange(true)
+          }
+          if (result.bootstrapPrivateKeyPem || result.bootstrapSshKeyId) {
+            setBootstrapKey({
+              pem: result.bootstrapPrivateKeyPem ?? null,
+              keyId: result.bootstrapSshKeyId ?? '',
+              label: bootstrapUser,
+            })
+          } else {
+            setBootstrapKey(null)
           }
           setDidVerifyLaunchKey(false)
           setVerifyError(null)

@@ -642,31 +642,47 @@ public sealed class CloudFirewallService : ICloudFirewallService
             };
         }
 
-        if (provider == CloudProvider.DigitalOcean)
+        try
         {
-            return await ProbeDigitalOceanAsync(connection, request, cancellationToken);
+            return provider switch
+            {
+                CloudProvider.DigitalOcean => await ProbeDigitalOceanAsync(connection, request, cancellationToken),
+                CloudProvider.Vultr => await ProbeVultrAsync(connection, request, cancellationToken),
+                CloudProvider.Gcp => await ProbeGcpAsync(connection, request, cancellationToken),
+                CloudProvider.Azure => await ProbeAzureAsync(connection, request, cancellationToken),
+                CloudProvider.Hetzner => await ProbeHetznerAsync(connection, request, cancellationToken),
+                _ => await ProbeAwsAsync(connection, request, host, cancellationToken),
+            };
         }
-
-        if (provider == CloudProvider.Vultr)
+        catch (OperationCanceledException)
         {
-            return await ProbeVultrAsync(connection, request, cancellationToken);
+            throw;
         }
-
-        if (provider == CloudProvider.Gcp)
+        catch (Exception ex)
         {
-            return await ProbeGcpAsync(connection, request, cancellationToken);
+            return new CloudFirewallProbeResultDto
+            {
+                Success = false,
+                Message = ex.Message,
+                Checks =
+                [
+                    new RemotePrerequisiteCheckDto
+                    {
+                        Name = "Cloud security group",
+                        Passed = false,
+                        Message = ex.Message,
+                    },
+                ],
+            };
         }
+    }
 
-        if (provider == CloudProvider.Azure)
-        {
-            return await ProbeAzureAsync(connection, request, cancellationToken);
-        }
-
-        if (provider == CloudProvider.Hetzner)
-        {
-            return await ProbeHetznerAsync(connection, request, cancellationToken);
-        }
-
+    private async Task<CloudFirewallProbeResultDto> ProbeAwsAsync(
+        CloudProviderConnectionEntity connection,
+        CloudFirewallProbeRequestDto request,
+        string host,
+        CancellationToken cancellationToken)
+    {
         var credentials = await _awsCredentialResolver.ResolveAsync(connection, cancellationToken);
         var actual = await _awsEc2Client.ListInstanceIngressRulesAsync(
             credentials,
@@ -679,17 +695,19 @@ public sealed class CloudFirewallService : ICloudFirewallService
         var checks = new List<RemotePrerequisiteCheckDto>();
         foreach (var rule in expected)
         {
-            var present = actual.Any(item =>
-                item.Port == rule.Port
-                && string.Equals(item.Protocol, "tcp", StringComparison.OrdinalIgnoreCase)
-                && CidrCovers(item.Cidr, rule.Source));
+            var unpinnedSsh = VpcSecurityCatalog.IsUnpinnedAdminSsh(rule);
+            var matching = actual.Where(item =>
+                    AwsIngressCoversPort(item, rule.Port)
+                    && VpcSecurityCatalog.ProbeIngressSourceSatisfied(rule.Source, item.Cidr, unpinnedSsh))
+                .ToList();
+            var present = matching.Count > 0;
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"AWS SG tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open in the instance security group."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the instance security group."
+                    ? FormatOpenRuleMessage(rule, matching[0].Cidr, unpinnedSsh)
+                    : FormatMissingRuleMessage(rule, unpinnedSsh)
             });
         }
 
@@ -757,14 +775,18 @@ public sealed class CloudFirewallService : ICloudFirewallService
         foreach (var rule in expected)
         {
             var present = actual.Any(item =>
-                DigitalOceanClient.InboundRuleCovers(item, rule.Port, rule.Source));
+                DigitalOceanClient.InboundRuleCovers(
+                    item,
+                    rule.Port,
+                    rule.Source,
+                    VpcSecurityCatalog.IsUnpinnedAdminSsh(rule)));
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"DO firewall tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open on the droplet Cloud Firewall."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the droplet Cloud Firewall."
+                    ? FormatOpenRuleMessage(rule, null, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
+                    : FormatMissingRuleMessage(rule, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
             });
         }
 
@@ -831,14 +853,18 @@ public sealed class CloudFirewallService : ICloudFirewallService
         foreach (var rule in expected)
         {
             var present = actual.Any(item =>
-                VultrClient.FirewallRuleCovers(item, rule.Port, rule.Source));
+                VultrClient.FirewallRuleCovers(
+                    item,
+                    rule.Port,
+                    rule.Source,
+                    VpcSecurityCatalog.IsUnpinnedAdminSsh(rule)));
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"Vultr firewall tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open on the instance firewall group."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the instance firewall group."
+                    ? FormatOpenRuleMessage(rule, null, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
+                    : FormatMissingRuleMessage(rule, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
             });
         }
 
@@ -917,14 +943,18 @@ public sealed class CloudFirewallService : ICloudFirewallService
         foreach (var rule in expected)
         {
             var present = actual.Any(item =>
-                GcpComputeClient.FirewallRuleCovers(item, rule.Port, rule.Source));
+                GcpComputeClient.FirewallRuleCovers(
+                    item,
+                    rule.Port,
+                    rule.Source,
+                    VpcSecurityCatalog.IsUnpinnedAdminSsh(rule)));
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"GCP firewall tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open on VPC firewall rules targeting {GcpComputeClient.PlatformNetworkTag}."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from VPC firewall rules."
+                    ? FormatOpenRuleMessage(rule, null, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
+                    : FormatMissingRuleMessage(rule, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
             });
         }
 
@@ -1001,14 +1031,18 @@ public sealed class CloudFirewallService : ICloudFirewallService
         foreach (var rule in expected)
         {
             var present = actual.Any(item =>
-                AzureComputeClient.NsgRuleCovers(item, rule.Port, rule.Source));
+                AzureComputeClient.NsgRuleCovers(
+                    item,
+                    rule.Port,
+                    rule.Source,
+                    VpcSecurityCatalog.IsUnpinnedAdminSsh(rule)));
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"Azure NSG tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open on the attached NSG."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the NSG."
+                    ? FormatOpenRuleMessage(rule, null, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
+                    : FormatMissingRuleMessage(rule, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
             });
         }
 
@@ -1077,14 +1111,18 @@ public sealed class CloudFirewallService : ICloudFirewallService
         foreach (var rule in expected)
         {
             var present = actual.Any(item =>
-                HetznerCloudClient.FirewallRuleCovers(item, rule.Port, rule.Source));
+                HetznerCloudClient.FirewallRuleCovers(
+                    item,
+                    rule.Port,
+                    rule.Source,
+                    VpcSecurityCatalog.IsUnpinnedAdminSsh(rule)));
             checks.Add(new RemotePrerequisiteCheckDto
             {
                 Name = $"Hetzner firewall tcp/{rule.Port}",
                 Passed = present,
                 Message = present
-                    ? $"{rule.Description} is open on the server Cloud Firewall."
-                    : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the server Cloud Firewall."
+                    ? FormatOpenRuleMessage(rule, null, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
+                    : FormatMissingRuleMessage(rule, VpcSecurityCatalog.IsUnpinnedAdminSsh(rule))
             });
         }
 
@@ -1113,17 +1151,32 @@ public sealed class CloudFirewallService : ICloudFirewallService
         };
     }
 
-    private static bool CidrCovers(string actualCidr, string expectedCidr)
+    private static bool AwsIngressCoversPort(AwsEc2Client.AwsIngressRule item, int port)
     {
-        var actual = (actualCidr ?? string.Empty).Trim();
-        var expected = (expectedCidr ?? string.Empty).Trim();
-        if (string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        if (item.Port != port)
         {
-            return true;
+            return false;
         }
 
-        return actual is "0.0.0.0/0" or "::/0";
+        var protocol = (item.Protocol ?? string.Empty).Trim();
+        return string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase)
+               || protocol is "-1" or "all";
     }
+
+    private static string FormatOpenRuleMessage(VpcSecurityRuleDto rule, string? actualCidr, bool unpinnedSsh)
+    {
+        if (unpinnedSsh && !string.IsNullOrWhiteSpace(actualCidr) && actualCidr is not "0.0.0.0/0" and not "::/0")
+        {
+            return $"{rule.Description} is open from {actualCidr}.";
+        }
+
+        return $"{rule.Description} is open.";
+    }
+
+    private static string FormatMissingRuleMessage(VpcSecurityRuleDto rule, bool unpinnedSsh)
+        => unpinnedSsh
+            ? $"{rule.Description} (tcp/{rule.Port}) is missing from the cloud firewall."
+            : $"{rule.Description} (tcp/{rule.Port} from {rule.Source}) is missing from the cloud firewall.";
 
     private static string ValidateAdminSourceCidr(string? value)
     {

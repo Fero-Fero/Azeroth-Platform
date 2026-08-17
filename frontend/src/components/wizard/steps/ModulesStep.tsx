@@ -10,6 +10,8 @@ import {
   mergeRequiredModuleIds,
   sortModulesForDisplay,
 } from '@/lib/server-type-modules'
+import { ServerTypeSlot } from '@/server-types'
+import { mergeModuleEnvDefaults } from '@/setup/steps/modules/envDefaults'
 import { ServerType } from '@/types/stack.types'
 import { cn } from '@/lib/utils'
 
@@ -57,10 +59,6 @@ export function ModulesStep({ form }: ModulesStepProps) {
   const recommendedModules = filtered.filter((module) => module.recommended)
   const otherCuratedModules = filtered.filter((module) => !module.recommended)
 
-  const MODULE_ENV_DEFAULTS: Record<string, Record<string, string>> = {
-    'mod-ah-bot': { AC_AUCTION_HOUSE_BOT_GUIDS: '' },
-  }
-
   const toggle = (id: string) => {
     if (isServerTypeRequiredModule(id, serverType, serverTypes) && selectedIds.includes(id)) {
       return
@@ -74,11 +72,12 @@ export function ModulesStep({ form }: ModulesStepProps) {
     const isRemoving = selectedIds.includes(id)
     setValue('moduleIds', next, { shouldDirty: true })
 
-    if (!isRemoving && MODULE_ENV_DEFAULTS[id]) {
+    if (!isRemoving) {
       const services = (form.getValues('advanced.serviceEnvVars') as Record<string, Record<string, string>>) ?? {}
-      const worldserver = services['worldserver'] ?? {}
-      const merged = { ...MODULE_ENV_DEFAULTS[id], ...worldserver }
-      form.setValue('advanced.serviceEnvVars', { ...services, worldserver: merged }, { shouldDirty: true })
+      const merged = mergeModuleEnvDefaults(id, services)
+      if (merged !== services) {
+        form.setValue('advanced.serviceEnvVars', merged, { shouldDirty: true })
+      }
     }
   }
 
@@ -90,11 +89,10 @@ export function ModulesStep({ form }: ModulesStepProps) {
     const next = applyModuleToggle(moduleId, selectedIds, modules ?? []) ?? [...selectedIds, moduleId]
     setValue('moduleIds', next, { shouldDirty: true })
 
-    if (MODULE_ENV_DEFAULTS[moduleId]) {
-      const services = (form.getValues('advanced.serviceEnvVars') as Record<string, Record<string, string>>) ?? {}
-      const worldserver = services['worldserver'] ?? {}
-      const merged = { ...MODULE_ENV_DEFAULTS[moduleId], ...worldserver }
-      form.setValue('advanced.serviceEnvVars', { ...services, worldserver: merged }, { shouldDirty: true })
+    const services = (form.getValues('advanced.serviceEnvVars') as Record<string, Record<string, string>>) ?? {}
+    const merged = mergeModuleEnvDefaults(moduleId, services)
+    if (merged !== services) {
+      form.setValue('advanced.serviceEnvVars', merged, { shouldDirty: true })
     }
   }
 
@@ -121,27 +119,7 @@ export function ModulesStep({ form }: ModulesStepProps) {
         communityCount={communityPreview?.total}
       />
 
-      {serverType === ServerType.IndividualProgression && browseTab === 'curated' && (
-        <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 space-y-2">
-          <p className="text-violet-800">
-            After creating the stack, you will be prompted to <strong>disable playerbots</strong> before
-            your first launch so you can configure patches and progression content first.
-          </p>
-          <p className="text-violet-800">
-            Install <strong>AtlasLoot Individual Progression</strong> from the <strong>Addons</strong> tab after
-            creation — it restores Naxx 40, Ony 40, and Kazzak loot tables for progressive progression.{' '}
-            <a
-              href="https://github.com/Day36512/Atlas-Loot-Individual-Progression-3.3.5"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-violet-700 underline hover:text-violet-900"
-            >
-              GitHub project
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-            </a>
-          </p>
-        </div>
-      )}
+      <ServerTypeSlot serverType={serverType} selectedModuleIds={selectedIds} browseTab={browseTab} />
 
       {browseTab === 'community' ? (
         <CommunityModulesBrowser selectedIds={selectedIds} onAdd={addCommunityModule} />

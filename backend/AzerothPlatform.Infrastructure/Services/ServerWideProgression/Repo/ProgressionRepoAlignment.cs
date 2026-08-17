@@ -1,6 +1,6 @@
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Aligns stack patch folders with the Azeroth-Platform-Progression repository layout.

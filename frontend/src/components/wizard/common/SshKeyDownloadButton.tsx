@@ -10,6 +10,7 @@ interface SshKeyDownloadButtonProps {
   keyId?: string
   disabled?: boolean
   className?: string
+  buttonLabel?: string
 }
 
 export function SshKeyDownloadButton({
@@ -18,6 +19,7 @@ export function SshKeyDownloadButton({
   keyId,
   disabled = false,
   className,
+  buttonLabel,
 }: SshKeyDownloadButtonProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,7 +39,7 @@ export function SshKeyDownloadButton({
     setBusy(true)
     try {
       const exported = (await cloudApi.downloadSshKey(keyId)).data
-      downloadPemFile(exported.label || label, exported.privateKey)
+      downloadPemFile(exported.defaultSshUser || label, exported.privateKey)
     } catch {
       setError('Could not download the SSH key.')
     } finally {
@@ -61,7 +63,7 @@ export function SshKeyDownloadButton({
         ) : (
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
         )}
-        Download {pemDownloadFilename(label)}
+        Download {buttonLabel ?? pemDownloadFilename(label)}
       </button>
       {error ? <span className="text-[11px] text-red-700">{error}</span> : null}
     </span>

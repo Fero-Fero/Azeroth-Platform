@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { CheckCircle2, Cloud, Copy, Loader2, Server, XCircle } from 'lucide-react'
 import { FormField } from '@/components/wizard/common/FormField'
 import { VpcConnectionMethodTabs } from '@/components/wizard/common/VpcConnectionMethodTabs'
+import { OsMismatchNotice, osMismatchDetected } from '@/components/wizard/common/OsMismatchNotice'
 import { VpcSecurityOverviewSection } from '@/components/wizard/common/VpcSecurityOverviewSection'
 import { SavedSshKeySelector } from '@/components/wizard/common/SavedSshKeySelector'
 import { SshPrivateKeyField } from '@/components/wizard/common/SshPrivateKeyField'
 import type { WizardForm } from '@/components/wizard/types'
 import { DEFAULT_ARMORY_PORT, DEFAULT_CLIENT_PORT } from '@/lib/stack-network-defaults'
-import { cn } from '@/lib/utils'
+import { providerDisplayName } from '@/lib/cloud-auth'
+import { cn, apiErrorMessage } from '@/lib/utils'
 import { systemApi, cloudApi } from '@/services/api'
 import {
+  CloudProvider,
   DeploymentTarget,
   RemoteConnectionTestPhase,
   RemoteHostOs,
@@ -25,35 +28,34 @@ interface DeploymentStepProps {
   onVpcBound?: () => void
 }
 
-const PLANNED_SETUP_ITEMS = [
-  {
-    id: 'docker',
-    title: 'Setting up Docker',
-    description: 'Install Docker Engine & Compose, start the service, and grant your SSH user access.',
-    available: true,
-  },
-  {
-    id: 'baseline',
-    title: 'OS security baselines',
-    description: 'Enable automatic security updates on Ubuntu/Debian.',
-    available: true,
-  },
-  {
-    id: 'firewall',
-    title: 'Configure host firewall (ufw)',
-    description: 'Allow SSH and player/web ports; keep MySQL and SOAP closed (Docker binds them on the VPC IP).',
-    available: true,
-  },
-  {
-    id: 'cloud-sg',
-    title: 'Configure cloud security group',
-    description:
-      'Launch and pick apply these rules automatically on AWS, GCP, Azure, DigitalOcean, Hetzner, and Vultr. Use the checklist if you need to inspect or repair by hand.',
-    available: true,
-  },
-] as const
+function plannedSetupItems() {
+  return [
+    {
+      id: 'docker' as const,
+      title: 'Setting up Docker',
+      description: 'Install Docker Engine & Compose, start the service, and grant your SSH user access.',
+    },
+    {
+      id: 'baseline' as const,
+      title: 'OS security baselines',
+      description: 'Enable automatic security updates on Ubuntu/Debian.',
+    },
+    {
+      id: 'firewall' as const,
+      title: 'Configure host firewall (ufw)',
+      description:
+        'Allow SSH and player/web ports; keep MySQL and SOAP closed (Docker binds them on the VPC IP).',
+    },
+    {
+      id: 'cloud-sg' as const,
+      title: 'Configure cloud security group',
+      description:
+        'Launch and pick apply these rules automatically on the VPC provider. Use the checklist if you need to inspect or repair by hand.',
+    },
+  ]
+}
 
-type SetupSectionId = (typeof PLANNED_SETUP_ITEMS)[number]['id']
+type SetupSectionId = 'docker' | 'baseline' | 'firewall' | 'cloud-sg'
 type SetupSectionStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped'
 
 function matchesSetupSection(stepName: string, sectionId: SetupSectionId): boolean {
@@ -174,7 +176,7 @@ function ManualVpcDockerSetupPanel({ sshUser }: { sshUser: string }) {
       <p className="font-medium">Install Docker manually over SSH (Ubuntu/Debian)</p>
       <p className="mt-1 text-amber-900">
         SSH into the VPS as a user that can run <code className="text-[11px]">sudo</code> (often{' '}
-        <code className="text-[11px]">ubuntu</code> on AWS). Paste these commands, then log out and back in
+        <code className="text-[11px]">root</code>). Paste these commands, then log out and back in
         (or run <code className="text-[11px]">newgrp docker</code>) so group membership applies. Click{' '}
         <strong>Test connection</strong> again  -  Setup Now will skip install if Docker is already running.
       </p>
@@ -210,7 +212,7 @@ function VpcLaunchGuidePanel({
     aws: {
       title: 'Amazon Web Services (EC2)',
       steps: [
-        'EC2 â†’ Launch instance â†’ pick Ubuntu 22.04 or 24.04.',
+        'EC2 → Launch instance → pick Ubuntu 22.04 or 24.04.',
         'Expand Advanced details at the bottom of the launch form (easy to miss  -  scroll down past storage and tags).',
         'Paste the script into User data, allow SSH (port 22) from your IP, create/download the .pem key pair, then Launch.',
       ],
@@ -269,7 +271,9 @@ function VpcLaunchGuidePanel({
       {!embedded ? (
         <h3 className="text-sm font-semibold text-blue-950">Launch a new cloud server (optional)</h3>
       ) : hintsOnly ? null : (
-        <p className="text-xs font-medium text-gray-800">Bootstrap script (Linux)</p>
+        <p className="text-xs font-medium text-gray-800">
+          Bootstrap script (Linux)
+        </p>
       )}
       <p className={cn('text-xs text-blue-900', !embedded || hintsOnly ? undefined : 'mt-1', hintsOnly && 'pt-0')}>
         {hintsOnly ? (
@@ -475,7 +479,18 @@ function DeploymentSubstep({
   )
 }
 
+function vpcProviderLabel(cloudProvider: string): string {
+  const match = (Object.values(CloudProvider) as string[]).find(
+    (value) => value.toLowerCase() === cloudProvider.trim().toLowerCase()
+  )
+  return match ? providerDisplayName(match as CloudProvider) : 'VPC provider'
+}
+
 function sshCheckPassed(result: RemoteConnectionTestResultDto | null): boolean {
+  if (result?.prerequisites?.some((check) => check.name === 'Operating system' && !check.passed)) {
+    return false
+  }
+
   return result?.prerequisites?.some((check) => check.name === 'SSH' && check.passed) ?? false
 }
 
@@ -491,7 +506,7 @@ interface ConnectionTestProgress {
 }
 
 const CONNECTION_TEST_STEPS = [
-  { id: 'connection', label: 'SSH connection' },
+  { id: 'connection', label: 'Root SSH & azp-admin SSH' },
   { id: 'prerequisites', label: 'Server ready (Docker)' },
 ] as const
 
@@ -583,7 +598,10 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
   const sshCertificateVerified = watch('deployment.sshCertificateVerified') ?? true
   const cloudConnectionId = watch('deployment.cloudConnectionId') ?? ''
   const cloudInstanceId = watch('deployment.cloudInstanceId') ?? ''
+  const cloudRegion = watch('deployment.cloudRegion') ?? ''
   const cloudProvider = watch('deployment.cloudProvider') ?? ''
+  const bootstrapSshKeyId = watch('deployment.bootstrapSshKeyId') ?? ''
+  const bootstrapUserSecured = watch('deployment.bootstrapUserSecured') ?? false
   const authServerPort = watch('ports.authServer') ?? 3724
   const worldServerPort = watch('ports.worldServer') ?? 8085
 
@@ -597,8 +615,19 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
       savedSshKeyId,
       saveSshKeyToVault,
       saveSshKeyLabel,
+      cloudConnectionId,
+      cloudInstanceId,
+      cloudProvider,
+      bootstrapSshKeyId,
+      bootstrapUserSecured,
+      remoteOs,
     }),
     [
+      bootstrapSshKeyId,
+      bootstrapUserSecured,
+      cloudConnectionId,
+      cloudInstanceId,
+      cloudProvider,
       externalHost,
       externalSshPort,
       externalSshPrivateKey,
@@ -606,6 +635,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
       saveSshKeyLabel,
       saveSshKeyToVault,
       savedSshKeyId,
+      remoteOs,
     ]
   )
 
@@ -623,6 +653,22 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
   const handleCloudConnectionIdChange = useCallback((id: string) => {
     setValue('deployment.cloudConnectionId', id, { shouldDirty: true })
   }, [setValue])
+
+  const applyRemoteOs = useCallback((next: RemoteHostOs) => {
+    setValue('deployment.remoteOs', RemoteHostOs.Linux, { shouldDirty: true, shouldValidate: true })
+    const current = (externalSshUser ?? '').trim()
+    if (next === RemoteHostOs.Linux && current.toLowerCase() === 'administrator') {
+      setValue('deployment.externalSshUser', 'azp-admin', { shouldDirty: true, shouldValidate: true })
+    }
+  }, [externalSshUser, setValue])
+
+  useEffect(() => {
+    if (remoteOs === RemoteHostOs.Windows) {
+      applyRemoteOs(RemoteHostOs.Linux)
+    }
+  }, [applyRemoteOs, remoteOs])
+
+  const hostOsMismatch = osMismatchDetected(testResult, remoteOs)
 
   const handleCloudProviderChange = useCallback((provider: string) => {
     setValue('deployment.cloudProvider', provider, { shouldDirty: true })
@@ -651,7 +697,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
     setTestProgress(null)
     setSshTestResult(null)
     setSetupResult(null)
-  }, [deploymentTarget, externalHost, externalSshPort, externalSshUser, externalSshPrivateKey, savedSshKeyId, setValue])
+  }, [deploymentTarget, externalHost, externalSshPort, externalSshUser, externalSshPrivateKey, savedSshKeyId, remoteOs, setValue])
 
   const runPrerequisiteCheck = useCallback(
     async (sshData: RemoteConnectionTestResultDto): Promise<RemoteConnectionTestResultDto> => {
@@ -672,6 +718,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
             await cloudApi.probeFirewall(cloudConnectionId, {
               publicHost: externalHost.trim(),
               instanceId: cloudInstanceId.trim() || undefined,
+              region: cloudRegion.trim() || undefined,
             })
           ).data
           cloudChecks = probe.checks ?? []
@@ -679,12 +726,12 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
           if (!probe.success) {
             prereqRes.data.success = false
           }
-        } catch {
+        } catch (error) {
           cloudChecks = [
             {
               name: 'Cloud security group',
               passed: false,
-              message: 'Could not probe the cloud security group for this account.',
+              message: apiErrorMessage(error, 'Retry Verify VPC after the cloud account can list this VM.'),
             },
           ]
           prereqRes.data.success = false
@@ -702,7 +749,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
         prerequisites,
       }
     },
-    [cloudConnectionId, cloudInstanceId, deploymentPayload, externalHost]
+    [cloudConnectionId, cloudInstanceId, cloudRegion, deploymentPayload, externalHost]
   )
 
   const runConnectionTest = useCallback(async (): Promise<RemoteConnectionTestResultDto | null> => {
@@ -711,6 +758,11 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
     const sshRes = await systemApi.testRemoteConnection(deploymentPayload, RemoteConnectionTestPhase.SshOnly)
     const sshData = sshRes.data
     const sshPassed = sshCheckPassed(sshData)
+
+    if (sshData.bootstrapUserSecured) {
+      setValue('deployment.bootstrapUserSecured', true, { shouldDirty: true })
+      setValue('deployment.bootstrapSshKeyId', '', { shouldDirty: true })
+    }
 
     if (!sshPassed) {
       setTestProgress({ connection: 'failed', prerequisites: 'pending' })
@@ -721,25 +773,40 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
 
     setTestProgress({ connection: 'complete', prerequisites: 'active' })
 
-    const merged = await runPrerequisiteCheck(sshData)
+    try {
+      const merged = await runPrerequisiteCheck(sshData)
 
-    setTestResult(merged)
-    setTestProgress({
-      connection: 'complete',
-      prerequisites: merged.success ? 'complete' : 'failed',
-    })
+      setTestResult(merged)
+      setTestProgress({
+        connection: 'complete',
+        prerequisites: merged.success ? 'complete' : 'failed',
+      })
 
-    if (merged.success) {
-      setValue('deployment.connectionVerified', true, { shouldDirty: true })
-      const currentRealmlistHost = form.getValues('advanced.realmlistHost')?.trim()
-      if (!currentRealmlistHost && externalHost.trim()) {
-        setValue('advanced.realmlistHost', externalHost.trim(), { shouldDirty: true })
+      if (merged.success) {
+        setValue('deployment.connectionVerified', true, { shouldDirty: true })
+        const currentRealmlistHost = form.getValues('advanced.realmlistHost')?.trim()
+        if (!currentRealmlistHost && externalHost.trim()) {
+          setValue('advanced.realmlistHost', externalHost.trim(), { shouldDirty: true })
+        }
+      } else {
+        setValue('deployment.connectionVerified', false, { shouldDirty: true })
       }
-    } else {
-      setValue('deployment.connectionVerified', false, { shouldDirty: true })
-    }
 
-    return merged
+      return merged
+    } catch (error) {
+      setTestProgress({ connection: 'complete', prerequisites: 'failed' })
+      setValue('deployment.connectionVerified', false, { shouldDirty: true })
+      const failed: RemoteConnectionTestResultDto = {
+        success: false,
+        message: apiErrorMessage(
+          error,
+          'SSH already succeeded. The manager timed out while installing Docker. Confirm the manager container is running, then Verify again.'
+        ),
+        prerequisites: sshData.prerequisites ?? [],
+      }
+      setTestResult(failed)
+      return failed
+    }
   }, [deploymentPayload, externalHost, form, runPrerequisiteCheck, setValue])
 
   const handleTestConnection = useCallback(async () => {
@@ -751,11 +818,14 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
 
     try {
       await runConnectionTest()
-    } catch {
+    } catch (error) {
       setTestProgress({ connection: 'failed', prerequisites: 'pending' })
       setTestResult({
         success: false,
-        message: 'Failed to reach the platform to run the test.',
+        message: apiErrorMessage(
+          error,
+          'Confirm the manager is running, then wait until the VM has finished booting and SSH port 22 is reachable.'
+        ),
         prerequisites: [],
       })
     } finally {
@@ -768,12 +838,22 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
     setSshTestResult(null)
 
     try {
-      const sshRes = await systemApi.testRemoteConnection(deploymentPayload, RemoteConnectionTestPhase.SshOnly)
+      const sshRes = await systemApi.testRemoteConnection(
+        {
+          ...deploymentPayload,
+          bootstrapSshKeyId: '',
+          bootstrapUserSecured: false,
+        },
+        RemoteConnectionTestPhase.SshOnly
+      )
       setSshTestResult(sshRes.data)
-    } catch {
+    } catch (error) {
       setSshTestResult({
         success: false,
-        message: 'Failed to reach the platform to run the test.',
+        message: apiErrorMessage(
+          error,
+          'Confirm the manager is running, then wait until the VM has finished booting and SSH port 22 is reachable.'
+        ),
         prerequisites: [],
       })
     } finally {
@@ -782,10 +862,6 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
   }, [deploymentPayload])
 
   const handleSetupNow = useCallback(async () => {
-    if (remoteOs === RemoteHostOs.Windows) {
-      return
-    }
-
     setSettingUp(true)
     setSetupResult(null)
 
@@ -819,10 +895,13 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
         setValue('deployment.firstTimeSetupCompleted', false, { shouldDirty: true })
         setValue('deployment.connectionVerified', false, { shouldDirty: true })
       }
-    } catch {
+    } catch (error) {
       setSetupResult({
         success: false,
-        message: 'Failed to reach the platform to run setup.',
+        message: apiErrorMessage(
+          error,
+          'Confirm the manager is running, then wait until the VM has finished booting.'
+        ),
         steps: [],
       })
     } finally {
@@ -842,11 +921,11 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
   ])
 
   const setupButtonDisabled = useMemo(() => {
-    if (settingUp || testing || !credentialsReady || remoteOs === RemoteHostOs.Windows) {
+    if (settingUp || testing || !credentialsReady) {
       return true
     }
     return !sshVerified
-  }, [credentialsReady, remoteOs, settingUp, sshVerified, testing])
+  }, [credentialsReady, settingUp, sshVerified, testing])
 
   const setupHint = useMemo(() => {
     if (!credentialsReady) {
@@ -928,42 +1007,12 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
           <DeploymentSubstep
             step={1}
             title="Operating system"
-            description="Choose the OS running on your remote host."
+            description="Remote VPC hosts must run Ubuntu or Debian."
           >
-            <fieldset>
-              <legend className="sr-only">Remote host operating system</legend>
-              <div className="flex flex-wrap gap-3">
-                {[
-                  { value: RemoteHostOs.Linux, label: 'Linux (Ubuntu / Debian)', supported: true },
-                  { value: RemoteHostOs.Windows, label: 'Windows', supported: false },
-                ].map((option) => (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm',
-                      remoteOs === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300',
-                      !option.supported && 'opacity-70'
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="remote-os"
-                      disabled={!option.supported}
-                      checked={remoteOs === option.value}
-                      onChange={() =>
-                        setValue('deployment.remoteOs', option.value, { shouldDirty: true, shouldValidate: true })
-                      }
-                    />
-                    <span>
-                      {option.label}
-                      {!option.supported && (
-                        <span className="ml-1.5 text-[10px] font-semibold uppercase text-gray-500">Coming soon</span>
-                      )}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <p className="text-sm text-gray-700">Linux (Ubuntu / Debian)</p>
+            <p className="mt-1 text-xs text-gray-600">
+              Windows Server VPC hosts are not supported. Launch or connect an Ubuntu or Debian VM.
+            </p>
           </DeploymentSubstep>
 
           <DeploymentSubstep
@@ -974,6 +1023,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
             <div className="space-y-4">
               <VpcConnectionMethodTabs
                 disabled={testing || settingUp || sshTesting}
+                remoteOs={remoteOs}
                 cloudConnectionId={cloudConnectionId}
                 onCloudConnectionIdChange={handleCloudConnectionIdChange}
                 cloudProvider={cloudProvider}
@@ -981,6 +1031,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                 externalHost={externalHost}
                 externalSshUser={externalSshUser}
                 savedSshKeyId={savedSshKeyId}
+                bootstrapSshKeyId={bootstrapSshKeyId}
                 sshCertificateVerified={sshCertificateVerified}
                 onSshCertificateVerifiedChange={(verified) =>
                   setValue('deployment.sshCertificateVerified', verified, {
@@ -995,6 +1046,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                 sshTesting={sshTesting}
                 onTestConnection={handleTestSshConnection}
                 sshTestResult={sshTestResult}
+                onSwitchRemoteOs={applyRemoteOs}
                 onSelectInstance={(instance) => {
                   setValue('deployment.externalHost', instance.publicHost, { shouldDirty: true, shouldValidate: true })
                   setValue('deployment.cloudInstanceId', instance.id, { shouldDirty: true })
@@ -1036,6 +1088,10 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                       shouldValidate: true,
                     })
                     setValue('deployment.externalSshPrivateKey', '', { shouldDirty: true, shouldValidate: true })
+                  }
+                  if (result.bootstrapSshKeyId) {
+                    setValue('deployment.bootstrapSshKeyId', result.bootstrapSshKeyId, { shouldDirty: true })
+                    setValue('deployment.bootstrapUserSecured', false, { shouldDirty: true })
                   }
                   setValue('deployment.vpcSetupMode', 'skip', { shouldDirty: true })
                   setValue('deployment.firstTimeSetupCompleted', true, { shouldDirty: true })
@@ -1113,7 +1169,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                           <input
                             id="save-ssh-key-label"
                             type="text"
-                            placeholder="e.g. AWS production key"
+                            placeholder="e.g. production operator key"
                             className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             {...register('deployment.saveSshKeyLabel')}
                           />
@@ -1132,18 +1188,18 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
 
           {!sshCertificateVerified ? (
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-              Verify the downloaded SSH certificate in Connect before Verify VPC and the rest of stack creation.
+              Verify azp-admin.pem in Connect before Verify VPC. Do not upload the bootstrap root.pem.
             </p>
           ) : (
           <>
           <DeploymentSubstep
             step={3}
             title="Verify VPC"
-            description="Confirm Docker, host firewall (ufw), OS baselines, and cloud security group rules on both the VM and the provider."
+            description="Verify azp-admin.pem (not the bootstrap root.pem). Verify VPC then SSHs as root with that bootstrap key, locks those accounts, and finally confirms azp-admin SSH on its own."
           >
             <div className="space-y-4">
               <ul className="list-disc space-y-1 pl-4 text-[11px] text-gray-600">
-                {PLANNED_SETUP_ITEMS.map((item) => (
+                {plannedSetupItems().map((item) => (
                   <li key={item.id}>
                     <span className="font-medium text-gray-800">{item.title}.</span> {item.description}
                   </li>
@@ -1161,8 +1217,9 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                   Verify VPC
                 </button>
                 <p className="text-xs text-gray-500">
-                  Checks SSH, Docker, ufw ports, OS baselines
-                  {cloudConnectionId.trim() ? ', and the linked cloud firewall' : ''}.
+                  {bootstrapUserSecured
+                    ? 'Root bootstrap already finished on this VM. This run only confirms azp-admin SSH, then Docker and the cloud firewall.'
+                    : `Logs in as root with a manager-only key, sets up azp-admin, disables internet SSH for root (${vpcProviderLabel(cloudProvider)} console stays), then verifies azp-admin separately.`}
                 </p>
               </div>
 
@@ -1187,7 +1244,7 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                             ) : (
                               <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" aria-hidden="true" />
                             )}
-                            <span className={check.passed ? 'text-green-800' : 'text-red-800'}>
+                            <span className={check.passed ? 'text-green-800' : 'text-red-800 whitespace-pre-wrap break-all'}>
                               <span className="font-medium">{check.name}:</span> {check.message}
                             </span>
                           </li>
@@ -1204,6 +1261,13 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                   >
                     {testResult.message}
                   </p>
+                  {hostOsMismatch ? (
+                    <OsMismatchNotice
+                      detectedOs={hostOsMismatch}
+                      selectedOs={remoteOs}
+                      onSwitchOs={applyRemoteOs}
+                    />
+                  ) : null}
                 </div>
               )}
 
@@ -1226,8 +1290,8 @@ export function DeploymentStep({ form, onVpcBound }: DeploymentStepProps) {
                 </summary>
                 <div className="mt-3 space-y-3">
                   <p className="text-xs text-gray-600">
-                    Re-runs Docker, ufw, and OS baselines over SSH. Use this if Verify VPC fails after cloud-init
-                    should have finished, or when you selected an existing VM.
+                    Re-runs Docker, ufw, and OS baselines over SSH.
+                    Use this if Verify VPC fails after cloud-init should have finished, or when you selected an existing VM.
                   </p>
                   <VpcSecurityOverviewSection />
                   <div className="flex flex-wrap items-center gap-3">

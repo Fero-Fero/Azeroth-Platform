@@ -19,6 +19,9 @@ internal static class AwsLaunchInstanceTypeCatalog
         int VCpus,
         int MemoryMiB);
 
+    /// <summary>
+    /// Keep only Free Tier eligible types that are actually offered in the selected location.
+    /// </summary>
     internal static IReadOnlyList<LaunchType> SelectAvailable(
         IReadOnlyCollection<string> offeredInLocation,
         IReadOnlyList<LaunchType> freeTierEligible)

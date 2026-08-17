@@ -1,13 +1,13 @@
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Data.Entities;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
-/// Fingerprints a stack build so Individual Progression patch validation can be tied to the latest
+/// Fingerprints a stack build so Server Wide Progression patch validation can be tied to the latest
 /// server recompile. Validation must be re-run whenever the fingerprint changes.
 /// </summary>
-internal static class IndividualProgressionBuildFingerprint
+internal static class ServerWideProgressionBuildFingerprint
 {
     public static string? Compute(ManagedStackEntity stack)
     {
@@ -19,7 +19,7 @@ internal static class IndividualProgressionBuildFingerprint
         return $"{stack.CoreCommitSha}|{stack.ModuleVersionsJson}|{stack.LastBuiltAt.Value.ToUniversalTime():O}";
     }
 
-    public static bool IsCurrent(IndividualProgressionSettingsDto settings, ManagedStackEntity stack)
+    public static bool IsCurrent(ServerWideProgressionSettingsDto settings, ManagedStackEntity stack)
     {
         var current = Compute(stack);
         return current is not null

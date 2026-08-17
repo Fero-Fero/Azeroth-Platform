@@ -109,13 +109,15 @@ export function CloudSecurityGroupRulesCard({
   suggestedSshSource?: string
 }) {
   const inboundRules = resolveCloudSshSource(profile.cloudSecurityGroupRules, suggestedSshSource)
+  const hostFirewall = 'ufw'
+  const hostOs = 'Linux'
 
   return (
     <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="text-xs text-gray-700">
         Add these <span className="font-medium">inbound allow</span> rules in your cloud firewall (security
-        group, NSG, or Cloud Firewall). Host <span className="font-medium">ufw</span> is applied at launch
-        and by Verify VPC / Repair — you do not need to set source CIDRs on the Linux host.
+        group, NSG, or Cloud Firewall). Host <span className="font-medium">{hostFirewall}</span> is applied at launch
+        and by Verify VPC / Repair — you do not need to set source CIDRs on the {hostOs} host.
       </p>
       <RuleTable
         title="Inbound allow"
@@ -171,11 +173,19 @@ export function VpcSecurityRolesCard({ compact = false }: { compact?: boolean })
   )
 }
 
-export function VpcSecurityProfileCard({ profile }: { profile: VpcSecurityProfileDto }) {
+export function VpcSecurityProfileCard({
+  profile,
+}: {
+  profile: VpcSecurityProfileDto
+}) {
   return (
     <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="text-xs text-gray-700">{profile.notes}</p>
-      <RuleTable title="Host firewall (ufw) — allow" rules={profile.hostFirewallRules} variant="allow" />
+      <RuleTable
+        title="Host firewall (ufw) — allow"
+        rules={profile.hostFirewallRules}
+        variant="allow"
+      />
       <RuleTable
         title="Cloud security group — allow"
         rules={profile.cloudSecurityGroupRules}

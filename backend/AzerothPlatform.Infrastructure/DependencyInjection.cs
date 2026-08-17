@@ -6,6 +6,7 @@ using AzerothPlatform.Infrastructure.Services;
 using AzerothPlatform.Infrastructure.Services.Cloud;
 using AzerothPlatform.Infrastructure.Services.Cloud.Auth;
 using AzerothPlatform.Infrastructure.Services.Parsers;
+using AzerothPlatform.Infrastructure.Services.RemoteHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -93,6 +94,7 @@ public static class DependencyInjection
         services.AddSingleton<IServiceEnvTemplateService, ServiceEnvTemplateService>();
         services.AddSingleton<IServerTypeCatalog, ServerTypeCatalog>();
         services.AddScoped<IStackConfigurationValidator, StackConfigurationValidator>();
+        services.AddSingleton<LinuxRemoteSetupStrategy>();
         services.AddSingleton<IRemoteEngineService, RemoteEngineService>();
         services.AddScoped<IStackImageShippingService, StackImageShippingService>();
         services.AddScoped<IStackService, StackService>();
@@ -112,7 +114,7 @@ public static class DependencyInjection
         services.AddScoped<IAddonService, AddonService>();
         services.AddScoped<ILuaScriptService, LuaScriptService>();
         services.AddScoped<IServerConfigService, ServerConfigService>();
-        services.AddScoped<IIndividualProgressionSyncService, Services.IndividualProgression.IndividualProgressionSyncService>();
+        services.AddScoped<IServerWideProgressionService, Services.ServerWideProgression.ServerWideProgressionService>();
         services.AddScoped<IConfigMigrationService, ConfigMigrationService>();
         services.AddScoped<IRevisionService, RevisionService>();
         services.AddScoped<ILauncherPortalService, LauncherPortalService>();

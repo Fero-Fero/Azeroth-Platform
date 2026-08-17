@@ -1,6 +1,6 @@
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Resolves the per-stack Azeroth-Platform-Progression checkout used for sync and validation.

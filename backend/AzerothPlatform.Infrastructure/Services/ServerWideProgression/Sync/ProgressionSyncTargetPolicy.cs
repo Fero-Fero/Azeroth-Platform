@@ -1,7 +1,7 @@
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Decides whether progression sync may write into a resolved patch destination.

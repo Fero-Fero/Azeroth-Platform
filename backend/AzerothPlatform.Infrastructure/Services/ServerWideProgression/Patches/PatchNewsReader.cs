@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Reads patch <c>news/article.json</c>, optional <c>news/article.html</c>, and images from a stack patch folder.

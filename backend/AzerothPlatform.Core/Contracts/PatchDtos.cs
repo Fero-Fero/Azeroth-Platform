@@ -58,7 +58,7 @@ public sealed class PatchSummaryDto
 
     public string? ProgressionSlug { get; set; }
 
-    /// <summary>Human-readable progression tier title from the IP catalog, when this is a progression patch.</summary>
+    /// <summary>Human-readable progression tier title from the Server Wide Progression catalog, when this is a progression patch.</summary>
     public string? ProgressionTitle { get; set; }
 
     public bool? IncrementsProgression { get; set; }
@@ -195,19 +195,19 @@ public sealed class MigrationOverviewDto
 
     public bool HasIndividualProgressionModule { get; set; }
 
-    public bool IndividualProgressionBootstrapped { get; set; }
+    public bool ServerWideProgressionBootstrapped { get; set; }
 
-    /// <summary>True when IP is bootstrapped and patch apply requires a validation check first.</summary>
-    public bool IndividualProgressionValidationRequired { get; set; }
+    /// <summary>True when Server Wide Progression is bootstrapped and patch apply requires a validation check first.</summary>
+    public bool ServerWideProgressionValidationRequired { get; set; }
 
     /// <summary>True when validation passed for the current server build fingerprint.</summary>
-    public bool IndividualProgressionValidationCurrent { get; set; }
+    public bool ServerWideProgressionValidationCurrent { get; set; }
 
-    public DateTimeOffset? IndividualProgressionValidationPassedAt { get; set; }
+    public DateTimeOffset? ServerWideProgressionValidationPassedAt { get; set; }
 
-    public int IndividualProgressionPatchCount { get; set; }
+    public int ServerWideProgressionPatchCount { get; set; }
 
-    public int IndividualProgressionExpectedPatchCount { get; set; }
+    public int ServerWideProgressionExpectedPatchCount { get; set; }
 }
 
 /// <summary>Live status of a background apply/reapply run, returned by the status-poll endpoint.</summary>
@@ -315,4 +315,58 @@ public sealed class SavePatchNewsRequest
 public sealed class SavePatchLauncherThemeRequest
 {
     public string Theme { get; set; } = string.Empty;
+}
+
+public sealed class PatchProgressionMetadataDto
+{
+    public int State { get; set; }
+
+    public string Slug { get; set; } = string.Empty;
+
+    public string Expansion { get; set; } = string.Empty;
+
+    public bool IncrementsProgression { get; set; } = true;
+}
+
+public enum PatchValidationMode
+{
+    ConfigOnly,
+    Full,
+}
+
+/// <summary>The mpq.json manifest defining MPQ construction/removal rules for a patch.</summary>
+public sealed class MpqManifestDto
+{
+    /// <summary>MPQ file names to construct from raw content in this patch's mpq directory.</summary>
+    public List<string> Add { get; set; } = new();
+
+    /// <summary>MPQ files to be removed from the client overlay when the patch is applied.</summary>
+    public List<string> Remove { get; set; } = new();
+
+    /// <summary>
+    /// Human-readable descriptions keyed by archive file name (for example <c>patch-k.mpq</c>).
+    /// Required for every shipped archive — pre-built uploads and names listed in <see cref="Add"/>.
+    /// </summary>
+    public Dictionary<string, string> Description { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>Resolved MPQ construction plan across all applied patches.</summary>
+public sealed class MpqConstructionPlanDto
+{
+    /// <summary>MPQ files that need to be constructed (survived all add/remove resolutions).</summary>
+    public List<MpqConstructionEntryDto> ToBuild { get; set; } = new();
+
+    /// <summary>MPQ files that were skipped because a later patch removes them.</summary>
+    public List<string> Skipped { get; set; } = new();
+}
+
+/// <summary>A single MPQ file to be constructed from raw content.</summary>
+public sealed class MpqConstructionEntryDto
+{
+    public string MpqName { get; set; } = string.Empty;
+    public string PatchKey { get; set; } = string.Empty;
+    public string? Description { get; set; }
+
+    /// <summary>True when a pre-built .mpq already exists (skip construction).</summary>
+    public bool PreBuilt { get; set; }
 }

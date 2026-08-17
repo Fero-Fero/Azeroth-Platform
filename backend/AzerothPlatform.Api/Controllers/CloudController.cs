@@ -1,3 +1,4 @@
+using AzerothPlatform.Core;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -205,11 +206,12 @@ public class CloudController : ControllerBase
     [HttpGet("connections/{id}/launch-defaults")]
     public async Task<ActionResult<CloudLaunchDefaultsDto>> GetLaunchDefaults(
         string id,
-        CancellationToken cancellationToken)
+        [FromQuery] RemoteHostOs targetOs = RemoteHostOs.Linux,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _cloudLaunchService.GetDefaultsAsync(id, cancellationToken));
+            return Ok(await _cloudLaunchService.GetDefaultsAsync(id, cancellationToken, targetOs));
         }
         catch (KeyNotFoundException)
         {
@@ -226,11 +228,12 @@ public class CloudController : ControllerBase
     public async Task<ActionResult<CloudLaunchCatalogDto>> GetLaunchCatalog(
         string id,
         [FromQuery] string? region,
-        CancellationToken cancellationToken)
+        [FromQuery] RemoteHostOs targetOs = RemoteHostOs.Linux,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _cloudLaunchService.GetCatalogAsync(id, region, cancellationToken));
+            return Ok(await _cloudLaunchService.GetCatalogAsync(id, region, cancellationToken, targetOs));
         }
         catch (KeyNotFoundException)
         {
@@ -262,6 +265,13 @@ public class CloudController : ControllerBase
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(request.AdminSourceCidr))
+            {
+                request.AdminSourceCidr = AdminSourceCidrResolver.FromForwardedAndRemote(
+                    Request.Headers["X-Forwarded-For"].FirstOrDefault(),
+                    HttpContext.Connection.RemoteIpAddress);
+            }
+
             return Ok(await _cloudLaunchService.LaunchAsync(id, request, cancellationToken));
         }
         catch (KeyNotFoundException)

@@ -4,7 +4,7 @@ using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +15,7 @@ using Xunit;
 
 namespace AzerothPlatform.Tests;
 
-public sealed class IndividualProgressionHeaderParserTests
+public sealed class ServerWideProgressionHeaderParserTests
 {
     [Fact]
     public void ParseHeader_reads_progression_enum_entries()
@@ -36,15 +36,15 @@ public sealed class IndividualProgressionHeaderParserTests
         parsed[1].Slug.Should().Be("MOLTEN_CORE");
     }
 
-    private static List<IndividualProgressionHeaderParser.ParsedState> InvokeParseHeader(string content)
+    private static List<ServerWideProgressionHeaderParser.ParsedState> InvokeParseHeader(string content)
     {
-        var method = typeof(IndividualProgressionHeaderParser)
+        var method = typeof(ServerWideProgressionHeaderParser)
             .GetMethod("ParseHeader", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (List<IndividualProgressionHeaderParser.ParsedState>)method!.Invoke(null, [content])!;
+        return (List<ServerWideProgressionHeaderParser.ParsedState>)method!.Invoke(null, [content])!;
     }
 }
 
-public sealed class IndividualProgressionSyncLogicTests
+public sealed class ServerWideProgressionSyncLogicTests
 {
     [Fact]
     public void ResolveProgressionRepoDirectory_uses_stack_absolute_path()
@@ -89,7 +89,7 @@ public sealed class IndividualProgressionSyncLogicTests
     [Fact]
     public void IncrementConfigValue_increments_parsed_integer()
     {
-        var settings = new IndividualProgressionSettingsDto
+        var settings = new ServerWideProgressionSettingsDto
         {
             Values = { ["IndividualProgression.ProgressionLimit"] = "3" },
         };
@@ -100,32 +100,32 @@ public sealed class IndividualProgressionSyncLogicTests
 
     private static string? InvokeResolveExpansion(PatchProgressionMetadataDto metadata)
     {
-        var method = typeof(IndividualProgressionSyncService)
+        var method = typeof(ServerWideProgressionService)
             .GetMethod("ResolveExpansionForPatch", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string?)method!.Invoke(null, [metadata]);
     }
 
-    private static string InvokeResolveProgressionRepoDirectory(IndividualProgressionSyncService service, string stackRoot)
+    private static string InvokeResolveProgressionRepoDirectory(ServerWideProgressionService service, string stackRoot)
     {
-        var method = typeof(IndividualProgressionSyncService)
+        var method = typeof(ServerWideProgressionService)
             .GetMethod("ResolveProgressionRepoDirectory", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, [stackRoot])!;
     }
 
-    private static IndividualProgressionSyncService CreateSyncServiceForRepoResolution(string buildsPath)
+    private static ServerWideProgressionService CreateSyncServiceForRepoResolution(string buildsPath)
     {
         var docker = Options.Create(new DockerOptions { BuildsPath = buildsPath });
         var migrations = Options.Create(new MigrationOptions());
         var serverConfig = new Mock<IServerConfigService>();
         var httpClientFactory = new Mock<IHttpClientFactory>();
 
-        return new IndividualProgressionSyncService(
+        return new ServerWideProgressionService(
             CreateInMemoryDbContext(),
             serverConfig.Object,
             httpClientFactory.Object,
             docker,
             migrations,
-            NullLogger<IndividualProgressionSyncService>.Instance);
+            NullLogger<ServerWideProgressionService>.Instance);
     }
 
     private static AzerothCoreDbContext CreateInMemoryDbContext()
@@ -139,9 +139,9 @@ public sealed class IndividualProgressionSyncLogicTests
         return db;
     }
 
-    private static string InvokeIncrement(IndividualProgressionSettingsDto settings, string key)
+    private static string InvokeIncrement(ServerWideProgressionSettingsDto settings, string key)
     {
-        var method = typeof(IndividualProgressionSyncService)
+        var method = typeof(ServerWideProgressionService)
             .GetMethod("IncrementConfigValue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, [settings, key])!;
     }
@@ -504,7 +504,7 @@ public sealed class PatchConfigValidatorTests
                 });
 
             var errors = new List<string>();
-            var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+            var keyChecks = new List<ServerWideProgressionKeyCheckDto>();
             await PatchConfigValidator.ValidateAsync(
                 stackId,
                 stackRoot,
@@ -546,7 +546,7 @@ public sealed class PatchConfigValidatorTests
             File.WriteAllText(Path.Combine(patchDir, "config", "empty.json"), "   \n");
 
             var errors = new List<string>();
-            var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+            var keyChecks = new List<ServerWideProgressionKeyCheckDto>();
             await PatchConfigValidator.ValidateAsync(
                 stackId,
                 stackRoot,
@@ -584,7 +584,7 @@ public sealed class PatchConfigValidatorTests
                 """{"Expansion": "0", broken json""");
 
             var errors = new List<string>();
-            var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+            var keyChecks = new List<ServerWideProgressionKeyCheckDto>();
             await PatchConfigValidator.ValidateAsync(
                 stackId,
                 stackRoot,
@@ -967,7 +967,7 @@ public sealed class ProgressionPatchFolderResolverTests
     [Fact]
     public void MatchDefinition_maps_repo_wotlk_version_to_catalog_index()
     {
-        var catalog = IndividualProgressionPatchCatalog.All;
+        var catalog = ServerWideProgressionPatchCatalog.All;
         var match = ProgressionPatchFolderResolver.MatchDefinition("wotlk", "3.5 Ruby Sanctum", catalog);
         match.Should().NotBeNull();
         match!.Index.Should().Be("3.3");

@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AzerothPlatform.Core.Contracts;
 
 namespace AzerothPlatform.Infrastructure.Services.Cloud;
 
@@ -310,7 +311,11 @@ public sealed class HetznerCloudClient
             .ToList();
     }
 
-    internal static bool FirewallRuleCovers(HetznerFirewallInboundRule rule, int port, string expectedCidr)
+    internal static bool FirewallRuleCovers(
+        HetznerFirewallInboundRule rule,
+        int port,
+        string expectedCidr,
+        bool adminSshUnpinned = false)
     {
         if (!string.Equals(rule.Direction, "in", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(rule.Direction))
@@ -329,10 +334,8 @@ public sealed class HetznerCloudClient
             return false;
         }
 
-        var expected = (expectedCidr ?? string.Empty).Trim();
         return rule.SourceIps.Any(source =>
-            string.Equals(source.Trim(), expected, StringComparison.OrdinalIgnoreCase)
-            || source.Trim() is "0.0.0.0/0" or "::/0");
+            VpcSecurityCatalog.ProbeIngressSourceSatisfied(expectedCidr, source, adminSshUnpinned));
     }
 
     internal static bool FirewallRuleOpensPortPublicly(HetznerFirewallInboundRule rule, int port)

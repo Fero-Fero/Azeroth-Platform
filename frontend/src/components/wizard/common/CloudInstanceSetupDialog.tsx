@@ -7,13 +7,14 @@ import { connectionStatusLine, providerDisplayName } from '@/lib/cloud-auth'
 import { resolvePublicAdminSourceCidr } from '@/lib/public-ip'
 import { apiErrorMessage, cn } from '@/lib/utils'
 import type { CloudInstanceDto, CloudLaunchResultDto, CloudProviderConnectionDto } from '@/types/stack.types'
-import { CloudLaunchMode, CloudProvider } from '@/types/stack.types'
+import { CloudLaunchMode, CloudProvider, RemoteHostOs } from '@/types/stack.types'
 
 interface CloudInstanceSetupDialogProps {
   open: boolean
   onClose: () => void
   connection: CloudProviderConnectionDto | null
   disabled?: boolean
+  remoteOs?: RemoteHostOs
   sshUser: string
   savedSshKeyId: string
   onSelectInstance: (instance: CloudInstanceDto) => void
@@ -27,6 +28,7 @@ export function CloudInstanceSetupDialog({
   onClose,
   connection,
   disabled = false,
+  remoteOs,
   sshUser,
   savedSshKeyId,
   onSelectInstance,
@@ -57,8 +59,10 @@ export function CloudInstanceSetupDialog({
   const isAzure = connection?.provider === CloudProvider.Azure
   const isAws = connection?.provider === CloudProvider.Aws
   const isHetzner = connection?.provider === CloudProvider.Hetzner
+  const canCreate = setup?.canCreate !== false
   const applyFirewallOnSelect = Boolean(setup?.canBootstrapExisting)
   const hostBootstrapOnSelect = isAzure || isAws
+  const hostFirewallLabel = 'ufw'
 
   const {
     data: instances,
@@ -94,10 +98,10 @@ export function CloudInstanceSetupDialog({
     }
 
     setSelectedInstanceId('')
-    setTab(setup?.canCreate === false ? 'existing' : 'create')
+    setTab(canCreate ? 'create' : 'existing')
     setAutoFirewall(setup?.autoFirewallDefault ?? true)
     setAdminCidr(setup?.suggestedAdminCidr ?? '')
-  }, [open, connectionId, setup?.autoFirewallDefault, setup?.canCreate, setup?.suggestedAdminCidr])
+  }, [open, connectionId, canCreate, setup?.autoFirewallDefault, setup?.suggestedAdminCidr])
 
   useEffect(() => {
     if (!open) {
@@ -134,6 +138,7 @@ export function CloudInstanceSetupDialog({
           mode: CloudLaunchMode.BootstrapExisting,
           name: selectedInstance.name,
           sshUser,
+          targetOs: remoteOs,
           region: selectedInstance.region,
           instanceId: selectedInstance.id,
           savedSshKeyId: savedSshKeyId.trim() || undefined,
@@ -337,13 +342,13 @@ export function CloudInstanceSetupDialog({
               ) : (
                 <p className="mt-1 text-xs text-gray-500">
                   {isAzure
-                    ? 'Select bootstraps the VM via Run Command (operator user, Docker, ufw) and applies NSG inbound rules. Create VM from the platform is not available yet.'
+                    ? `Select bootstraps the VM via Run Command (operator user, Docker, ${hostFirewallLabel}) and applies NSG inbound rules. Create VM from the platform is not available yet.`
                     : isAws
-                      ? 'Select bootstraps the instance via SSM (operator user, Docker, ufw) and applies the security group. Host setup still runs over SSH on Verify / Repair if SSM is unavailable.'
+                      ? `Select bootstraps the instance via SSM (operator user, Docker, ${hostFirewallLabel}) and applies the security group. Host setup still runs over SSH on Verify / Repair if SSM is unavailable.`
                     : isHetzner
-                      ? 'Select applies Hetzner Cloud Firewall inbound rules to this running server. Host Docker and ufw are installed on Create (cloud-init), or later via Verify / Repair over SSH.'
+                      ? `Select applies Hetzner Cloud Firewall inbound rules to this running server. Host Docker and ${hostFirewallLabel} are installed on Create (cloud-init), or later via Verify / Repair over SSH.`
                       : applyFirewallOnSelect
-                        ? 'Select applies cloud firewall / security group inbound rules to this running VM. Host Docker and ufw are installed on Create, or later via Verify / Repair over SSH.'
+                        ? `Select applies cloud firewall / security group inbound rules to this running VM. Host Docker and ${hostFirewallLabel} are installed on Create, or later via Verify / Repair over SSH.`
                         : 'Stopped instances are omitted (they have no public SSH yet). After you select, the next wizard steps install Docker and apply host security over SSH.'}
                 </p>
               )}
@@ -362,14 +367,13 @@ export function CloudInstanceSetupDialog({
             <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
               <p className="text-sm font-medium text-gray-900">Coming soon</p>
               <p className="mt-1 text-xs text-gray-600">
-                Creating a new Azure VM from this platform is not implemented yet. Use an existing Linux VM
-                with a public IP, then Select to bootstrap it with Run Command and apply NSG rules. You can
-                still create the VM in Azure Portal first.
+                Creating a new Azure VM from this platform is not implemented yet. Use an existing Linux VM with a public IP, then Select to bootstrap it with Run Command and apply NSG rules. You can still create the VM in Azure Portal first.
               </p>
             </div>
           ) : (
             <CloudLaunchPanel
               disabled={disabled || !scopeReady}
+              remoteOs={remoteOs}
               sshUser={sshUser}
               savedSshKeyId={savedSshKeyId}
               connectionId={connection.id}

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using AzerothPlatform.Core;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Services;
@@ -93,84 +94,10 @@ public class SystemController : ControllerBase
         {
             Addresses = addresses,
             SuggestedRealmlistHost = suggested,
-            SuggestedAdminSourceCidr = ResolveClientSourceCidr()
+            SuggestedAdminSourceCidr = AdminSourceCidrResolver.FromForwardedAndRemote(
+                Request.Headers["X-Forwarded-For"].FirstOrDefault(),
+                HttpContext.Connection.RemoteIpAddress)
         });
-    }
-
-    /// <summary>Client IP for cloud SG SSH source hints (respects X-Forwarded-For when present).</summary>
-    private string? ResolveClientSourceCidr()
-    {
-        var ip = ResolveClientIpAddress();
-        if (ip is null || !IsUsableAdminSourceIp(ip))
-        {
-            return null;
-        }
-
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-
-        return ip.AddressFamily switch
-        {
-            AddressFamily.InterNetwork => $"{ip}/32",
-            AddressFamily.InterNetworkV6 => $"{ip}/128",
-            _ => null
-        };
-    }
-
-    private static bool IsUsableAdminSourceIp(IPAddress ip)
-    {
-        if (IPAddress.IsLoopback(ip))
-        {
-            return false;
-        }
-
-        if (ip.AddressFamily != AddressFamily.InterNetwork)
-        {
-            return true;
-        }
-
-        var bytes = ip.GetAddressBytes();
-        if (bytes[0] == 10)
-        {
-            return false;
-        }
-
-        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-        {
-            return false;
-        }
-
-        if (bytes[0] == 192 && bytes[1] == 168)
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private IPAddress? ResolveClientIpAddress()
-    {
-        var forwarded = Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(forwarded))
-        {
-            foreach (var hop in forwarded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (IPAddress.TryParse(hop, out var forwardedIp) && IsUsableAdminSourceIp(forwardedIp))
-                {
-                    return forwardedIp;
-                }
-            }
-        }
-
-        var remote = HttpContext.Connection.RemoteIpAddress;
-        if (remote is not null && IsUsableAdminSourceIp(remote))
-        {
-            return remote;
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -189,7 +116,7 @@ public class SystemController : ControllerBase
     /// <summary>Picks the best realmlist host from the current request, then scanned interfaces.</summary>
     private string ResolveSuggestedHost(IReadOnlyList<string> scanned)
     {
-        // 1. The address the admin actually reached the manager on (e.g. http://192.168.1.95:8080).
+        // 1. The address the admin actually reached the manager on (e.g. http://192.168.1.50:8080).
         // This must beat HOST_LAN_IP because laptops move and the configured fallback can go stale.
         var requestHost = Request?.Host.Host;
         if (!string.IsNullOrEmpty(requestHost)
@@ -275,13 +202,53 @@ public class SystemController : ControllerBase
             return BadRequest(ex.Message);
         }
 
+        string? bootstrapPrivateKey = null;
+        if (!deployment.BootstrapUserSecured && !string.IsNullOrWhiteSpace(deployment.BootstrapSshKeyId))
+        {
+            try
+            {
+                bootstrapPrivateKey = await _cloudSshKeyService.ResolvePrivateKeyAsync(
+                    deployment.BootstrapSshKeyId,
+                    "vpc-bootstrap",
+                    cancellationToken);
+            }
+            catch (KeyNotFoundException)
+            {
+                bootstrapPrivateKey = null;
+            }
+        }
+
         var result = await _remoteEngine.TestConnectionAsync(
             deployment.ExternalHost,
             deployment.ExternalSshPort,
             deployment.ExternalSshUser,
             privateKey,
             request.Phase,
+            new VpcConnectionTestOptions
+            {
+                BootstrapPrivateKey = bootstrapPrivateKey,
+                BootstrapUserSecured = deployment.BootstrapUserSecured,
+                BootstrapSshKeyId = deployment.BootstrapSshKeyId,
+                EnableAwsInstanceConnect = string.Equals(
+                    deployment.CloudProvider,
+                    nameof(CloudProvider.Aws),
+                    StringComparison.OrdinalIgnoreCase),
+                RemoteOs = deployment.RemoteOs,
+            },
             cancellationToken);
+
+        if (result.BootstrapUserSecured
+            && !string.IsNullOrWhiteSpace(deployment.BootstrapSshKeyId))
+        {
+            try
+            {
+                await _cloudSshKeyService.DeleteAsync(deployment.BootstrapSshKeyId, cancellationToken);
+            }
+            catch (KeyNotFoundException)
+            {
+                // Already removed on a previous verify.
+            }
+        }
 
         return Ok(result);
     }
@@ -330,8 +297,10 @@ public class SystemController : ControllerBase
     /// </summary>
     [HttpGet("vpc-launch-user-data")]
     public ActionResult<VpcLaunchUserDataDto> GetVpcLaunchUserData(
-        [FromQuery] string? sshUser = VpcBootstrapUserData.DefaultOperatorUser)
-        => Ok(VpcBootstrapUserData.CreateDto(sshUser ?? VpcBootstrapUserData.DefaultOperatorUser));
+        [FromQuery] string? sshUser = null)
+    {
+        return Ok(VpcBootstrapUserData.CreateDto(sshUser ?? VpcBootstrapUserData.DefaultOperatorUser));
+    }
 
     /// <summary>Runs the VPC bootstrap script on a remote host over SSH (preferred over terminal paste).</summary>
     [HttpPost("run-vpc-bootstrap")]
@@ -352,6 +321,11 @@ public class SystemController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
+        }
+
+        if (deployment.RemoteOs == RemoteHostOs.Windows)
+        {
+            return BadRequest("Windows Server VPC hosts are not supported. Use Ubuntu or Debian.");
         }
 
         var result = await _remoteEngine.RunVpcBootstrapScriptAsync(

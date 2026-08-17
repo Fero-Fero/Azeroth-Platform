@@ -306,8 +306,8 @@ public class StacksController : ControllerBase
         CancellationToken cancellationToken)
     {
         var validationResult = await _stackConfigurationValidator.ValidateAsync(
-            configuration, 
-            existingStackId: existingStackId,
+            configuration,
+            existingStackId: existingStackId ?? configuration.DraftStackId,
             cancellationToken: cancellationToken);
         return Ok(validationResult);
     }

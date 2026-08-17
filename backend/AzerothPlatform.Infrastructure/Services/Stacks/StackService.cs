@@ -281,7 +281,7 @@ public sealed class StackService : IStackService
 
     public async Task<StackDetailsDto> CreateAsync(StackConfigurationDto configuration, CancellationToken cancellationToken = default)
     {
-        var existingDraft = await TryGetSetupDraftEntityAsync(configuration.DraftStackId, cancellationToken);
+        var existingDraft = await ResolveSetupDraftForCreateAsync(configuration, cancellationToken);
         var stackId = existingDraft?.Id ?? Guid.NewGuid().ToString("N");
         var deployment = configuration.Deployment ?? new DeploymentConfigDto();
         var externalHost = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost ?? string.Empty);
@@ -339,6 +339,7 @@ public sealed class StackService : IStackService
         stack.ExternalHost = externalHost;
         stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
         stack.ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim();
+        stack.RemoteOs = deployment.RemoteOs;
         stack.WizardDraftJson = string.Empty;
         stack.WizardStepId = string.Empty;
         if (existingDraft is null)
@@ -353,6 +354,7 @@ public sealed class StackService : IStackService
             stack.ExternalSshPrivateKey = protectedSshPrivateKey;
         }
         ApplyCloudBinding(stack, deployment, replaceEmpty: true);
+        StampSshHardeningIfBootstrapSecured(stack, deployment);
 
         ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
 
@@ -370,8 +372,14 @@ public sealed class StackService : IStackService
                 : ModuleCatalogService.ValidateGitRef(customBranch);
         }
 
-        _dbContext.ManagedStacks.Add(stack);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsUniqueStackNameConflict(ex))
+        {
+            throw new InvalidOperationException("A stack with this name already exists.");
+        }
 
         // For external stacks, provision the SSH docker context up-front so later start/build calls
         // can target the remote engine. Best-effort: creation still succeeds if the remote is offline.
@@ -396,7 +404,7 @@ public sealed class StackService : IStackService
                     privateKey,
                     new RemoteSetupOptionsDto
                     {
-                        RemoteOs = RemoteHostOs.Linux,
+                        RemoteOs = stack.RemoteOs,
                         AuthServerPort = stack.AuthServerPort,
                         WorldServerPort = stack.WorldServerPort,
                         ArmoryPort = stack.ArmoryPort,
@@ -489,9 +497,11 @@ public sealed class StackService : IStackService
         stack.ExternalHost = host;
         stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
         stack.ExternalSshUser = (deployment.ExternalSshUser ?? string.Empty).Trim();
+        stack.RemoteOs = deployment.RemoteOs;
         stack.WizardStepId = NormalizeWizardStepId(request.WizardStepId);
         stack.WizardDraftJson = RedactWizardDraftPrivateKey(request.WizardDraftJson);
         ApplyCloudBinding(stack, deployment, replaceEmpty: true);
+        StampSshHardeningIfBootstrapSecured(stack, deployment);
 
         if (!string.IsNullOrWhiteSpace(deployment.ExternalSshPrivateKey)
             || !string.IsNullOrWhiteSpace(deployment.SavedSshKeyId))
@@ -544,6 +554,7 @@ public sealed class StackService : IStackService
             }
         }
 
+        var wizardSsh = ReadWizardSshDraft(stack.WizardDraftJson);
         return new StackSetupDraftDto
         {
             StackId = stack.Id,
@@ -557,33 +568,75 @@ public sealed class StackService : IStackService
                 ExternalHost = stack.ExternalHost,
                 ExternalSshPort = stack.ExternalSshPort == 0 ? 22 : stack.ExternalSshPort,
                 ExternalSshUser = stack.ExternalSshUser,
+                SavedSshKeyId = wizardSsh.SavedSshKeyId,
                 CloudConnectionId = stack.CloudConnectionId,
                 CloudInstanceId = stack.CloudInstanceId,
                 CloudRegion = stack.CloudRegion,
                 CloudProvider = stack.CloudProvider,
                 CloudInstanceType = stack.CloudInstanceType,
+                BootstrapSshKeyId = wizardSsh.BootstrapSshKeyId,
+                BootstrapUserSecured = wizardSsh.BootstrapUserSecured,
+                RemoteOs = stack.RemoteOs,
             },
         };
     }
 
-    private async Task<ManagedStackEntity?> TryGetSetupDraftEntityAsync(
-        string? draftStackId,
+    private async Task<ManagedStackEntity?> ResolveSetupDraftForCreateAsync(
+        StackConfigurationDto configuration,
         CancellationToken cancellationToken)
     {
-        var id = (draftStackId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(id))
+        var draftId = (configuration.DraftStackId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(draftId))
+        {
+            var byId = await _dbContext.ManagedStacks
+                .SingleOrDefaultAsync(item => item.Id == draftId, cancellationToken);
+            if (byId is not null && byId.Status != StackStatus.SetupIncomplete)
+            {
+                throw new InvalidOperationException("The unfinished VPC stack was not found or is already set up.");
+            }
+
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        var deployment = configuration.Deployment;
+        if (deployment is null || deployment.Target != DeploymentTarget.External)
         {
             return null;
         }
 
-        var stack = await _dbContext.ManagedStacks
-            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
-        if (stack is null || stack.Status != StackStatus.SetupIncomplete)
+        var instanceId = (deployment.CloudInstanceId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(instanceId))
         {
-            throw new InvalidOperationException("The unfinished VPC stack was not found or is already set up.");
+            var byInstance = await _dbContext.ManagedStacks
+                .SingleOrDefaultAsync(
+                    item => item.Status == StackStatus.SetupIncomplete && item.CloudInstanceId == instanceId,
+                    cancellationToken);
+            if (byInstance is not null)
+            {
+                return byInstance;
+            }
         }
 
-        return stack;
+        var host = RealmlistHostResolver.NormalizeHost(deployment.ExternalHost ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+
+        return await _dbContext.ManagedStacks
+            .SingleOrDefaultAsync(
+                item => item.Status == StackStatus.SetupIncomplete && item.ExternalHost == host,
+                cancellationToken);
+    }
+
+    private static bool IsUniqueStackNameConflict(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase)
+               && message.Contains("NormalizedStackName", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeWizardStepId(string? stepId)
@@ -665,6 +718,45 @@ public sealed class StackService : IStackService
         }
 
         return slug.Length >= 3 ? slug : null;
+    }
+
+    private static (string SavedSshKeyId, string BootstrapSshKeyId, bool BootstrapUserSecured) ReadWizardSshDraft(
+        string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return (string.Empty, string.Empty, false);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("deployment", out var deployment)
+                || deployment.ValueKind != JsonValueKind.Object)
+            {
+                return (string.Empty, string.Empty, false);
+            }
+
+            var saved = ReadJsonString(deployment, "savedSshKeyId");
+            var bootstrap = ReadJsonString(deployment, "bootstrapSshKeyId");
+            var secured = deployment.TryGetProperty("bootstrapUserSecured", out var securedElement)
+                          && securedElement.ValueKind is JsonValueKind.True;
+            return (saved, bootstrap, secured);
+        }
+        catch (JsonException)
+        {
+            return (string.Empty, string.Empty, false);
+        }
+    }
+
+    private static string ReadJsonString(JsonElement objectElement, string name)
+    {
+        if (!objectElement.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            return string.Empty;
+        }
+
+        return (value.GetString() ?? string.Empty).Trim();
     }
 
     private static string RedactWizardDraftPrivateKey(string? json)
@@ -875,6 +967,7 @@ public sealed class StackService : IStackService
             deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort,
             deployment.ExternalSshUser.Trim(),
             privateKey,
+            options: new VpcConnectionTestOptions { RemoteOs = stack.RemoteOs },
             cancellationToken: cancellationToken);
         if (!test.Success)
         {
@@ -1433,6 +1526,15 @@ public sealed class StackService : IStackService
         }
 
         CleanupManagerPersistentData(stackId);
+
+        try
+        {
+            await _cloudSshKeyService.DeleteUnusedKeysForStackAsync(stack.Id, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to remove unused Cloud SSH keys for stack {StackId}", stackId);
+        }
 
         // Remove stack directory (gracefully handle if already removed)
         if (Directory.Exists(stackPath))
@@ -2180,13 +2282,12 @@ public sealed class StackService : IStackService
     }
 
     /// <summary>
-    /// Best-effort build of the shared armory image. Returns false (and logs) if the image can't be
-    /// built, so callers can start the stack without the armory rather than failing outright.
-    /// </summary>
-    /// <summary>
-    /// Brings a stack up. External stacks use an explicit init → game-server sequence because
-    /// <c>docker --context … compose up -d</c> does not reliably chain one-shot init containers to
-    /// auth/world on a remote engine.
+    /// Brings a stack up. Init containers (db-import, client-data) run only after MySQL accepts
+    /// connections — a healthcheck can pass during MySQL's first-boot temp server. Missing
+    /// <c>acore_*</c> databases are created by AzerothCore AutoSetup (db-import, then auth/world),
+    /// with the interactive "create it?" prompt auto-accepted via <c>AC_DISABLE_INTERACTIVE</c>.
+    /// External stacks also need this explicit sequence because remote compose does not reliably chain
+    /// one-shot init containers to auth/world.
     /// </summary>
     private async Task BringStackUpAsync(
         ManagedStackEntity stack,
@@ -2196,18 +2297,6 @@ public sealed class StackService : IStackService
         bool clientReady,
         CancellationToken cancellationToken)
     {
-        if (stack.DeploymentTarget != DeploymentTarget.External)
-        {
-            await RunDockerComposeAsync(stackId, "up -d", repoPath, cancellationToken);
-            if (armoryReady)
-            {
-                await WaitForDatabaseServiceAsync(stackId, cancellationToken);
-                await _armoryDatabase.EnsureProvisionedAsync(stackId, cancellationToken);
-            }
-
-            return;
-        }
-
         var containerPrefix = DockerComposeOverrideGenerator.GetContainerPrefix(stack.Id, stack.StackName);
 
         // Stop game servers first so crash-looping auth/world processes cannot hammer MySQL while the
@@ -2220,9 +2309,10 @@ public sealed class StackService : IStackService
             cancellationToken,
             throwOnError: false);
 
-        ReportLifecycleProgress(stackId, "Starting database on the VPC…");
+        ReportLifecycleProgress(stackId, "Starting database…");
         await RunDockerComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
         await WaitForDatabaseServiceAsync(stackId, cancellationToken);
+        await WaitForDatabaseReadyAsync(stack, stackId, cancellationToken);
 
         var dbImportName = $"{containerPrefix}-db-import";
         var clientDataName = $"{containerPrefix}-client-data-init";
@@ -2242,6 +2332,17 @@ public sealed class StackService : IStackService
 
         if (initServices.Count > 0)
         {
+            if (!dbImportDone)
+            {
+                // A previous failed one-shot stays exited; compose up will not rerun it unless removed.
+                await RunDockerComposeAsync(
+                    stackId,
+                    "rm -sf ac-db-import",
+                    repoPath,
+                    cancellationToken,
+                    throwOnError: false);
+            }
+
             ReportLifecycleProgress(
                 stackId,
                 initServices.Count == 2
@@ -2300,7 +2401,7 @@ public sealed class StackService : IStackService
 
         ReportLifecycleProgress(
             stackId,
-            $"Starting {services.Count} service container(s) on the VPC…");
+            $"Starting {services.Count} service container(s)…");
         // `--no-deps` is critical: the base compose requires ac-db-import to have completed, and after
         // `compose down` that one-shot container is gone — compose would otherwise re-run db-import while
         // auth/world start, hammering MySQL and causing "Lost connection to MySQL server" errors.
@@ -2488,7 +2589,11 @@ public sealed class StackService : IStackService
                         var code = parts.Length > 1 && int.TryParse(parts[1].Trim(), out var parsed) ? parsed : -1;
                         if (code != 0)
                         {
-                            throw new InvalidOperationException($"{displayName} failed with exit code {code}.");
+                            var logs = await TryReadContainerLogsAsync(stackId, containerName, tail: 40, cancellationToken);
+                            var detail = string.IsNullOrWhiteSpace(logs)
+                                ? $"{displayName} failed with exit code {code}."
+                                : $"{displayName} failed with exit code {code}.{Environment.NewLine}{logs.Trim()}";
+                            throw new InvalidOperationException(detail);
                         }
 
                         return;
@@ -3180,6 +3285,7 @@ public sealed class StackService : IStackService
                     CloudRegion = stack.CloudRegion,
                     CloudProvider = stack.CloudProvider,
                     CloudInstanceType = stack.CloudInstanceType,
+                    RemoteOs = stack.RemoteOs,
                 },
                 // Surface the user-supplied fork for custom-repository server types so the UI can show it.
                 CustomFork = _serverTypeCatalog.AllowsCustomRepository(stack.ServerType)
@@ -4568,6 +4674,33 @@ public sealed class StackService : IStackService
         throw new InvalidOperationException("Stack containers did not reach a running state before the startup timeout elapsed.");
     }
 
+    private async Task<string?> TryReadContainerLogsAsync(
+        string stackId,
+        string containerName,
+        int tail,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var contextArg = await GetDockerContextArgAsync(stackId, cancellationToken);
+            var (exitCode, stdout, stderr) = await RunDockerCliAsync(
+                $"{contextArg}logs --tail {tail} {containerName}",
+                cancellationToken);
+            if (exitCode != 0)
+            {
+                return null;
+            }
+
+            var combined = string.IsNullOrWhiteSpace(stdout) ? stderr : stdout;
+            return string.IsNullOrWhiteSpace(combined) ? null : combined;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not read logs for container {Container}.", containerName);
+            return null;
+        }
+    }
+
     private async Task WaitForDatabaseServiceAsync(string stackId, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + LifecycleVerificationTimeout;
@@ -4817,6 +4950,22 @@ public sealed class StackService : IStackService
         SetIfProvided(value => stack.CloudRegion = value, deployment.CloudRegion, replaceEmpty);
         SetIfProvided(value => stack.CloudProvider = value, deployment.CloudProvider, replaceEmpty);
         SetIfProvided(value => stack.CloudInstanceType = value, deployment.CloudInstanceType, replaceEmpty);
+    }
+
+    /// <summary>
+    /// Verify VPC already locks ubuntu/root. Stamp the stack so the VPC panel does not ask to
+    /// Finalize SSH again after Finish setup.
+    /// </summary>
+    private static void StampSshHardeningIfBootstrapSecured(
+        ManagedStackEntity stack,
+        DeploymentConfigDto deployment)
+    {
+        if (!deployment.BootstrapUserSecured || stack.SshHardeningCompletedAt.HasValue)
+        {
+            return;
+        }
+
+        stack.SshHardeningCompletedAt = DateTime.UtcNow;
     }
 
     private static void SetIfProvided(Action<string> assign, string? value, bool replaceEmpty)
@@ -5591,7 +5740,7 @@ public sealed class StackService : IStackService
             privateKey,
             new RemoteSetupOptionsDto
             {
-                RemoteOs = RemoteHostOs.Linux,
+                RemoteOs = stack.RemoteOs,
                 EnableHostFirewall = false,
                 EnableUnattendedUpgrades = false,
                 AuthServerPort = stack.AuthServerPort,
@@ -5641,7 +5790,8 @@ public sealed class StackService : IStackService
             stack.ExternalSshUser,
             privateKey,
             enableAwsInstanceConnect,
-            timeoutCts.Token);
+            timeoutCts.Token,
+            stack.RemoteOs);
 
         if (result.Success)
         {
@@ -5691,7 +5841,7 @@ public sealed class StackService : IStackService
             privateKey,
             new RemoteSetupOptionsDto
             {
-                RemoteOs = RemoteHostOs.Linux,
+                RemoteOs = stack.RemoteOs,
                 AuthServerPort = stack.AuthServerPort,
                 WorldServerPort = stack.WorldServerPort,
                 ArmoryPort = stack.ArmoryPort,

@@ -1,5 +1,5 @@
 using AzerothPlatform.Core.Contracts;
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using FluentAssertions;
 using Xunit;
 
@@ -51,7 +51,7 @@ public sealed class ServerConfigValueEditorTests
     public void ApplyKeyMapping_uses_discovered_key_names()
     {
         var discovered = ServerConfigValueEditor.GrepIndividualProgressionKeys(SampleConf);
-        var keys = IndividualProgressionKeyNames.FromDto(new IndividualProgressionKeyMappingDto());
+        var keys = IndividualProgressionKeyNames.FromDto(new ServerWideProgressionKeyMappingDto());
         ServerConfigValueEditor.ApplyKeyMapping(keys, discovered);
         keys.StartingProgression.Should().Be("IndividualProgression.StartingProgression");
         keys.ProgressionLimit.Should().Be("IndividualProgression.ProgressionLimit");

@@ -278,6 +278,28 @@ public sealed class AddonService : IAddonService
         return catalog;
     }
 
+    public IReadOnlyList<AddonCatalogEntryDto> GetCatalogDefinitions() =>
+        BuiltInAddons
+            .Select(a => new AddonCatalogEntryDto
+            {
+                Id = a.Id,
+                Name = a.Name,
+                Description = a.Description,
+                Category = a.Category,
+                DownloadUrl = a.DownloadUrl,
+                Website = a.Website,
+                IsBuiltIn = a.IsBuiltIn,
+                Folders = a.Folders,
+                Installed = false,
+                Recommended = a.Recommended,
+                RelatedModuleIds = a.RelatedModuleIds,
+                RelatedServerTypes = a.RelatedServerTypes,
+                Suggested = false,
+                ParentAddonId = a.ParentAddonId,
+                InstallAsFolder = a.InstallAsFolder,
+            })
+            .ToList();
+
     public async Task<AddonListDto> InstallFromCatalogAsync(string? stackId, string addonId, CancellationToken cancellationToken = default)
     {
         var entry = BuiltInAddons.FirstOrDefault(a => string.Equals(a.Id, addonId, StringComparison.OrdinalIgnoreCase))

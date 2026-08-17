@@ -2,7 +2,7 @@ using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Validates patch <c>config/*.json</c> overrides against configs available on the running stack.
@@ -14,7 +14,7 @@ internal static class PatchConfigValidator
         string stackRoot,
         IServerConfigService serverConfig,
         ICollection<string> errors,
-        ICollection<IndividualProgressionKeyCheckDto> keyChecks,
+        ICollection<ServerWideProgressionKeyCheckDto> keyChecks,
         CancellationToken cancellationToken)
     {
         var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
@@ -63,7 +63,7 @@ internal static class PatchConfigValidator
                 {
                     errors.Add(
                         $"{patchKey}: server config not found for {configSource} (expected {baseName}.conf under the stack etc directory). Rebuild or start the stack once so configs are seeded.");
-                    keyChecks.Add(new IndividualProgressionKeyCheckDto
+                    keyChecks.Add(new ServerWideProgressionKeyCheckDto
                     {
                         PatchKey = patchKey,
                         ConfigSource = configSource,
@@ -81,7 +81,7 @@ internal static class PatchConfigValidator
                 catch (FileNotFoundException)
                 {
                     errors.Add($"{patchKey}: server config {relativeConf} for {configSource} is not available.");
-                    keyChecks.Add(new IndividualProgressionKeyCheckDto
+                    keyChecks.Add(new ServerWideProgressionKeyCheckDto
                     {
                         PatchKey = patchKey,
                         ConfigSource = configSource,
@@ -93,7 +93,7 @@ internal static class PatchConfigValidator
 
                 foreach (var key in overrides!.Keys)
                 {
-                    var check = new IndividualProgressionKeyCheckDto
+                    var check = new ServerWideProgressionKeyCheckDto
                     {
                         PatchKey = patchKey,
                         ConfigSource = configSource,

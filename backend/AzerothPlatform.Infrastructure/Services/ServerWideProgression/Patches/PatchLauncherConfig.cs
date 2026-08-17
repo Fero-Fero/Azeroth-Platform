@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Reads patch <c>config/launcher.json</c> theme overrides (classic/tbc/wotlk).

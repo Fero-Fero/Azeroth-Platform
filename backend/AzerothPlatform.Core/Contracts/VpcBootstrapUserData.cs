@@ -11,6 +11,15 @@ public static class VpcBootstrapUserData
 {
     public const string DefaultOperatorUser = "azp-admin";
 
+    /// <summary>
+    /// Image-default SSH user for first login (the bootstrap key). Filenames use this so
+    /// <c>ubuntu.pem</c> / <c>root.pem</c> match the account Verify VPC SSHs as.
+    /// </summary>
+    public static string ImageDefaultSshUser(CloudProvider provider)
+        => provider is CloudProvider.DigitalOcean or CloudProvider.Hetzner or CloudProvider.Vultr
+            ? "root"
+            : "ubuntu";
+
     private static readonly Regex SafeLinuxUser = new("^[a-z_][a-z0-9_-]{0,31}$", RegexOptions.CultureInvariant);
 
     private static readonly HashSet<string> ForbiddenUsers = new(StringComparer.Ordinal)
@@ -92,14 +101,6 @@ public static class VpcBootstrapUserData
             AUTH_TMP="$(mktemp)"
             if [ -n "{{keyB64}}" ]; then
               echo "{{keyB64}}" | $SUDO base64 -d >> "$AUTH_TMP" || true
-            fi
-            for src in ubuntu debian azureuser ec2-user admin centos fedora; do
-              if [ "$src" != "{{user}}" ] && [ -f "/home/$src/.ssh/authorized_keys" ]; then
-                $SUDO cat "/home/$src/.ssh/authorized_keys" >> "$AUTH_TMP" || true
-              fi
-            done
-            if [ "{{user}}" != "root" ] && [ -f /root/.ssh/authorized_keys ]; then
-              $SUDO cat /root/.ssh/authorized_keys >> "$AUTH_TMP" || true
             fi
             if [ -s "$AUTH_TMP" ]; then
               $SUDO sort -u "$AUTH_TMP" | $SUDO tee "/home/{{user}}/.ssh/authorized_keys" >/dev/null
@@ -201,6 +202,8 @@ public static class VpcBootstrapUserData
         {
             SshUser = SanitizeSshUser(sshUser),
             Script = BuildLaunchScript(sshUser),
+            RemoteOs = RemoteHostOs.Linux,
+            ScriptKind = "bash",
             Instructions =
                 "Paste this script into your cloud provider's startup/user-data field when creating a new " +
                 "Ubuntu VM (AWS User data, GCP Startup script, DigitalOcean User data, etc.). It creates " +
@@ -230,4 +233,6 @@ public sealed class VpcLaunchUserDataDto
     public string SshUser { get; set; } = VpcBootstrapUserData.DefaultOperatorUser;
     public string Script { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
+    public RemoteHostOs RemoteOs { get; set; } = RemoteHostOs.Linux;
+    public string ScriptKind { get; set; } = "bash";
 }

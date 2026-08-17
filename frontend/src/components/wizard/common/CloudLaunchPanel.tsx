@@ -5,15 +5,18 @@ import { cloudApi } from '@/services/api'
 import {
   CloudLaunchMode,
   CloudProvider,
+  RemoteHostOs,
   type CloudLaunchCatalogOptionDto,
   type CloudLaunchResultDto,
 } from '@/types/stack.types'
 import { cn, apiErrorMessage } from '@/lib/utils'
-import { downloadPemFile } from '@/lib/ssh-key-download'
-import { DEFAULT_OPERATOR_SSH_USER, isForbiddenSshUser, sshUserWarning } from '@/lib/ssh-user'
+import { downloadPemFiles } from '@/lib/ssh-key-download'
+import { DEFAULT_OPERATOR_SSH_USER, imageDefaultSshUser, isForbiddenSshUser, sshUserWarning } from '@/lib/ssh-user'
+import { providerSupportsRemoteOs } from '@/lib/vpc-providers'
 
 interface CloudLaunchPanelProps {
   disabled?: boolean
+  remoteOs?: RemoteHostOs
   sshUser: string
   savedSshKeyId: string
   connectionId?: string
@@ -116,6 +119,7 @@ function CatalogField({
 
 export function CloudLaunchPanel({
   disabled = false,
+  remoteOs,
   sshUser,
   savedSshKeyId,
   connectionId: controlledConnectionId,
@@ -140,6 +144,8 @@ export function CloudLaunchPanel({
   const [name, setName] = useState('azeroth-vpc')
   const [region, setRegion] = useState('')
   const [size, setSize] = useState('')
+  const [cpuFilter, setCpuFilter] = useState('')
+  const [diskSizeGb, setDiskSizeGb] = useState(40)
   const [image, setImage] = useState('')
   const [instanceId, setInstanceId] = useState('')
   const [awsLaunchMode, setAwsLaunchMode] = useState<'create' | 'bootstrap'>('create')
@@ -150,7 +156,7 @@ export function CloudLaunchPanel({
     const current = sshUser.trim()
     return current && current !== 'root' ? current : DEFAULT_OPERATOR_SSH_USER
   })
-  const operatorWarning = sshUserWarning(operatorUser)
+  const operatorWarning = sshUserWarning(operatorUser, remoteOs)
 
   const { data: connections, isLoading: loadingConnections } = useQuery({
     queryKey: ['cloud-connections'],
@@ -159,17 +165,30 @@ export function CloudLaunchPanel({
 
   const launchableConnections = useMemo(
     () =>
-      (connections ?? []).filter(
-        (connection) =>
+      (connections ?? []).filter((connection) => {
+        const launchable =
           connection.provider === CloudProvider.DigitalOcean
           || connection.provider === CloudProvider.Hetzner
           || connection.provider === CloudProvider.Vultr
           || connection.provider === CloudProvider.Aws
           || connection.provider === CloudProvider.Gcp
           || connection.provider === CloudProvider.Azure
-      ),
-    [connections]
+        return launchable && providerSupportsRemoteOs(connection.provider, remoteOs)
+      }),
+    [connections, remoteOs]
   )
+
+  useEffect(() => {
+    if (hideAccountSelect || !connectionId) {
+      return
+    }
+
+    if (launchableConnections.some((connection) => connection.id === connectionId)) {
+      return
+    }
+
+    setConnectionId(launchableConnections[0]?.id ?? '')
+  }, [connectionId, hideAccountSelect, launchableConnections])
 
   const selectedConnection = useMemo(
     () => launchableConnections.find((connection) => connection.id === connectionId) ?? null,
@@ -182,8 +201,8 @@ export function CloudLaunchPanel({
     isError: defaultsError,
     error: defaultsErrorDetail,
   } = useQuery({
-    queryKey: ['cloud-launch-defaults', connectionId],
-    queryFn: async () => (await cloudApi.getLaunchDefaults(connectionId)).data,
+    queryKey: ['cloud-launch-defaults', connectionId, remoteOs],
+    queryFn: async () => (await cloudApi.getLaunchDefaults(connectionId, remoteOs)).data,
     enabled: connectionId.length > 0,
   })
 
@@ -193,8 +212,8 @@ export function CloudLaunchPanel({
     isError: catalogError,
     error: catalogErrorDetail,
   } = useQuery({
-    queryKey: ['cloud-launch-catalog', connectionId, region],
-    queryFn: async () => (await cloudApi.getLaunchCatalog(connectionId, region || undefined)).data,
+    queryKey: ['cloud-launch-catalog', connectionId, region, remoteOs],
+    queryFn: async () => (await cloudApi.getLaunchCatalog(connectionId, region || undefined, remoteOs)).data,
     enabled: connectionId.length > 0 && defaults != null,
   })
 
@@ -203,7 +222,7 @@ export function CloudLaunchPanel({
   const isBootstrapMode =
     (isAwsAccount && awsLaunchMode === 'bootstrap')
     || (isAzureAccount && defaults?.supportsBootstrapExisting === true)
-  const showCreateForm = !isBootstrapMode
+  const showCreateForm = !isBootstrapMode && defaults?.supportsCreate !== false
 
   const { data: instances, isLoading: loadingInstances } = useQuery({
     queryKey: ['cloud-instances', connectionId, region],
@@ -219,6 +238,9 @@ export function CloudLaunchPanel({
     setRegion(defaults.region)
     setSize(defaults.size)
     setImage(defaults.image)
+    if (defaults.supportsCustomDiskSize && defaults.diskSizeGb && defaults.diskSizeGb > 0) {
+      setDiskSizeGb(defaults.diskSizeGb)
+    }
   }, [defaults])
 
   useEffect(() => {
@@ -227,15 +249,19 @@ export function CloudLaunchPanel({
     }
 
     if (catalog.sizes.length > 0) {
-      const sizeInCatalog = catalog.sizes.some((option) => option.value === size)
-      if (!size.trim() || !sizeInCatalog) {
-        const preferred = catalog.sizes.find((option) =>
+      const matchingCpu = cpuFilter
+        ? catalog.sizes.filter((option) => String(option.vcpus ?? '') === cpuFilter)
+        : catalog.sizes
+      const pool = matchingCpu.length > 0 ? matchingCpu : catalog.sizes
+      const sizeInPool = pool.some((option) => option.value === size)
+      if (!size.trim() || !sizeInPool) {
+        const preferred = pool.find((option) =>
           option.value === 't3.micro'
           || option.value === 't2.micro'
           || option.value === 't3.small'
           || option.value === 'cx22'
           || option.value === 'vc2-2c-4gb')
-        setSize(preferred?.value ?? catalog.sizes[0].value)
+        setSize(preferred?.value ?? pool[0].value)
         return
       }
     }
@@ -255,16 +281,37 @@ export function CloudLaunchPanel({
         setImage(imagePool[0].value)
       }
     }
-  }, [catalog, image, isAwsAccount, awsLaunchMode, size, showCreateForm, selectedConnection?.provider])
+  }, [catalog, image, isAwsAccount, awsLaunchMode, size, showCreateForm, selectedConnection?.provider, cpuFilter])
 
+  const cpuOptions = useMemo(() => {
+    const counts = new Set<number>()
+    for (const option of catalog?.sizes ?? []) {
+      if (typeof option.vcpus === 'number' && option.vcpus > 0) {
+        counts.add(option.vcpus)
+      }
+    }
+    return [...counts].sort((a, b) => a - b)
+  }, [catalog?.sizes])
+  const showCpuFilter = cpuOptions.length > 1
   const regionOptions = useMemo(
     () => withCurrentOption(catalog?.regions, region),
     [catalog?.regions, region]
   )
-  const sizeOptions = useMemo(
-    () => (isAwsAccount ? (catalog?.sizes ?? []) : withCurrentOption(catalog?.sizes, size)),
-    [catalog?.sizes, isAwsAccount, size]
+  const sizeOptions = useMemo(() => {
+    const source = isAwsAccount ? (catalog?.sizes ?? []) : withCurrentOption(catalog?.sizes, size)
+    if (!cpuFilter) {
+      return source
+    }
+    const filtered = source.filter((option) => String(option.vcpus ?? '') === cpuFilter)
+    return filtered.length > 0 ? filtered : source
+  }, [catalog?.sizes, cpuFilter, isAwsAccount, size])
+  const selectedSize = useMemo(
+    () => (catalog?.sizes ?? []).find((option) => option.value === size) ?? null,
+    [catalog?.sizes, size]
   )
+  const customDisk = Boolean(catalog?.supportsCustomDiskSize)
+  const minDisk = catalog?.minDiskSizeGb ?? 20
+  const maxDisk = catalog?.maxDiskSizeGb ?? 1000
   const imageOptions = useMemo(() => {
     const images = catalog?.images ?? []
     if (!isAwsAccount) {
@@ -293,9 +340,11 @@ export function CloudLaunchPanel({
           mode,
           name: name.trim(),
           sshUser: operatorUser.trim() || defaults?.sshUser || DEFAULT_OPERATOR_SSH_USER,
+          targetOs: remoteOs,
           region: region.trim() || undefined,
           instanceId: instanceId.trim() || undefined,
           size: size.trim() || undefined,
+          diskSizeGb: customDisk ? diskSizeGb : undefined,
           image: image.trim() || undefined,
           savedSshKeyId: savedSshKeyId.trim() || undefined,
           generateSshKey: (embedded || generateSshKey) && !savedSshKeyId.trim(),
@@ -307,8 +356,18 @@ export function CloudLaunchPanel({
     onSuccess: (result) => {
       setLaunchError(null)
       setLaunchMessage(result.message)
+      const operatorUser = result.instance.suggestedSshUser?.trim() || DEFAULT_OPERATOR_SSH_USER
+      const bootstrapUser = result.bootstrapSshUser?.trim()
+        || imageDefaultSshUser(selectedConnection?.provider, remoteOs)
+      const downloads: Array<{ filename: string; pem: string }> = []
       if (result.privateKeyPem) {
-        downloadPemFile(`azeroth-${(result.savedSshKeyId ?? 'launch').slice(0, 8)}`, result.privateKeyPem)
+        downloads.push({ filename: operatorUser, pem: result.privateKeyPem })
+      }
+      if (result.bootstrapPrivateKeyPem) {
+        downloads.push({ filename: bootstrapUser, pem: result.bootstrapPrivateKeyPem })
+      }
+      if (downloads.length > 0) {
+        downloadPemFiles(downloads)
       }
       onLaunched(result)
     },
@@ -351,6 +410,7 @@ export function CloudLaunchPanel({
       || selectedConnection?.provider === CloudProvider.Vultr
     ) {
       setSize('')
+      setCpuFilter('')
       if (selectedConnection?.provider === CloudProvider.Aws) {
         setImage('')
       }
@@ -361,6 +421,14 @@ export function CloudLaunchPanel({
   }
 
   const showBody = embedded || expanded
+  const catalogPending = showCreateForm && (loadingDefaults || loadingCatalog)
+  const launchReady = isBootstrapMode
+    ? instanceId.trim().length > 0
+    : name.trim().length > 0
+      && region.trim().length > 0
+      && size.trim().length > 0
+      && (!(isAwsAccount || selectedConnection?.provider === CloudProvider.Vultr) || image.trim().length > 0)
+  const launchBusy = launchMutation.isPending || catalogPending
 
   return (
     <div className={embedded ? 'space-y-3' : 'rounded-lg border border-emerald-200 bg-emerald-50/60'}>
@@ -532,22 +600,78 @@ export function CloudLaunchPanel({
                     ) : null}
                   </div>
                   <div>
-                    <CatalogField
-                      id="launch-size"
-                      label={sizeLabel}
-                      value={size}
-                      options={sizeOptions}
-                      disabled={disabled || launchMutation.isPending}
-                      loading={loadingDefaults || loadingCatalog}
-                      onChange={setSize}
-                      placeholder={`Select ${sizeLabel.toLowerCase()}…`}
-                    />
+                    {showCpuFilter ? (
+                      <CatalogField
+                        id="launch-cpu"
+                        label="vCPU"
+                        value={cpuFilter}
+                        options={cpuOptions.map((count) => ({
+                          value: String(count),
+                          label: `${count} vCPU`,
+                        }))}
+                        disabled={disabled || launchMutation.isPending}
+                        loading={loadingDefaults || loadingCatalog}
+                        onChange={setCpuFilter}
+                        placeholder="Any"
+                      />
+                    ) : null}
+                    <div className={showCpuFilter ? 'mt-3' : undefined}>
+                      <CatalogField
+                        id="launch-size"
+                        label={sizeLabel}
+                        value={size}
+                        options={sizeOptions}
+                        disabled={disabled || launchMutation.isPending}
+                        loading={loadingDefaults || loadingCatalog}
+                        onChange={setSize}
+                        placeholder={`Select ${sizeLabel.toLowerCase()}…`}
+                      />
+                    </div>
                     {isAwsAccount ? (
                       <p className="mt-1 text-[11px] text-gray-500">
                         Only Free Tier eligible types this account can launch in the selected region.
                       </p>
+                    ) : showCpuFilter ? (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Filter sizes by vCPU, then pick RAM and disk from the list.
+                      </p>
                     ) : null}
                   </div>
+                  {customDisk ? (
+                    <div>
+                      <label htmlFor="launch-disk" className="block text-xs font-medium text-gray-800">
+                        Storage (GB)
+                      </label>
+                      <input
+                        id="launch-disk"
+                        type="number"
+                        min={minDisk}
+                        max={maxDisk}
+                        step={10}
+                        value={diskSizeGb}
+                        disabled={disabled || launchMutation.isPending}
+                        onChange={(event) => {
+                          const next = Number.parseInt(event.target.value, 10)
+                          if (Number.isNaN(next)) {
+                            return
+                          }
+                          setDiskSizeGb(Math.min(maxDisk, Math.max(minDisk, next)))
+                        }}
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Root disk for the VM ({minDisk}–{maxDisk} GB). Client data and Docker images need room.
+                      </p>
+                    </div>
+                  ) : selectedSize?.diskGb ? (
+                    <div>
+                      <p className="text-xs font-medium text-gray-800">Storage</p>
+                      <p className="mt-1 text-sm text-gray-700">{selectedSize.diskGb} GB included with this size</p>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Disk size is fixed by the plan on this provider. Pick a larger size for more disk.
+                      </p>
+                    </div>
+                  ) : null}
                   <CatalogField
                     id="launch-image"
                     label={imageLabel}
@@ -634,8 +758,7 @@ export function CloudLaunchPanel({
                   className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <p className="mt-1 text-[11px] text-gray-600">
-                  Created on first boot. Not root. After the stack is working, Finalize SSH hardening locks ubuntu out of
-                  internet SSH (AWS console Instance Connect remains for break-glass).
+                  Created on first boot. Not root. Launch also downloads the bootstrap PEM for first SSH. Verify VPC uses that key, then locks those accounts. Daily SSH is this operator user (the VPC provider console stays for break-glass).
                 </p>
                 {operatorWarning ? <p className="mt-1 text-[11px] text-amber-800">{operatorWarning}</p> : null}
               </div>
@@ -663,23 +786,20 @@ export function CloudLaunchPanel({
 
               <button
                 type="button"
-                disabled={
-                  disabled
-                  || launchMutation.isPending
-                  || isForbiddenSshUser(operatorUser)
-                  || (isBootstrapMode
-                    ? instanceId.trim().length === 0
-                    : name.trim().length === 0
-                      || !region.trim()
-                      || !size.trim()
-                      || ((isAwsAccount || selectedConnection?.provider === CloudProvider.Vultr) && !image.trim()))
+                disabled={disabled || launchBusy || isForbiddenSshUser(operatorUser, remoteOs) || !launchReady}
+                title={
+                  catalogPending
+                    ? 'Loading instance types and images from the cloud account…'
+                    : !launchReady
+                      ? 'Select region, size, and image first.'
+                      : undefined
                 }
                 onClick={() => void launchMutation.mutate()}
                 className={cn(
                   'inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60'
                 )}
               >
-                {launchMutation.isPending ? (
+                {launchBusy ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <Rocket className="h-3.5 w-3.5" aria-hidden="true" />
@@ -688,11 +808,13 @@ export function CloudLaunchPanel({
                   ? isBootstrapMode
                     ? 'Bootstrapping…'
                     : 'Launching server…'
-                  : isBootstrapMode
-                    ? isAzureAccount
-                      ? 'Bootstrap via Azure Run Command'
-                      : 'Bootstrap via AWS SSM'
-                    : 'Launch server'}
+                  : catalogPending
+                    ? 'Loading launch options…'
+                    : isBootstrapMode
+                      ? isAzureAccount
+                        ? 'Bootstrap via Azure Run Command'
+                        : 'Bootstrap via AWS SSM'
+                      : 'Launch server'}
               </button>
             </>
           ) : connectionId ? null : launchableConnections.length > 0 ? (

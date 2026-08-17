@@ -73,13 +73,14 @@ function VpcSecurityStatusCard({
     acc[key].push(check)
     return acc
   }, {})
+  const firewallName = 'ufw'
 
   return (
     <div className="space-y-3 rounded-md border border-gray-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold text-gray-800">Live security status</p>
         <p className="text-[11px] text-gray-500">
-          ufw:{' '}
+          {firewallName}:{' '}
           {!ufwInstalled ? (
             <span className="text-amber-700">not installed</span>
           ) : ufwActive ? (
@@ -184,7 +185,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
       )
       return { suggestedAdminSourceCidr }
     },
-    enabled: isExternal && cloudSgOpen,
+    enabled: isExternal,
     staleTime: 60_000,
   })
 
@@ -214,10 +215,10 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
   })
 
   const syncCloudSg = useMutation({
-    mutationFn: () =>
+    mutationFn: (cidrOverride?: string) =>
       stackApi.syncCloudSecurityGroup(stack.stackId, {
         connectionId,
-        adminSourceCidr: adminSourceCidr.trim(),
+        adminSourceCidr: (cidrOverride ?? adminSourceCidr).trim(),
         instanceId: instanceId.trim() || undefined,
         region: awsRegion.trim() || undefined,
       }),
@@ -236,13 +237,13 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
   })
 
   const sshUser = deployment?.externalSshUser?.trim() ?? ''
+  const hostFirewallLabel = 'ufw'
   const canHarden =
     stack.status !== StackStatus.SetupIncomplete
     && sshUser.length > 0
-    && !isForbiddenSshUser(sshUser)
-    && !isImageDefaultSshUser(sshUser)
+    && !isForbiddenSshUser(sshUser, deployment?.remoteOs)
+    && !isImageDefaultSshUser(sshUser, deployment?.remoteOs)
   const stackCloudProvider = deployment?.cloudProvider ?? stack.configuration?.deployment?.cloudProvider
-  const isAwsStack = stackCloudProvider === CloudProvider.Aws
   const isDigitalOceanStack = stackCloudProvider === CloudProvider.DigitalOcean
   const isVultrStack = stackCloudProvider === CloudProvider.Vultr
   const isGcpStack = stackCloudProvider === CloudProvider.Gcp
@@ -267,7 +268,26 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
     if (savedInstanceId) {
       setInstanceId((current) => current || savedInstanceId)
     }
-  }, [deployment?.cloudConnectionId, deployment?.cloudInstanceId, firewallConnections])
+
+    const savedRegion = (deployment?.cloudRegion ?? '').trim()
+    if (savedRegion) {
+      setAwsRegion((current) => current || savedRegion)
+    }
+  }, [
+    deployment?.cloudConnectionId,
+    deployment?.cloudInstanceId,
+    deployment?.cloudRegion,
+    firewallConnections,
+  ])
+
+  useEffect(() => {
+    const suggested = networkInfo?.suggestedAdminSourceCidr?.trim()
+    if (!suggested) {
+      return
+    }
+
+    setAdminSourceCidr((current) => current.trim() || suggested)
+  }, [networkInfo?.suggestedAdminSourceCidr])
 
   const finalizeSsh = useMutation({
     mutationFn: () => stackApi.finalizeSshHardening(stack.stackId),
@@ -306,9 +326,9 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
               bind policy.
             </p>
             <p className="mt-2 text-xs text-gray-500">
-              <strong>Sync VPC firewall (ufw)</strong> is optional. It SSHs into your remote Linux server and
-              configures <em>that machine&apos;s</em> host firewall — it does <strong>not</strong> change
-              Windows Firewall or any rules on the PC running this manager. If you only use your cloud
+              <strong>Sync VPC firewall ({hostFirewallLabel})</strong> is optional. It SSHs into your remote
+              Linux server and configures <em>that machine&apos;s</em> host firewall — it does{' '}
+              <strong>not</strong> change rules on the PC running this manager. If you only use your cloud
               provider&apos;s security group, open the <strong>Cloud SG guide</strong> and skip sync.
             </p>
           </div>
@@ -319,7 +339,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
             onClick={() => void refetchStatus()}
             disabled={statusFetching}
             className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-            title="Re-check ufw and Docker bind policy on the remote host"
+            title={`Re-check ${hostFirewallLabel} and Docker bind policy on the remote host`}
           >
             {statusFetching ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -337,7 +357,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                 ? 'border-green-300 bg-green-50 text-green-800 hover:bg-green-100'
                 : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
             }`}
-            title="Configure ufw on the remote VPS over SSH (optional)"
+            title={`Configure ${hostFirewallLabel} on the remote VPS over SSH (optional)`}
           >
             {syncFirewall.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -346,7 +366,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
             ) : (
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            {syncSuccess === true && !syncFirewall.isPending ? 'VPC firewall synced' : 'Sync VPC firewall (ufw)'}
+            {syncSuccess === true && !syncFirewall.isPending ? 'VPC firewall synced' : `Sync VPC firewall (${hostFirewallLabel})`}
           </button>
           <button
             type="button"
@@ -357,6 +377,42 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
           </button>
         </div>
       </div>
+
+      {networkInfo?.suggestedAdminSourceCidr && firewallConnections.length > 0 ? (
+        <div
+          role="status"
+          className="mt-4 flex flex-wrap items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+        >
+          <p>
+            SSH on the cloud firewall is limited to your admin IP. This browser&apos;s public IP is{' '}
+            <span className="font-mono">{networkInfo.suggestedAdminSourceCidr}</span>. If you changed
+            networks, update the SSH rule so azp-admin still works.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const cidr = networkInfo.suggestedAdminSourceCidr?.trim()
+              if (!cidr) {
+                return
+              }
+              setAdminSourceCidr(cidr)
+              setCloudSgOpen(true)
+              if (connectionId) {
+                syncCloudSg.mutate(cidr)
+              }
+            }}
+            disabled={syncCloudSg.isPending || !connectionId}
+            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-amber-950 hover:bg-amber-100 disabled:opacity-60"
+          >
+            {syncCloudSg.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Shield className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            Update SSH to my IP
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-4">
         {statusLoading && <p className="text-xs text-gray-500">Checking firewall status…</p>}
@@ -522,7 +578,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                   </p>
                   <button
                     type="button"
-                    onClick={() => syncCloudSg.mutate()}
+                    onClick={() => syncCloudSg.mutate(undefined)}
                     disabled={
                       syncCloudSg.isPending
                       || !connectionId
@@ -609,24 +665,13 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
             <p className="text-[11px] text-green-800">
               Applied {new Date(stack.sshHardeningCompletedAt).toLocaleString()}. Daily SSH is{' '}
               <span className="font-mono">{sshUser || 'the operator user'}</span>
-              {isAwsStack
-                ? '; ubuntu is AWS console Instance Connect only'
-                : isDigitalOceanStack
-                  ? '; image-default users cannot SSH from the internet (break-glass is Droplet Console)'
-                  : isVultrStack
-                    ? '; image-default users cannot SSH from the internet (break-glass is View Console)'
-                    : isGcpStack
-                      ? '; image-default users cannot SSH from the internet (break-glass is serial console / IAP)'
-                      : isAzureStack
-                        ? '; image-default users cannot SSH from the internet (break-glass is Bastion / serial / Run Command)'
-                        : isHetznerStack
-                          ? '; image-default users cannot SSH from the internet (break-glass is Hetzner KVM Console)'
-                          : '; image-default users cannot SSH from the internet'}.
+              ; image-default users cannot SSH from the internet (break-glass is the VPC provider console).
             </p>
           ) : (
             <p className="text-[11px] text-gray-600">
-              Last step after the stack is working. Disables root SSH and removes static keys from ubuntu (and other
-              image defaults). Keep one operator session until it finishes.
+              New launches already lock root during Verify VPC. Use this only to re-apply, or for stacks that
+              skipped that lock. Disables root SSH and removes static keys from image-default users.
+              Keep one operator session until it finishes.
             </p>
           )}
           {!canHarden ? (
@@ -635,56 +680,15 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
               SSH user <span className="font-mono">{sshUser || '(empty)'}</span> cannot be hardened.
             </p>
           ) : null}
-          {isAwsStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: AWS console → EC2 → instance → Connect → EC2 Instance Connect as{' '}
-              <span className="font-mono">ubuntu</span>, then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>.
-            </p>
-          ) : isVultrStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: Vultr portal → instance →{' '}
-              <span className="font-medium">View Console</span>, then{' '}
-              <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no internet SSH to
-              root after this.
-            </p>
-          ) : isGcpStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: Google Cloud Console → Compute Engine → VM →{' '}
-              <span className="font-medium">Serial console</span> or <span className="font-medium">IAP SSH</span>
-              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
-              internet SSH to root after this.
-            </p>
-          ) : isAzureStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: Azure Portal → VM →{' '}
-              <span className="font-medium">Bastion</span>, serial console, or{' '}
-              <span className="font-medium">Run Command</span>
-              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
-              internet SSH to root after this.
-            </p>
-          ) : isHetznerStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: Hetzner Cloud Console → server →{' '}
-              <span className="font-medium">Console</span> (KVM)
-              , then <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no
-              internet SSH to root after this.
-            </p>
-          ) : isDigitalOceanStack ? (
-            <p className="text-[11px] text-gray-600">
-              Recovery if the operator key is lost: DigitalOcean → Droplet → Access →{' '}
-              <span className="font-medium">Launch Droplet Console</span>, then{' '}
-              <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no internet SSH to
-              root after this.
-            </p>
-          ) : (
-            <p className="text-[11px] text-gray-600">
-              Recovery is the provider console (serial / web console) only. There is no internet SSH to root after this.
-            </p>
-          )}
+          <p className="text-[11px] text-gray-600">
+            Recovery if the operator key is lost: the VPC provider console, then{' '}
+            <span className="font-mono">sudo -u {sshUser || 'azp-admin'} -i</span>. There is no internet SSH to
+            root after this.
+          </p>
           {hardenConfirm ? (
             <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
               <p className="text-xs font-medium text-amber-950">
-                I understand ubuntu is console-only after this, and daily access is via my operator user. This cannot be
+                I understand root is console-only after this, and daily access is via my operator user. This cannot be
                 undone from the platform.
               </p>
               <div className="flex flex-wrap gap-2">

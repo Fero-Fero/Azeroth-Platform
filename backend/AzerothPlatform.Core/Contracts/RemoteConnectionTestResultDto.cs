@@ -16,4 +16,13 @@ public class RemoteConnectionTestResultDto
 
     /// <summary>Individual prerequisite checks (SSH, Docker Engine, Docker Compose, …).</summary>
     public List<RemotePrerequisiteCheckDto> Prerequisites { get; set; } = new();
+
+    /// <summary>
+    /// True after ubuntu/root bootstrap SSH succeeded and image-default users were locked.
+    /// Persist this so a later Verify VPC does not retry root (the bootstrap key is gone).
+    /// </summary>
+    public bool BootstrapUserSecured { get; set; }
+
+    /// <summary>OS detected on the host over SSH, when the probe could tell Linux from Windows.</summary>
+    public RemoteHostOs? DetectedOs { get; set; }
 }

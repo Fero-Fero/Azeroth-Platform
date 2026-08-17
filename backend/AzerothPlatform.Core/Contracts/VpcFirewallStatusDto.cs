@@ -13,6 +13,9 @@ public class VpcFirewallStatusDto
 
     public string? UfwStatusSummary { get; set; }
 
+    /// <summary><c>ufw</c> or <c>windows</c>.</summary>
+    public string FirewallProduct { get; set; } = "ufw";
+
     public List<VpcSecurityCheckDto> Checks { get; set; } = new();
 }
 

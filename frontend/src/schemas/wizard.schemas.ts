@@ -86,6 +86,8 @@ export const deploymentSchema = z.object({
       remoteOs: z.nativeEnum(RemoteHostOs).optional().default(RemoteHostOs.Linux),
       enableHostFirewall: z.boolean().optional().default(true),
       cloudSecurityGroupAcknowledged: z.boolean().optional().default(false),
+      bootstrapSshKeyId: z.string().optional().default(''),
+      bootstrapUserSecured: z.boolean().optional().default(false),
     })
     .superRefine((deployment, ctx) => {
       if (deployment.target === DeploymentTarget.External) {
@@ -242,6 +244,8 @@ export const WIZARD_DEFAULTS: WizardFormData = {
     remoteOs: RemoteHostOs.Linux,
     enableHostFirewall: true,
     cloudSecurityGroupAcknowledged: false,
+    bootstrapSshKeyId: '',
+    bootstrapUserSecured: false,
   },
   armoryAccounts: {
     useEmailConfirmation: false,

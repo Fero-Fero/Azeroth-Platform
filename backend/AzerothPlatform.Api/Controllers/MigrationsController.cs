@@ -20,14 +20,14 @@ public class MigrationsController : ControllerBase
     public MigrationsController(
         IMigrationService migrations,
         IMigrationApplyRunner applyRunner,
-        IIndividualProgressionSyncService individualProgression)
+        IServerWideProgressionService serverWideProgression)
     {
         _migrations = migrations;
         _applyRunner = applyRunner;
-        _individualProgression = individualProgression;
+        _serverWideProgression = serverWideProgression;
     }
 
-    private readonly IIndividualProgressionSyncService _individualProgression;
+    private readonly IServerWideProgressionService _serverWideProgression;
 
     /// <summary>Lists all patches with status and per-category file counts.</summary>
     [HttpGet]
@@ -226,27 +226,13 @@ public class MigrationsController : ControllerBase
             return await _migrations.ImportPatchCollectionAsync(stackId, stream, mode, cancellationToken);
         });
 
-    [HttpPost("individual-progression/bootstrap")]
-    public Task<IActionResult> BootstrapIndividualProgression(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.BootstrapAsync(stackId, cancellationToken));
-
-    /// <summary>Creates any missing Individual Progression patch template folders without resetting config.</summary>
-    [HttpPost("individual-progression/recreate-missing-patches")]
-    public Task<IActionResult> RecreateMissingProgressionPatches(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.RecreateMissingPatchesAsync(stackId, cancellationToken));
-
     /// <summary>
-    /// Verifies patch templates and config overrides. When Individual Progression is bootstrapped and
+    /// Verifies patch templates and config overrides. When Server Wide Progression is bootstrapped and
     /// Azeroth-Platform-Progression is synced, validates folder structure against the repository as well.
     /// </summary>
     [HttpPost("validate-patches")]
     public Task<IActionResult> ValidatePatches(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.ValidatePatchesAsync(stackId, cancellationToken));
-
-    /// <summary>Backward-compatible alias for <see cref="ValidatePatches"/>.</summary>
-    [HttpPost("individual-progression/validate-patches")]
-    public Task<IActionResult> ValidateIndividualProgressionPatches(string stackId, CancellationToken cancellationToken)
-        => ValidatePatches(stackId, cancellationToken);
+        => Execute(() => _serverWideProgression.ValidatePatchesAsync(stackId, cancellationToken));
 
     /// <summary>Captures the server_dbc baseline from the running stack's data volume.</summary>
     [HttpPost("init-baseline")]
@@ -294,32 +280,6 @@ public class MigrationsController : ControllerBase
         var stream = new FileStream(file.Value.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return File(stream, "text/plain", file.Value.FileName);
     }
-
-    [HttpGet("individual-progression/sync/status")]
-    public Task<IActionResult> GetProgressionSyncStatus(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.GetSyncStatusAsync(stackId, cancellationToken));
-
-    [HttpPost("individual-progression/sync/run")]
-    public Task<IActionResult> RunProgressionSync(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.RunSyncAsync(stackId, cancellationToken));
-
-    [HttpPost("individual-progression/sync/resolve-optional")]
-    public Task<IActionResult> ResolveProgressionOptionalFiles(
-        string stackId,
-        [FromBody] ResolveOptionalFilesRequest request,
-        CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.ResolveOptionalFilesAsync(stackId, request, cancellationToken));
-
-    [HttpGet("individual-progression/sync/ignored-files")]
-    public Task<IActionResult> GetProgressionIgnoredFiles(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.GetIgnoredFilesAsync(stackId, cancellationToken));
-
-    [HttpPost("individual-progression/sync/reprompt")]
-    public Task<IActionResult> RepromptProgressionIgnoredFile(
-        string stackId,
-        [FromQuery] string source,
-        CancellationToken cancellationToken)
-        => Execute(() => _individualProgression.RepromptIgnoredFileAsync(stackId, source, cancellationToken));
 
     // ===== File operations =====
 

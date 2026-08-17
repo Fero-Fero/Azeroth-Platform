@@ -144,6 +144,18 @@ public static class DockerComposeOverrideGenerator
     private static readonly IReadOnlyDictionary<string, string> EmptyEnv =
         new Dictionary<string, string>();
 
+    /// <summary>
+    /// Lets AzerothCore create missing <c>acore_*</c> databases and apply SQL itself.
+    /// <c>AC_DISABLE_INTERACTIVE=1</c> skips the "Do you want to create it? [yes (default) / no]"
+    /// prompt (same as answering yes) because Docker compose does not attach a TTY.
+    /// </summary>
+    private static readonly (string Key, string Value)[] AcDatabaseAutoSetupEnv =
+    [
+        ("AC_UPDATES_ENABLE_DATABASES", "7"),
+        ("AC_UPDATES_AUTO_SETUP", "1"),
+        ("AC_DISABLE_INTERACTIVE", "1"),
+    ];
+
     public static string Generate(
         string stackId,
         string? stackName,
@@ -651,6 +663,12 @@ public static class DockerComposeOverrideGenerator
     {
         sb.AppendLine("  ac-db-import:");
         sb.AppendLine($"    container_name: {containerName}");
+        sb.AppendLine("    environment:");
+        foreach (var (key, value) in AcDatabaseAutoSetupEnv)
+        {
+            AppendEnv(sb, key, value);
+        }
+
         if (external)
         {
             AppendExternalImagePin(sb, $"acore/ac-wotlk-db-import:{stackId}");
@@ -721,12 +739,12 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine("    environment:");
         EmitMergedEnv(
             sb,
-            new[]
-            {
+            AcDatabaseAutoSetupEnv.Concat(
+            [
                 ("AC_SOAP_ENABLED", "1"),
                 ("AC_SOAP_IP", "0.0.0.0"),
                 ("AC_SOAP_PORT", "7878"),
-            },
+            ]),
             customEnvironment,
             protectedKeys: new HashSet<string>(StringComparer.Ordinal)
             {
@@ -750,12 +768,8 @@ public static class DockerComposeOverrideGenerator
         sb.AppendLine("    ports:");
         sb.AppendLine("      - \"${DOCKER_AUTH_EXTERNAL_PORT}:3724\"");
 
-        // The authserver has no baseline overrides; only emit the block when the operator set some.
-        if (environment.Count > 0)
-        {
-            sb.AppendLine("    environment:");
-            EmitMergedEnv(sb, Array.Empty<(string, string)>(), environment);
-        }
+        sb.AppendLine("    environment:");
+        EmitMergedEnv(sb, AcDatabaseAutoSetupEnv, environment);
     }
 }
 

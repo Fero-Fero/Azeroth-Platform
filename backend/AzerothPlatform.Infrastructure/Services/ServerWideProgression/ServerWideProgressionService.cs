@@ -10,9 +10,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
-public sealed class IndividualProgressionSyncService : IIndividualProgressionSyncService
+public sealed class ServerWideProgressionService : IServerWideProgressionService
 {
     private const string SettingsFileName = "individual_progression_settings.json";
     private const string ProgressionMetadataFileName = "progression.json";
@@ -31,15 +31,15 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly DockerOptions _dockerOptions;
     private readonly MigrationOptions _migrationOptions;
-    private readonly ILogger<IndividualProgressionSyncService> _logger;
+    private readonly ILogger<ServerWideProgressionService> _logger;
 
-    public IndividualProgressionSyncService(
+    public ServerWideProgressionService(
         AzerothCoreDbContext dbContext,
         IServerConfigService serverConfig,
         IHttpClientFactory httpClientFactory,
         IOptions<DockerOptions> dockerOptions,
         IOptions<MigrationOptions> migrationOptions,
-        ILogger<IndividualProgressionSyncService> logger)
+        ILogger<ServerWideProgressionService> logger)
     {
         _dbContext = dbContext;
         _serverConfig = serverConfig;
@@ -50,9 +50,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
     }
 
     public bool StackHasModule(IReadOnlyList<string> moduleIds) =>
-        moduleIds.Contains(IIndividualProgressionSyncService.ModuleId, StringComparer.OrdinalIgnoreCase);
+        moduleIds.Contains(IServerWideProgressionService.ModuleId, StringComparer.OrdinalIgnoreCase);
 
-    public async Task<IndividualProgressionSettingsDto> GetSettingsAsync(
+    public async Task<ServerWideProgressionSettingsDto> GetSettingsAsync(
         string stackId,
         CancellationToken cancellationToken = default)
     {
@@ -60,9 +60,9 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         return await LoadSettingsAsync(GetStackRoot(stackId), cancellationToken);
     }
 
-    public async Task<IndividualProgressionSettingsDto> DiscoverAndMergeSettingsAsync(
+    public async Task<ServerWideProgressionSettingsDto> DiscoverAndMergeSettingsAsync(
         string stackId,
-        IndividualProgressionSettingsDto? existing = null,
+        ServerWideProgressionSettingsDto? existing = null,
         CancellationToken cancellationToken = default)
     {
         await EnsureModuleInstalledAsync(stackId, cancellationToken);
@@ -74,7 +74,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         return settings;
     }
 
-    public async Task<IndividualProgressionBootstrapResultDto> BootstrapAsync(
+    public async Task<ServerWideProgressionBootstrapResultDto> BootstrapAsync(
         string stackId,
         CancellationToken cancellationToken = default)
     {
@@ -102,7 +102,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             "Bootstrapped Individual Progression for stack {StackId}. Run progression sync to create patch folders from Azeroth-Platform-Progression.",
             stackId);
 
-        return new IndividualProgressionBootstrapResultDto
+        return new ServerWideProgressionBootstrapResultDto
         {
             TemplatesCreated = 0,
             ConfigUpdated = true,
@@ -112,7 +112,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         };
     }
 
-    public async Task<IndividualProgressionRecreatePatchesResultDto> RecreateMissingPatchesAsync(
+    public async Task<ServerWideProgressionRecreatePatchesResultDto> RecreateMissingPatchesAsync(
         string stackId,
         CancellationToken cancellationToken = default)
     {
@@ -162,7 +162,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             "Recreated {Count} missing Individual Progression patch templates for stack {StackId} ({MissingBefore} were missing).",
             templatesCreated, stackId, missingBefore);
 
-        return new IndividualProgressionRecreatePatchesResultDto
+        return new ServerWideProgressionRecreatePatchesResultDto
         {
             TemplatesCreated = templatesCreated,
             MissingBefore = missingBefore,
@@ -271,7 +271,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         return syncLog.LastKnownPatchKeys;
     }
 
-    public async Task<IndividualProgressionValidationResultDto> ValidatePatchesAsync(
+    public async Task<ServerWideProgressionValidationResultDto> ValidatePatchesAsync(
         string stackId,
         CancellationToken cancellationToken = default)
     {
@@ -282,7 +282,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var stackRoot = GetStackRoot(stackId);
         var moduleIds = JsonSerializer.Deserialize<List<string>>(stack.ModuleIdsJson, JsonOptions) ?? [];
         var hasMip = StackHasModule(moduleIds);
-        IndividualProgressionSettingsDto? settings = null;
+        ServerWideProgressionSettingsDto? settings = null;
         if (hasMip)
         {
             settings = await LoadSettingsAsync(stackRoot, cancellationToken);
@@ -299,7 +299,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         var expectedPatchKeys = ResolveExpectedPatchKeys(stackRoot);
 
         var errors = new List<string>();
-        var keyChecks = new List<IndividualProgressionKeyCheckDto>();
+        var keyChecks = new List<ServerWideProgressionKeyCheckDto>();
         var patchCount = validateRepoStructure
             ? ProgressionRepoAlignment.CountAlignedPatches(expectedPatchKeys, stackRoot)
             : 0;
@@ -373,7 +373,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         string? buildFingerprint = null;
         if (fingerprintMode)
         {
-            buildFingerprint = IndividualProgressionBuildFingerprint.Compute(stack);
+            buildFingerprint = ServerWideProgressionBuildFingerprint.Compute(stack);
             if (passed && buildFingerprint is null)
             {
                 passed = false;
@@ -397,13 +397,13 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             await PersistSettingsAsync(stackRoot, settings, cancellationToken);
         }
 
-        return new IndividualProgressionValidationResultDto
+        return new ServerWideProgressionValidationResultDto
         {
             Passed = passed,
             IsCurrent = fingerprintMode
                 && passed
                 && settings is not null
-                && IndividualProgressionBuildFingerprint.IsCurrent(settings, stack),
+                && ServerWideProgressionBuildFingerprint.IsCurrent(settings, stack),
             Mode = mode,
             ValidatedAt = fingerprintMode ? settings?.ValidationPassedAt : DateTimeOffset.UtcNow,
             BuildFingerprint = fingerprintMode ? settings?.ValidationBuildFingerprint : null,
@@ -437,7 +437,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
             return (true, null);
         }
 
-        if (IndividualProgressionBuildFingerprint.IsCurrent(settings, stack))
+        if (ServerWideProgressionBuildFingerprint.IsCurrent(settings, stack))
         {
             return (true, null);
         }
@@ -454,7 +454,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         _ => null,
     };
 
-    private static string IncrementConfigValue(IndividualProgressionSettingsDto settings, string key)
+    private static string IncrementConfigValue(ServerWideProgressionSettingsDto settings, string key)
     {
         var current = settings.Values.TryGetValue(key, out var raw) && int.TryParse(raw, out var parsed) ? parsed : 0;
         return (current + 1).ToString();
@@ -483,7 +483,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     private async Task DiscoverKeysAsync(
         string stackId,
-        IndividualProgressionSettingsDto settings,
+        ServerWideProgressionSettingsDto settings,
         CancellationToken cancellationToken)
     {
         settings.ModuleConfPath = await ResolveModuleConfPathAsync(stackId, settings.ModuleConfPath, cancellationToken);
@@ -496,7 +496,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     private async Task RefreshValuesAsync(
         string stackId,
-        IndividualProgressionSettingsDto settings,
+        ServerWideProgressionSettingsDto settings,
         CancellationToken cancellationToken)
     {
         var moduleContent = await ReadConfigContentAsync(stackId, settings.ModuleConfPath, cancellationToken);
@@ -523,7 +523,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
     private async Task WriteConfigFromSettingsAsync(
         string stackId,
-        IndividualProgressionSettingsDto settings,
+        ServerWideProgressionSettingsDto settings,
         CancellationToken cancellationToken)
     {
         if (settings.Values.TryGetValue("Expansion", out var expansion))
@@ -585,24 +585,24 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         }
     }
 
-    private async Task<IndividualProgressionSettingsDto> LoadSettingsAsync(
+    private async Task<ServerWideProgressionSettingsDto> LoadSettingsAsync(
         string stackRoot,
         CancellationToken cancellationToken)
     {
         var path = SettingsFilePath(stackRoot);
         if (!File.Exists(path))
         {
-            return new IndividualProgressionSettingsDto();
+            return new ServerWideProgressionSettingsDto();
         }
 
         await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<IndividualProgressionSettingsDto>(stream, JsonOptions, cancellationToken)
-            ?? new IndividualProgressionSettingsDto();
+        return await JsonSerializer.DeserializeAsync<ServerWideProgressionSettingsDto>(stream, JsonOptions, cancellationToken)
+            ?? new ServerWideProgressionSettingsDto();
     }
 
     private static Task PersistSettingsAsync(
         string stackRoot,
-        IndividualProgressionSettingsDto settings,
+        ServerWideProgressionSettingsDto settings,
         CancellationToken cancellationToken)
     {
         var path = SettingsFilePath(stackRoot);
@@ -623,7 +623,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
         if (!StackHasModule(moduleIds))
         {
             throw new InvalidOperationException(
-                $"Stack must have {IIndividualProgressionSyncService.ModuleId} installed to use Individual Progression features.");
+                $"Stack must have {IServerWideProgressionService.ModuleId} installed to use Server Wide Progression features.");
         }
 
         return stack;
@@ -728,7 +728,7 @@ public sealed class IndividualProgressionSyncService : IIndividualProgressionSyn
 
         try
         {
-            var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", IIndividualProgressionSyncService.ModuleId);
+            var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", IServerWideProgressionService.ModuleId);
             var moduleError = await EnsureIndividualProgressionModuleAsync(
                 moduleRoot,
                 progressStore,

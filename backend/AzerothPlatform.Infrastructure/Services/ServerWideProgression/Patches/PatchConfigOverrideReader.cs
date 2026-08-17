@@ -2,7 +2,7 @@ using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Reads effective config overrides from a patch's <c>config/*.json</c> files.

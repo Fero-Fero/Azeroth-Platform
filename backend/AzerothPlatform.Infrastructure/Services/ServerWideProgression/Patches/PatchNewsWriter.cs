@@ -1,7 +1,7 @@
 using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Writes patch <c>news/</c> content to a stack patch folder.

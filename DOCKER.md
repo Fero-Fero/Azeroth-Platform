@@ -2,8 +2,8 @@
 
 This project can be run in Docker as a single container that includes both the frontend and backend.
 
-> For install (local & external), getting started, and the full feature reference see the main
-> **[README.md](./README.md)**. This document focuses on the container/volume internals.
+> For install (local & external), getting started, and the full feature reference see
+> **[README.technical.md](./README.technical.md)**. This document focuses on the container/volume internals.
 
 ## Quick Start
 
@@ -240,7 +240,7 @@ Assets are uploaded per stack from **Client → Armory → Armory Assets**:
 - **Sync DBCs from server** extracts DBCs from the running server, converts them to CSVs, bakes them
   into the image, and reloads — this is what powers item tooltips, achievement titles, and icons.
 
-See [README.md → Armory](./README.md#armory).
+See [README.technical.md → Armory](./README.technical.md#armory).
 
 ## Stack Migrations / Patches
 
@@ -407,7 +407,7 @@ All managed AzerothCore stacks are created on the `azerothcore-network` Docker n
 
 ## Security Notes
 
-See **[README.md → Security hardening](./README.md#security-hardening)** for the full hardening
+See **[README.technical.md → Security hardening](./README.technical.md#security-hardening)** for the full hardening
 walkthrough. In short, the default compose deployment already:
 
 ### Docker socket proxy (no raw socket in the manager)

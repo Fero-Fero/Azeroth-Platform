@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using AzerothPlatform.Infrastructure.Services.Migrations;
 
-namespace AzerothPlatform.Infrastructure.Services.IndividualProgression;
+namespace AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 
 /// <summary>
 /// Maps Azeroth-Platform-Progression destination paths (expansion + patch folder + category)
@@ -59,7 +59,7 @@ internal static partial class ProgressionPatchFolderResolver
             return null;
         }
 
-        var catalog = IndividualProgressionPatchCatalog.ResolveDefinitions(stackRoot);
+        var catalog = ServerWideProgressionPatchCatalog.ResolveDefinitions(stackRoot);
         var definition = MatchDefinition(expansion, patchSegment, catalog);
         if (definition is null)
         {

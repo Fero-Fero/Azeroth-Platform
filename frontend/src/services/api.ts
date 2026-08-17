@@ -400,12 +400,14 @@ export const systemApi = {
   ) =>
     apiClient.post<import('@/types/stack.types').RemoteConnectionTestResultDto>(
       '/system/test-remote-connection',
-      { deployment, phase: phase ?? 0 }
+      { deployment, phase: phase ?? 0 },
+      { timeout: 900_000 }
     ),
   provisionRemoteHost: (request: import('@/types/stack.types').RemoteProvisionRequestDto) =>
     apiClient.post<import('@/types/stack.types').RemoteSetupResultDto>(
       '/system/provision-remote-host',
-      request
+      request,
+      { timeout: 900_000 }
     ),
   runVpcBootstrap: (deployment: import('@/types/stack.types').DeploymentConfigDto) =>
     apiClient.post<import('@/types/stack.types').RemoteBootstrapResultDto>(
@@ -428,9 +430,12 @@ export const systemApi = {
     apiClient.get<import('@/types/stack.types').VpcSecurityProfileDto>('/system/vpc-security-profile', {
       params,
     }),
-  vpcLaunchUserData: (sshUser?: string) =>
+  vpcLaunchUserData: (sshUser?: string, remoteOs?: import('@/types/stack.types').RemoteHostOs) =>
     apiClient.get<import('@/types/stack.types').VpcLaunchUserDataDto>('/system/vpc-launch-user-data', {
-      params: sshUser ? { sshUser } : undefined,
+      params: {
+        ...(sshUser ? { sshUser } : {}),
+        ...(remoteOs != null ? { remoteOs } : {}),
+      },
     }),
 }
 
@@ -458,19 +463,21 @@ export const cloudApi = {
       `/cloud/connections/${connectionId}/instances`,
       { params: region ? { region } : undefined }
     ),
-  getLaunchDefaults: (connectionId: string) =>
+  getLaunchDefaults: (connectionId: string, targetOs?: import('@/types/stack.types').RemoteHostOs) =>
     apiClient.get<import('@/types/stack.types').CloudLaunchDefaultsDto>(
-      `/cloud/connections/${connectionId}/launch-defaults`
+      `/cloud/connections/${connectionId}/launch-defaults`,
+      { params: targetOs != null ? { targetOs } : undefined }
     ),
-  getLaunchCatalog: (connectionId: string, region?: string) =>
+  getLaunchCatalog: (connectionId: string, region?: string, targetOs?: import('@/types/stack.types').RemoteHostOs) =>
     apiClient.get<import('@/types/stack.types').CloudLaunchCatalogDto>(
       `/cloud/connections/${connectionId}/launch-catalog`,
-      { params: region ? { region } : undefined }
+      { params: { ...(region ? { region } : {}), ...(targetOs != null ? { targetOs } : {}) } }
     ),
   launch: (connectionId: string, request: import('@/types/stack.types').CloudLaunchRequestDto) =>
     apiClient.post<import('@/types/stack.types').CloudLaunchResultDto>(
       `/cloud/connections/${connectionId}/launch`,
-      request
+      request,
+      { timeout: 300_000 }
     ),
   probeFirewall: (
     connectionId: string,
@@ -711,50 +718,50 @@ export const patchApi = {
       { fileNames }
     ),
 
-  bootstrapIndividualProgression: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionBootstrapResult>(
-      `/stacks/${stackId}/migrations/individual-progression/bootstrap`
+  bootstrapServerWideProgression: (stackId: string) =>
+    apiClient.post<import('@/types/server-wide-progression.types').ServerWideProgressionBootstrapResult>(
+      `/stacks/${stackId}/server-wide-progression/bootstrap`
     ),
 
   validatePatches: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionValidationResult>(
+    apiClient.post<import('@/types/server-wide-progression.types').ServerWideProgressionValidationResult>(
       `/stacks/${stackId}/migrations/validate-patches`
     ),
 
-  validateIndividualProgressionPatches: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').IndividualProgressionValidationResult>(
-      `/stacks/${stackId}/migrations/individual-progression/validate-patches`
+  validateServerWideProgressionPatches: (stackId: string) =>
+    apiClient.post<import('@/types/server-wide-progression.types').ServerWideProgressionValidationResult>(
+      `/stacks/${stackId}/server-wide-progression/validate-patches`
     ),
 
   // ===== Progression Sync =====
 
   progressionSyncStatus: (stackId: string) =>
-    apiClient.get<import('@/types/individual-progression.types').ProgressionSyncStatus>(
-      `/stacks/${stackId}/migrations/individual-progression/sync/status`
+    apiClient.get<import('@/types/server-wide-progression.types').ProgressionSyncStatus>(
+      `/stacks/${stackId}/server-wide-progression/sync/status`
     ),
 
   runProgressionSync: (stackId: string) =>
-    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
-      `/stacks/${stackId}/migrations/individual-progression/sync/run`
+    apiClient.post<import('@/types/server-wide-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/server-wide-progression/sync/run`
     ),
 
   resolveProgressionOptionalFiles: (
     stackId: string,
     decisions: Record<string, boolean>
   ) =>
-    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
-      `/stacks/${stackId}/migrations/individual-progression/sync/resolve-optional`,
+    apiClient.post<import('@/types/server-wide-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/server-wide-progression/sync/resolve-optional`,
       { decisions }
     ),
 
   getProgressionIgnoredFiles: (stackId: string) =>
-    apiClient.get<import('@/types/individual-progression.types').ProgressionIgnoredFile[]>(
-      `/stacks/${stackId}/migrations/individual-progression/sync/ignored-files`
+    apiClient.get<import('@/types/server-wide-progression.types').ProgressionIgnoredFile[]>(
+      `/stacks/${stackId}/server-wide-progression/sync/ignored-files`
     ),
 
   repromptProgressionIgnoredFile: (stackId: string, source: string) =>
-    apiClient.post<import('@/types/individual-progression.types').ProgressionSyncResult>(
-      `/stacks/${stackId}/migrations/individual-progression/sync/reprompt`,
+    apiClient.post<import('@/types/server-wide-progression.types').ProgressionSyncResult>(
+      `/stacks/${stackId}/server-wide-progression/sync/reprompt`,
       null,
       { params: { source } }
     ),
@@ -771,6 +778,10 @@ function encodePathSegments(path: string): string {
 const addonBase = (stackId: string) => `/stacks/${stackId}/addons`
 
 export const addonApi = {
+  /** Built-in catalog (no stack). Used by wizard recommended-addon notices. */
+  globalCatalog: () =>
+    apiClient.get<import('@/types/addon.types').AddonCatalogEntryDto[]>('/addons/catalog'),
+
   list: (stackId: string) =>
     apiClient.get<import('@/types/addon.types').AddonListDto>(addonBase(stackId)),
 

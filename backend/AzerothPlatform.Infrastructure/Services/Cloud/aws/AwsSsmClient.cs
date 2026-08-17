@@ -11,12 +11,13 @@ public sealed class AwsSsmClient
         string region,
         string instanceId,
         string script,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool powershell = false)
     {
         using var client = CreateClient(credentials, region);
         var response = await client.SendCommandAsync(new SendCommandRequest
         {
-            DocumentName = "AWS-RunShellScript",
+            DocumentName = powershell ? "AWS-RunPowerShellScript" : "AWS-RunShellScript",
             InstanceIds = [instanceId],
             Parameters = new Dictionary<string, List<string>>
             {

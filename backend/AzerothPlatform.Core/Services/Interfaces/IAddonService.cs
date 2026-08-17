@@ -28,6 +28,12 @@ public interface IAddonService
     Task<IReadOnlyList<AddonCatalogEntryDto>> GetCatalogAsync(string? stackId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Every built-in catalog entry, unfiltered by stack modules or server type. Used by the wizard
+    /// to resolve recommended addon ids before a stack exists.
+    /// </summary>
+    IReadOnlyList<AddonCatalogEntryDto> GetCatalogDefinitions();
+
+    /// <summary>
     /// Installs a catalog addon by id: downloads its <c>.zip</c> server-side and extracts the contained
     /// addon folder(s) into <c>Interface/AddOns/</c>, then rescans the client manifest.
     /// </summary>

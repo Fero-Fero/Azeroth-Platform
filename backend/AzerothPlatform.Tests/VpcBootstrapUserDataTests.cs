@@ -16,6 +16,17 @@ public sealed class VpcBootstrapUserDataTests
     }
 
     [Fact]
+    public void ImageDefaultSshUser_MatchesProviderLogin()
+    {
+        Assert.Equal("ubuntu", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.Aws));
+        Assert.Equal("ubuntu", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.Gcp));
+        Assert.Equal("ubuntu", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.Azure));
+        Assert.Equal("root", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.DigitalOcean));
+        Assert.Equal("root", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.Hetzner));
+        Assert.Equal("root", VpcBootstrapUserData.ImageDefaultSshUser(CloudProvider.Vultr));
+    }
+
+    [Fact]
     public void EnsureLaunchSshUser_RejectsRoot()
     {
         var ex = Assert.Throws<ArgumentException>(() => VpcBootstrapUserData.EnsureLaunchSshUser("root"));
@@ -32,6 +43,7 @@ public sealed class VpcBootstrapUserDataTests
         Assert.Contains("azp-admin ALL=(ALL) NOPASSWD:ALL", script, StringComparison.Ordinal);
         Assert.DoesNotContain("PermitRootLogin no", script, StringComparison.Ordinal);
         Assert.DoesNotContain("truncate -s 0", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("/home/ubuntu/.ssh/authorized_keys", script, StringComparison.Ordinal);
         Assert.Contains("apt-get install -y docker.io ufw unattended-upgrades", script, StringComparison.Ordinal);
         Assert.DoesNotContain("docker.io docker-compose-v2", script, StringComparison.Ordinal);
     }

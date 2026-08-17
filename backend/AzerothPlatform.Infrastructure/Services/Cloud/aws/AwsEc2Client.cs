@@ -106,19 +106,36 @@ public sealed class AwsEc2Client
         var id = (instanceId ?? string.Empty).Trim();
         var regionName = (region ?? string.Empty).Trim();
 
-        if (!string.IsNullOrWhiteSpace(id))
+        var searchAllRegions = string.IsNullOrWhiteSpace(regionName);
+        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(regionName))
         {
-            if (string.IsNullOrWhiteSpace(regionName))
+            try
             {
-                throw new ArgumentException("AWS region is required when instance id is provided.");
+                return await ResolveInstanceInRegionAsync(
+                    credentials,
+                    regionName,
+                    id,
+                    host,
+                    cancellationToken);
             }
+            catch (AmazonEC2Exception ex) when (ex.ErrorCode is "InvalidInstanceID.NotFound" or "InvalidInstanceID.Malformed")
+            {
+                if (string.IsNullOrWhiteSpace(host))
+                {
+                    throw new InvalidOperationException(
+                        ParseAwsError(ex, $"EC2 instance {id} was not found in {regionName}."));
+                }
 
-            return await ResolveInstanceInRegionAsync(
-                credentials,
-                regionName,
-                id,
-                host,
-                cancellationToken);
+                searchAllRegions = true;
+            }
+            catch (InvalidOperationException) when (!string.IsNullOrWhiteSpace(host))
+            {
+                searchAllRegions = true;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(host))
+        {
+            throw new ArgumentException("AWS region is required when instance id is provided.");
         }
 
         if (string.IsNullOrWhiteSpace(host))
@@ -126,7 +143,7 @@ public sealed class AwsEc2Client
             throw new ArgumentException("Public host or instance id is required.");
         }
 
-        var regions = string.IsNullOrWhiteSpace(regionName)
+        var regions = searchAllRegions
             ? await ResolveRegionsAsync(credentials, region: null, cancellationToken)
             : [regionName];
 
@@ -211,48 +228,59 @@ public sealed class AwsEc2Client
         string? instanceId,
         CancellationToken cancellationToken)
     {
-        var target = await ResolveInstanceForFirewallAsync(
-            credentials,
-            publicHost,
-            region,
-            instanceId,
-            cancellationToken);
-        if (target.SecurityGroupIds.Count == 0)
+        try
         {
-            return [];
-        }
-
-        using var client = CreateClient(credentials, target.Region);
-        var groups = await client.DescribeSecurityGroupsAsync(new DescribeSecurityGroupsRequest
-        {
-            GroupIds = [.. target.SecurityGroupIds],
-        }, cancellationToken);
-
-        var rules = new List<AwsIngressRule>();
-        foreach (var group in groups.SecurityGroups)
-        {
-            foreach (var permission in group.IpPermissions)
+            var target = await ResolveInstanceForFirewallAsync(
+                credentials,
+                publicHost,
+                region,
+                instanceId,
+                cancellationToken);
+            if (target.SecurityGroupIds.Count == 0)
             {
-                var port = permission.FromPort;
-                foreach (var range in permission.Ipv4Ranges)
-                {
-                    if (string.IsNullOrWhiteSpace(range.CidrIp))
-                    {
-                        continue;
-                    }
+                return [];
+            }
 
-                    rules.Add(new AwsIngressRule
+            using var client = CreateClient(credentials, target.Region);
+            var groups = await client.DescribeSecurityGroupsAsync(new DescribeSecurityGroupsRequest
+            {
+                GroupIds = [.. target.SecurityGroupIds],
+            }, cancellationToken);
+
+            var rules = new List<AwsIngressRule>();
+            foreach (var group in groups.SecurityGroups)
+            {
+                foreach (var permission in group.IpPermissions)
+                {
+                    var port = permission.FromPort;
+                    foreach (var range in permission.Ipv4Ranges)
                     {
-                        Port = port,
-                        Protocol = permission.IpProtocol ?? "tcp",
-                        Cidr = range.CidrIp,
-                        Description = range.Description ?? string.Empty,
-                    });
+                        if (string.IsNullOrWhiteSpace(range.CidrIp))
+                        {
+                            continue;
+                        }
+
+                        rules.Add(new AwsIngressRule
+                        {
+                            Port = port,
+                            Protocol = permission.IpProtocol ?? "tcp",
+                            Cidr = range.CidrIp,
+                            Description = range.Description ?? string.Empty,
+                        });
+                    }
                 }
             }
-        }
 
-        return rules;
+            return rules;
+        }
+        catch (AmazonEC2Exception ex)
+        {
+            throw new InvalidOperationException(ParseAwsError(ex, "AWS rejected the security group probe."));
+        }
+        catch (AmazonServiceException ex)
+        {
+            throw new InvalidOperationException(ParseAwsError(ex, "AWS rejected the security group probe."));
+        }
     }
 
     private static async Task<AwsInstanceNetworkTarget> ResolveInstanceInRegionAsync(
@@ -433,6 +461,7 @@ public sealed class AwsEc2Client
                 Value = type.Type,
                 Label = AwsLaunchInstanceTypeCatalog.FormatLabel(type),
                 Description = type.Architecture,
+                Vcpus = type.VCpus,
             })
             .ToList();
     }
@@ -519,7 +548,8 @@ public sealed class AwsEc2Client
         string publicKeyMaterial,
         CancellationToken cancellationToken,
         string? adminSourceCidr = null,
-        bool applyNetworkProfile = true)
+        bool applyNetworkProfile = true,
+        int? diskSizeGb = null)
     {
         var regionName = (region ?? string.Empty).Trim();
         var amiId = (imageId ?? string.Empty).Trim();
@@ -550,6 +580,7 @@ public sealed class AwsEc2Client
                 .ToList();
 
             var userData = Convert.ToBase64String(Encoding.UTF8.GetBytes(userDataScript));
+            var rootVolume = await ResolveRootBlockDeviceAsync(client, amiId, diskSizeGb, cancellationToken);
             AmazonEC2Exception? lastAzError = null;
 
             for (var index = 0; index < subnets.Count; index += 1)
@@ -565,7 +596,8 @@ public sealed class AwsEc2Client
                             userData,
                             name,
                             subnet.SubnetId,
-                            network.SecurityGroupId),
+                            network.SecurityGroupId,
+                            rootVolume),
                         cancellationToken);
 
                     var instance = runResponse.Reservation?.Instances.FirstOrDefault()
@@ -616,8 +648,10 @@ public sealed class AwsEc2Client
         string userData,
         string name,
         string subnetId,
-        string securityGroupId)
-        => new()
+        string securityGroupId,
+        BlockDeviceMapping? rootVolume)
+    {
+        var request = new RunInstancesRequest
         {
             ImageId = imageId,
             InstanceType = instanceType,
@@ -648,6 +682,14 @@ public sealed class AwsEc2Client
                 },
             ],
         };
+
+        if (rootVolume is not null)
+        {
+            request.BlockDeviceMappings = [rootVolume];
+        }
+
+        return request;
+    }
 
     private static bool IsRetryableLaunchPlacementError(AmazonEC2Exception exception)
     {
@@ -1026,6 +1068,57 @@ public sealed class AwsEc2Client
         }
     }
 
+    private static async Task<BlockDeviceMapping?> ResolveRootBlockDeviceAsync(
+        IAmazonEC2 client,
+        string imageId,
+        int? diskSizeGb,
+        CancellationToken cancellationToken)
+    {
+        if (diskSizeGb is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var response = await client.DescribeImagesAsync(new DescribeImagesRequest
+            {
+                ImageIds = [imageId],
+            }, cancellationToken);
+
+            var image = response.Images.FirstOrDefault();
+            if (image is null)
+            {
+                return null;
+            }
+
+            var rootName = image.RootDeviceName;
+            var mapping = image.BlockDeviceMappings
+                .FirstOrDefault(entry =>
+                    !string.IsNullOrWhiteSpace(rootName)
+                    && string.Equals(entry.DeviceName, rootName, StringComparison.OrdinalIgnoreCase))
+                ?? image.BlockDeviceMappings.FirstOrDefault(entry => entry.Ebs is not null);
+
+            if (mapping?.Ebs is null || string.IsNullOrWhiteSpace(mapping.DeviceName))
+            {
+                return null;
+            }
+
+            var amiSize = mapping.Ebs.VolumeSize;
+            mapping.Ebs.VolumeSize = Math.Max(diskSizeGb.Value, amiSize);
+            mapping.Ebs.DeleteOnTermination = true;
+            return mapping;
+        }
+        catch (AmazonEC2Exception)
+        {
+            return null;
+        }
+        catch (AmazonServiceException)
+        {
+            return null;
+        }
+    }
+
     private static AwsLaunchInstanceTypeCatalog.LaunchType? ToLaunchType(InstanceTypeInfo info)
     {
         var type = info.InstanceType?.Value ?? string.Empty;
@@ -1258,6 +1351,11 @@ public sealed class AwsEc2Client
     internal static string SuggestSshUser(string? imageName, string? imageId)
     {
         var combined = $"{imageName} {imageId}".ToLowerInvariant();
+        if (combined.Contains("windows", StringComparison.Ordinal))
+        {
+            return "Administrator";
+        }
+
         if (combined.Contains("ubuntu", StringComparison.Ordinal))
         {
             return "ubuntu";
@@ -1339,6 +1437,8 @@ public sealed class AwsEc2Client
         public string Label { get; init; } = string.Empty;
 
         public string? Description { get; init; }
+
+        public int? Vcpus { get; init; }
     }
 
     public sealed class AwsInstanceNetworkTarget

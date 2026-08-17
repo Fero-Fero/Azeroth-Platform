@@ -417,6 +417,11 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RemoteOs")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("RuntimeArtifactVersion")
                         .HasColumnType("INTEGER");
 

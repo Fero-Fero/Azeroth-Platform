@@ -104,6 +104,7 @@ public interface IRemoteEngineService
         string user,
         string privateKey,
         RemoteConnectionTestPhase phase = RemoteConnectionTestPhase.Full,
+        VpcConnectionTestOptions? options = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -122,13 +123,14 @@ public interface IRemoteEngineService
     /// Locks root and image-default users out of internet SSH. Platform access stays on the operator user.
     /// AWS keeps <c>ubuntu</c> for EC2 Instance Connect only.
     /// </summary>
-    Task<RemoteSetupResultDto> FinalizeSshHardeningAsync(
-        string host,
-        int sshPort,
-        string user,
-        string privateKey,
-        bool enableAwsInstanceConnect,
-        CancellationToken cancellationToken = default);
+        Task<RemoteSetupResultDto> FinalizeSshHardeningAsync(
+            string host,
+            int sshPort,
+            string user,
+            string privateKey,
+            bool enableAwsInstanceConnect,
+            CancellationToken cancellationToken = default,
+            RemoteHostOs remoteOs = RemoteHostOs.Linux);
 
     /// <summary>
     /// Runs the VPC bootstrap shell script on a remote host over SSH (<c>bash -s</c> stdin). Prefer this

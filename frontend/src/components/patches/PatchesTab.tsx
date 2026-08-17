@@ -19,8 +19,8 @@ import {
   downloadApplyLog,
   downloadPatchTemplate,
   useSavePatchDescription,
-  useBootstrapIndividualProgression,
-  useValidateIndividualProgressionPatches,
+  useBootstrapServerWideProgression,
+  useValidateServerWideProgressionPatches,
   useProgressionSyncStatus,
   patchKeys,
 } from '@/hooks/usePatches'
@@ -39,7 +39,7 @@ import MpqRemovalPanel from './MpqRemovalPanel'
 import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
-import type { IndividualProgressionValidationResult } from '@/types/individual-progression.types'
+import type { ServerWideProgressionValidationResult } from '@/types/server-wide-progression.types'
 import { useLauncherConfig, useLauncherTemplates } from '@/hooks/useLauncher'
 
 interface PatchesTabProps {
@@ -265,10 +265,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const deletePatchMutation = useDeletePatchEntry(stackId)
   const dropAllPatchesMutation = useDropAllPatches(stackId)
   const saveDescriptionMutation = useSavePatchDescription(stackId)
-  const bootstrapMutation = useBootstrapIndividualProgression(stackId)
-  const validateMutation = useValidateIndividualProgressionPatches(stackId)
+  const bootstrapMutation = useBootstrapServerWideProgression(stackId)
+  const validateMutation = useValidateServerWideProgressionPatches(stackId)
   const hasIpModule = overview?.hasIndividualProgressionModule ?? false
-  const ipBootstrapped = hasIpModule && (overview?.individualProgressionBootstrapped ?? false)
+  const ipBootstrapped = hasIpModule && (overview?.serverWideProgressionBootstrapped ?? false)
   const { data: progressionSyncStatus } = useProgressionSyncStatus(stackId)
 
   const [showCreate, setShowCreate] = useState(false)
@@ -285,7 +285,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const [importMode, setImportMode] = useState<ImportPatchCollectionMode>('merge')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importSummary, setImportSummary] = useState<string | null>(null)
-  const [validationResult, setValidationResult] = useState<IndividualProgressionValidationResult | null>(null)
+  const [validationResult, setValidationResult] = useState<ServerWideProgressionValidationResult | null>(null)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const [importDragActive, setImportDragActive] = useState(false)
   const [importUploadPercent, setImportUploadPercent] = useState<number | null>(null)
@@ -760,10 +760,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     )
   }
 
-  const ipValidationRequired = overview?.individualProgressionValidationRequired ?? false
-  const ipValidationCurrent = overview?.individualProgressionValidationCurrent ?? false
+  const ipValidationRequired = overview?.serverWideProgressionValidationRequired ?? false
+  const ipValidationCurrent = overview?.serverWideProgressionValidationCurrent ?? false
   const patchApplyBlocked = ipValidationRequired && !ipValidationCurrent
-  const expectedProgressionPatchCount = overview?.individualProgressionExpectedPatchCount ?? 0
+  const expectedProgressionPatchCount = overview?.serverWideProgressionExpectedPatchCount ?? 0
 
   const patchIsApplyable =
     selectedSummary?.status === 'Next' && !isApplying && !patchApplyBlocked
@@ -878,7 +878,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     hasIpModule &&
     (overview?.currentLevel ?? 0) === 0 &&
     !isApplying &&
-    !overview?.individualProgressionBootstrapped
+    !overview?.serverWideProgressionBootstrapped
 
   const hasCompletedProgressionSync =
     progressionSyncStatus?.hasCompletedInitialSync === true || !!progressionSyncStatus?.lastSyncAt
@@ -899,7 +899,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       validationResult !== null)
   const validationMode =
     validationResult?.mode ??
-    (hasIpModule && (overview?.individualProgressionExpectedPatchCount ?? 0) > 0 ? 'Full' : 'ConfigOnly')
+    (hasIpModule && (overview?.serverWideProgressionExpectedPatchCount ?? 0) > 0 ? 'Full' : 'ConfigOnly')
   const validationPanelPositive =
     ipValidationCurrent ||
     (validationResult?.passed === true && validationResult.mode === 'ConfigOnly')
@@ -909,7 +909,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       : 'Validates config override keys against live server configs. Run progression sync first for full structure checks.'
   const progressionPatchCountMismatch =
     expectedProgressionPatchCount > 0 &&
-    (validationResult?.patchCount ?? overview?.individualProgressionPatchCount ?? 0) !==
+    (validationResult?.patchCount ?? overview?.serverWideProgressionPatchCount ?? 0) !==
       expectedProgressionPatchCount
 
   const applyProgressionPreview = (() => {
@@ -1065,7 +1065,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
         <section className="rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-violet-900">Individual Progression</p>
+              <p className="text-sm font-semibold text-violet-900">Server Wide Progression</p>
               <p className="mt-1 max-w-2xl text-sm text-violet-800">
                 Prepare server-wide progression settings, then use{' '}
                 <strong>Sync with mod-individual-progression</strong> below to pull both repositories,
@@ -1099,11 +1099,11 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-gray-900">Patch validation</p>
               <p className="mt-1 max-w-2xl text-sm text-gray-600">{validationModeDescription}</p>
-              {ipValidationCurrent && overview?.individualProgressionValidationPassedAt && validationMode === 'Full' && (
+              {ipValidationCurrent && overview?.serverWideProgressionValidationPassedAt && validationMode === 'Full' && (
                 <p className="mt-2 flex items-center gap-1.5 text-sm text-green-800">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
                   Validation passed for the current server build (
-                  {new Date(overview.individualProgressionValidationPassedAt).toLocaleString()}).
+                  {new Date(overview.serverWideProgressionValidationPassedAt).toLocaleString()}).
                 </p>
               )}
               {patchApplyBlocked && validationMode === 'Full' && (
@@ -1113,7 +1113,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                   {progressionPatchCountMismatch && (
                     <>
                       {' '}
-                      Found {overview?.individualProgressionPatchCount ?? 0} of{' '}
+                      Found {overview?.serverWideProgressionPatchCount ?? 0} of{' '}
                       {expectedProgressionPatchCount} expected progression patches from
                       Azeroth-Platform-Progression.
                     </>
@@ -2002,7 +2002,7 @@ Flat layout also works:
                   </p>
                 )}
                 <p className="text-xs text-gray-500 mt-3">
-                  Individual Progression config will be updated automatically when this patch finishes applying.
+                  mod-individual-progression config will be updated automatically when this patch finishes applying.
                 </p>
               </div>
             </div>

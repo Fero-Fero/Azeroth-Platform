@@ -5,7 +5,7 @@ using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Data.Entities;
-using AzerothPlatform.Infrastructure.Services.IndividualProgression;
+using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -50,7 +50,7 @@ public sealed partial class MigrationService : IMigrationService
     private readonly IClientDistributionService _clientDistribution;
     private readonly IMigrationImageService _imageService;
     private readonly IRemoteEngineService _remoteEngine;
-    private readonly IIndividualProgressionSyncService _individualProgression;
+    private readonly IServerWideProgressionService _serverWideProgression;
     private readonly IServerConfigService _serverConfig;
     private readonly IStackRegistryService _stackRegistry;
     private readonly ILauncherPortalService _launcherPortal;
@@ -64,7 +64,7 @@ public sealed partial class MigrationService : IMigrationService
         IClientDistributionService clientDistribution,
         IMigrationImageService imageService,
         IRemoteEngineService remoteEngine,
-        IIndividualProgressionSyncService individualProgression,
+        IServerWideProgressionService serverWideProgression,
         IServerConfigService serverConfig,
         IStackRegistryService stackRegistry,
         ILauncherPortalService launcherPortal,
@@ -77,7 +77,7 @@ public sealed partial class MigrationService : IMigrationService
         _clientDistribution = clientDistribution;
         _imageService = imageService;
         _remoteEngine = remoteEngine;
-        _individualProgression = individualProgression;
+        _serverWideProgression = serverWideProgression;
         _serverConfig = serverConfig;
         _stackRegistry = stackRegistry;
         _launcherPortal = launcherPortal;
@@ -116,9 +116,9 @@ public sealed partial class MigrationService : IMigrationService
 
         var appliedAt = ParseAppliedPatches(stack.AppliedPatchesJson);
         var moduleIds = JsonSerializer.Deserialize<List<string>>(stack.ModuleIdsJson, JsonOptions) ?? [];
-        var hasIpModule = _individualProgression.StackHasModule(moduleIds);
+        var hasIpModule = _serverWideProgression.StackHasModule(moduleIds);
         var ipSettings = hasIpModule
-            ? await _individualProgression.GetSettingsAsync(stackId, cancellationToken)
+            ? await _serverWideProgression.GetSettingsAsync(stackId, cancellationToken)
             : null;
 
         var summaries = new List<PatchSummaryDto>();
@@ -127,7 +127,7 @@ public sealed partial class MigrationService : IMigrationService
             MigrationLayout.SeedPatchDescriptionIfMissing(stackRoot, patch.Key);
             var (sql, dbc, map, mpq) = CountFiles(stackRoot, patch.Key);
             var metadata = hasIpModule
-                ? await _individualProgression.ReadPatchMetadataAsync(stackRoot, patch.Key)
+                ? await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key)
                 : null;
 
             summaries.Add(new PatchSummaryDto
@@ -152,11 +152,11 @@ public sealed partial class MigrationService : IMigrationService
 
         var applying = IsApplyLockLive(stack);
 
-        var patchCount = hasIpModule ? _individualProgression.CountProgressionPatches(stackRoot) : 0;
+        var patchCount = hasIpModule ? _serverWideProgression.CountProgressionPatches(stackRoot) : 0;
         var validationRequired = hasIpModule && (ipSettings?.Bootstrapped ?? false);
         var validationCurrent = validationRequired
             && ipSettings is not null
-            && IndividualProgressionBuildFingerprint.IsCurrent(ipSettings, stack);
+            && ServerWideProgressionBuildFingerprint.IsCurrent(ipSettings, stack);
 
         return new MigrationOverviewDto
         {
@@ -168,13 +168,13 @@ public sealed partial class MigrationService : IMigrationService
             ApplyingPatchKey = applying ? stack.ApplyingPatchKey : null,
             Patches = summaries,
             HasIndividualProgressionModule = hasIpModule,
-            IndividualProgressionBootstrapped = ipSettings?.Bootstrapped ?? false,
-            IndividualProgressionValidationRequired = validationRequired,
-            IndividualProgressionValidationCurrent = validationCurrent,
-            IndividualProgressionValidationPassedAt = ipSettings?.ValidationPassedAt,
-            IndividualProgressionPatchCount = patchCount,
-            IndividualProgressionExpectedPatchCount = hasIpModule
-                ? _individualProgression.GetExpectedProgressionPatchCount(stackId)
+            ServerWideProgressionBootstrapped = ipSettings?.Bootstrapped ?? false,
+            ServerWideProgressionValidationRequired = validationRequired,
+            ServerWideProgressionValidationCurrent = validationCurrent,
+            ServerWideProgressionValidationPassedAt = ipSettings?.ValidationPassedAt,
+            ServerWideProgressionPatchCount = patchCount,
+            ServerWideProgressionExpectedPatchCount = hasIpModule
+                ? _serverWideProgression.GetExpectedProgressionPatchCount(stackId)
                 : 0,
         };
     }
@@ -192,7 +192,7 @@ public sealed partial class MigrationService : IMigrationService
             .Min();
 
         var appliedAt = ParseAppliedPatches(stack.AppliedPatchesJson);
-        var metadata = await _individualProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
+        var metadata = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
         LauncherNewsItemDto? patchNews = null;
         if (PatchNewsReader.TryReadArticle(stackRoot, patch.Key, out var newsArticle, out _, out _))
         {

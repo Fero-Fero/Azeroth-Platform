@@ -5,7 +5,7 @@ import {
   useRunProgressionSync,
   useResolveProgressionOptionalFiles,
 } from '@/hooks/usePatches'
-import type { ProgressionSyncPendingFile } from '@/types/individual-progression.types'
+import type { ProgressionSyncPendingFile } from '@/types/server-wide-progression.types'
 import IgnoredFilesDialog from './IgnoredFilesDialog'
 
 interface ProgressionSyncPanelProps {

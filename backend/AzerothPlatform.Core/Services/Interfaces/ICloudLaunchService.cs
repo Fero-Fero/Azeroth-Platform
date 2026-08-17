@@ -6,12 +6,14 @@ public interface ICloudLaunchService
 {
     Task<CloudLaunchDefaultsDto> GetDefaultsAsync(
         string connectionId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        RemoteHostOs targetOs = RemoteHostOs.Linux);
 
     Task<CloudLaunchCatalogDto> GetCatalogAsync(
         string connectionId,
         string? region = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        RemoteHostOs targetOs = RemoteHostOs.Linux);
 
     Task<CloudLaunchResultDto> LaunchAsync(
         string connectionId,
