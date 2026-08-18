@@ -34,7 +34,7 @@ export default function StackDetailLoadingShell({
             <p className="mt-1 text-sm text-gray-500">
               {stack ? (
                 <>
-                  Cached overview —{' '}
+                  Cached overview -{' '}
                   {isExternal ? 'VPC stack' : 'local stack'}
                   {stack.status ? ` · last known status: ${stack.status}` : ''}
                 </>

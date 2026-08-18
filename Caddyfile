@@ -12,7 +12,7 @@
 # terminates TLS here and is forwarded to the manager over the internal network.
 
 # Default site is `localhost` (not a bare :443) so Caddy has a concrete hostname to issue a certificate
-# for — Caddy automatically uses its internal self-signed CA for `localhost`. Set SITE_ADDRESS to a real
+# for - Caddy automatically uses its internal self-signed CA for `localhost`. Set SITE_ADDRESS to a real
 # domain (or LAN hostname/IP) to serve that instead.
 {$SITE_ADDRESS:localhost} {
 	# TLS issuer is driven by TLS_EMAIL:

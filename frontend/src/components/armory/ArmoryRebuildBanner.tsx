@@ -34,7 +34,7 @@ export default function ArmoryRebuildBanner({
         <span className="inline-flex items-center gap-2">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
           <span>
-            <strong>Rebuilding armory image.</strong> This runs in the background — you can refresh or
+            <strong>Rebuilding armory image.</strong> This runs in the background - you can refresh or
             navigate away; progress continues on the server.
           </span>
         </span>

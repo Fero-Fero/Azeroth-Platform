@@ -141,7 +141,7 @@ public class RealmService : IRealmService
         }
 
         // The platform rewrites realmlist row 1 (name/address/port) on every stack start, so keep the
-        // stored realm name in sync when the primary realm is renamed here — otherwise a restart would
+        // stored realm name in sync when the primary realm is renamed here - otherwise a restart would
         // revert the name. Row 1 is also the name the armory is configured with.
         if (realmId == 1)
         {
@@ -168,7 +168,7 @@ public class RealmService : IRealmService
             throw new ArgumentException("Realm address must be between 1 and 255 characters.", nameof(host));
         }
 
-        // Persist as the stack's realmlist host override so the address survives stack restarts — the
+        // Persist as the stack's realmlist host override so the address survives stack restarts - the
         // platform rewrites the realmlist row on every start from this value (blank falls back to the
         // global default), so without persisting it here the change would be reverted on the next start.
         var stack = await _dbContext.ManagedStacks

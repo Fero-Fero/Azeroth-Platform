@@ -44,7 +44,7 @@ export default function MpqManifestPanel({ files, mpqRemovals }: MpqManifestPane
       <p className="text-xs text-violet-700">
         This patch has an <span className="font-mono">mpq.json</span> manifest (comment-only templates are
         treated as empty). Pre-built <span className="font-mono">.mpq</span> files in this folder are
-        published as-is — describe each one under <span className="font-mono">description</span> (required), not{' '}
+        published as-is - describe each one under <span className="font-mono">description</span> (required), not{' '}
         <span className="font-mono">add</span>. Names in <span className="font-mono">add</span> are archives
         built from the raw content files below; each must also have a matching{' '}
         <span className="font-mono">description</span> entry. Names in{' '}
@@ -61,7 +61,7 @@ export default function MpqManifestPanel({ files, mpqRemovals }: MpqManifestPane
               <li key={f.name} className="flex items-center gap-2 text-xs text-violet-700">
                 <span className="font-mono">{f.name}</span>
                 {f.description && (
-                  <span className="text-violet-500">— {f.description}</span>
+                  <span className="text-violet-500">- {f.description}</span>
                 )}
               </li>
             ))}

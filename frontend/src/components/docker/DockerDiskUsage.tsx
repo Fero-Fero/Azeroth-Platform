@@ -1,14 +1,14 @@
 import type { DockerDiskUsageDto } from '@/types/docker.types'
 
 export function formatBytes(bytes: number | null | undefined): string {
-  if (!bytes) return '—'
+  if (!bytes) return '-'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
 export function formatDate(value?: string | null): string {
-  if (!value) return '—'
+  if (!value) return '-'
   return new Date(value).toLocaleString()
 }
 

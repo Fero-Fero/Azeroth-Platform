@@ -7,7 +7,7 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// Static, curated per-service environment-variable templates. These describe the safe-to-tweak
 /// variables each stack service accepts; anything not listed can still be added via the UI's custom
 /// escape hatch. Managed variables (DB credentials, ports, secrets, container paths) are intentionally
-/// omitted so operators can't break connectivity from here — the override generator re-forces those.
+/// omitted so operators can't break connectivity from here - the override generator re-forces those.
 /// </summary>
 public sealed class ServiceEnvTemplateService : IServiceEnvTemplateService
 {

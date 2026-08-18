@@ -781,7 +781,7 @@ public class StacksController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve stored MySQL root credentials for credential recovery. Sensitive, audited reveal — the
+    /// Retrieve stored MySQL root credentials for credential recovery. Sensitive, audited reveal - the
     /// standard stack detail payload no longer includes the root password.
     /// </summary>
     [HttpGet("{stackId}/database-credentials")]

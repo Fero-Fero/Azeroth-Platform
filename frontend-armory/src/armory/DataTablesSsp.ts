@@ -206,7 +206,7 @@ export class DataTablesSsp {
 
 		const bindings = [...this.filterBindings, ...this.customBindings];
 
-		// The two counts and the page of data are independent — run them concurrently on the pool
+		// The two counts and the page of data are independent - run them concurrently on the pool
 		// instead of sequentially so a draw costs one round-trip's worth of latency, not three.
 		const [totalResult, filteredResult, dataResult] = await Promise.all([
 			this.db.query<RowDataPacket[]>({

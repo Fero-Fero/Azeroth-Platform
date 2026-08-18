@@ -2,7 +2,7 @@ export const MOCK_NEWS = [
   {
     id: '1',
     title: 'Welcome to the Realm',
-    excerpt: 'The gates are open — create your hero and begin your adventure across Azeroth.',
+    excerpt: 'The gates are open - create your hero and begin your adventure across Azeroth.',
     date: 'Jul 8, 2026',
     tag: 'announcement',
     imageUrl: null as string | null,

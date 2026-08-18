@@ -401,7 +401,7 @@ public static class DockerComposeOverrideGenerator
 
             if (mountLauncherDist)
             {
-                // Same launcher-dist volume the client container uses — the armory serves downloads
+                // Same launcher-dist volume the client container uses - the armory serves downloads
                 // directly from disk so players are not blocked when the client service is stopped.
                 sb.AppendLine("      - client_launcher:/launcher-dist:ro");
             }

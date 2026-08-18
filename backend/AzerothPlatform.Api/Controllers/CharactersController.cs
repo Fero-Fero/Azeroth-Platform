@@ -45,7 +45,7 @@ public class CharactersController : ControllerBase
 
     /// <summary>
     /// Create the dedicated AH Bot account and inject Alliance + Horde bot characters directly into the database.
-    /// Idempotent — safe to call multiple times.
+    /// Idempotent - safe to call multiple times.
     /// </summary>
     [HttpPost("ahbot-account")]
     public async Task<ActionResult<AhBotSetupResultDto>> CreateAhBotAccount(

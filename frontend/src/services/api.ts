@@ -39,7 +39,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
-  // FormData must not use the default application/json header — the browser needs to
+  // FormData must not use the default application/json header - the browser needs to
   // set multipart/form-data with a boundary or ASP.NET cannot bind [FromForm] IFormFile.
   if (config.data instanceof FormData) {
     delete config.headers['Content-Type']
@@ -724,11 +724,6 @@ export const patchApi = {
     ),
 
   validatePatches: (stackId: string) =>
-    apiClient.post<import('@/types/server-wide-progression.types').ServerWideProgressionValidationResult>(
-      `/stacks/${stackId}/migrations/validate-patches`
-    ),
-
-  validateServerWideProgressionPatches: (stackId: string) =>
     apiClient.post<import('@/types/server-wide-progression.types').ServerWideProgressionValidationResult>(
       `/stacks/${stackId}/server-wide-progression/validate-patches`
     ),

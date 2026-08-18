@@ -10,7 +10,7 @@ This project can be run in Docker as a single container that includes both the f
 ### 1. Configure Environment
 
 ```bash
-# Copy the example and adjust as needed (optional — sensible defaults are provided):
+# Copy the example and adjust as needed (optional - sensible defaults are provided):
 cp .env.example .env
 ```
 
@@ -32,12 +32,12 @@ docker-compose down
 ```
 
 The application is served through the bundled **Caddy** reverse proxy (TLS + security headers) at
-**https://localhost** (self-signed certificate by default — accept the warning, or set `SITE_ADDRESS`
+**https://localhost** (self-signed certificate by default - accept the warning, or set `SITE_ADDRESS`
 + `TLS_EMAIL` in `.env` for Let's Encrypt). The manager also listens on `http://localhost:8080` for
 same-host access. Log in with the `ADMIN_PASSWORD` from your `.env`.
 
 > **Compose is the supported deployment.** It wires up the Caddy proxy and the allowlisted
-> `docker-socket-proxy` and runs the manager non-root — do not run the raw `docker run` command below
+> `docker-socket-proxy` and runs the manager non-root - do not run the raw `docker run` command below
 > against an untrusted network.
 
 ### 3. Build and run with Docker directly (development only)
@@ -47,7 +47,7 @@ same-host access. Log in with the `ADMIN_PASSWORD` from your `.env`.
 docker build -t azeroth-platform:latest .
 
 # Run the container bound to loopback (manager state lives in a Docker-managed named volume).
-# NOTE: this dev shortcut mounts the raw Docker socket and skips the TLS proxy — use `docker compose`
+# NOTE: this dev shortcut mounts the raw Docker socket and skips the TLS proxy - use `docker compose`
 # (which adds the socket proxy + Caddy + non-root user) for anything beyond local testing.
 docker run -d \
   --name azeroth-platform \
@@ -87,7 +87,7 @@ falls back to the id-only prefix.
 
 Per-stack runtime data (modules, config, logs, client base/overlay/cache, the `ac-client-data`
 volume) lives in **per-stack named volumes** seeded from the manager's data volume. Nothing is
-bind-mounted from a host filesystem path — the same model is used
+bind-mounted from a host filesystem path - the same model is used
 for both local and external (remote-engine) stacks.
 
 ## Environment Variables
@@ -128,7 +128,7 @@ When the manager runs in a container it drives the host's Docker daemon through 
 `docker-socket-proxy` (over TCP on the internal network). It never bind-mounts host filesystem paths
 into stack containers. Instead, per-stack data lives in
 **named volumes** that the manager creates and seeds from its own data volume (`azeroth-platform-data`)
-using short-lived helper containers — a volume-to-volume copy on the local daemon, or a `tar` stream
+using short-lived helper containers - a volume-to-volume copy on the local daemon, or a `tar` stream
 over SSH for external stacks. This removes the need for any host-path translation, so
 `Docker__BuildsPath` is the only path setting required.
 
@@ -232,13 +232,13 @@ small. On disk all armory assets live under one unified `static/` tree
 
 Assets are uploaded per stack from **Client → Armory → Armory Assets**:
 
-- `armory.data.zip` + `armory.textures.zip` — the model-viewer dataset, served live (takes effect
+- `armory.data.zip` + `armory.textures.zip` - the model-viewer dataset, served live (takes effect
   immediately). Download it from the
   [Armory release](https://github.com/Fero-Fero/AzerothPlatform/releases/tag/Armory).
-- `armory.static.zip` — static web assets baked into the image; changing them sets a rebuild marker
+- `armory.static.zip` - static web assets baked into the image; changing them sets a rebuild marker
   and requires a **Rebuild armory image** (the marker is cleared once `ArmoryImageService` rebuilds).
 - **Sync DBCs from server** extracts DBCs from the running server, converts them to CSVs, bakes them
-  into the image, and reloads — this is what powers item tooltips, achievement titles, and icons.
+  into the image, and reloads - this is what powers item tooltips, achievement titles, and icons.
 
 See [README.technical.md → Armory](./README.technical.md#armory).
 
@@ -262,7 +262,7 @@ using named volumes rather than host bind mounts.
 Each SQL file is applied inside a single transaction (`START TRANSACTION` … `COMMIT`) with the
 mysql client left to abort on the first error, so a failing statement rolls back that whole file
 instead of leaving it half-applied. (MySQL auto-commits DDL, so `CREATE/ALTER/DROP` statements
-cannot be rolled back — this protects the DML that AzerothCore patch SQL relies on.)
+cannot be rolled back - this protects the DML that AzerothCore patch SQL relies on.)
 
 You can start **only the database** of a stack (leaving world/auth stopped) for patching or
 maintenance via `POST /api/stacks/{id}/start-database` (surfaced as **DB Maintenance** on the stack
@@ -282,8 +282,8 @@ copy of the server `.conf` files and metadata (core SHA, applied patch level).
   client, and restores the `.conf` files. Snapshot/restore run inside the DB container via the Docker
   socket (`docker exec … mysqldump` / `mysql`), so no extra host-path translation is needed.
 
-Update flow: the **Update** action snapshots first, rebuilds the images, then — if any migration
-patches are applied — runs the standard AzerothCore updates and reapplies every applied patch's SQL
+Update flow: the **Update** action snapshots first, rebuilds the images, then - if any migration
+patches are applied - runs the standard AzerothCore updates and reapplies every applied patch's SQL
 in order before rebooting the stack. Plain **Rebuild** does none of this and leaves the stack
 stopped.
 
@@ -455,7 +455,7 @@ docker compose logs docker-socket-proxy
 ls -la /var/run/docker.sock   # srw-rw---- 1 root docker
 ```
 
-If an operation is rejected, the manager may need an API group that isn't enabled — add it to the
+If an operation is rejected, the manager may need an API group that isn't enabled - add it to the
 `docker-socket-proxy` environment in `docker-compose.yml` (keep the allowlist as tight as possible).
 
 ### Inspecting the manager's data volume

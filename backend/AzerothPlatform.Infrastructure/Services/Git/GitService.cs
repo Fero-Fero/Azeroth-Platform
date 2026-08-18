@@ -115,7 +115,7 @@ public sealed class GitService : IGitService
         }
         catch
         {
-            // Best effort — the process may have exited between the check and the kill.
+            // Best effort - the process may have exited between the check and the kill.
         }
     }
 }

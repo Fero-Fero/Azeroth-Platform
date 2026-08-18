@@ -45,7 +45,7 @@ function RuleTable({
                 <tr key={`${rule.roleId}-${rule.port}-${rule.action}`}>
                   <td className="px-2 py-1.5 font-mono text-red-800">{rule.port}/{rule.protocol}</td>
                   {showSource && (
-                    <td className="px-2 py-1.5 font-mono text-red-800">{rule.source?.trim() || '—'}</td>
+                    <td className="px-2 py-1.5 font-mono text-red-800">{rule.source?.trim() || '-'}</td>
                   )}
                   <td className="px-2 py-1.5 text-red-800">{rule.description}</td>
                 </tr>
@@ -76,7 +76,7 @@ function RuleTable({
               <tr key={`${rule.roleId}-${rule.port}-${rule.action}`}>
                 <td className="px-2 py-1.5 font-mono">{rule.port}/{rule.protocol}</td>
                 {showSource && (
-                  <td className="px-2 py-1.5 font-mono">{rule.source?.trim() || '—'}</td>
+                  <td className="px-2 py-1.5 font-mono">{rule.source?.trim() || '-'}</td>
                 )}
                 <td className="px-2 py-1.5 text-gray-700">
                   {rule.description}
@@ -100,7 +100,7 @@ function resolveCloudSshSource(rules: VpcSecurityRuleDto[], suggestedSshSource?:
   )
 }
 
-/** Inbound rules to add manually — cloud firewall guide only. */
+/** Inbound rules to add manually - cloud firewall guide only. */
 export function CloudSecurityGroupRulesCard({
   profile,
   suggestedSshSource,
@@ -117,7 +117,7 @@ export function CloudSecurityGroupRulesCard({
       <p className="text-xs text-gray-700">
         Add these <span className="font-medium">inbound allow</span> rules in your cloud firewall (security
         group, NSG, or Cloud Firewall). Host <span className="font-medium">{hostFirewall}</span> is applied at launch
-        and by Verify VPC / Repair — you do not need to set source CIDRs on the {hostOs} host.
+        and by Verify VPC / Repair - you do not need to set source CIDRs on the {hostOs} host.
       </p>
       <RuleTable
         title="Inbound allow"
@@ -182,12 +182,12 @@ export function VpcSecurityProfileCard({
     <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="text-xs text-gray-700">{profile.notes}</p>
       <RuleTable
-        title="Host firewall (ufw) — allow"
+        title="Host firewall (ufw) - allow"
         rules={profile.hostFirewallRules}
         variant="allow"
       />
       <RuleTable
-        title="Cloud security group — allow"
+        title="Cloud security group - allow"
         rules={profile.cloudSecurityGroupRules}
         variant="allow"
         showSource

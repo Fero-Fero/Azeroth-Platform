@@ -18,7 +18,7 @@ function modeFromBind(bind: string): BindMode {
 /**
  * Per-stack network settings for the armory website + client file server: which host ports they publish
  * on and which interface those ports bind to. Lets an operator expose the armory beyond localhost (LAN /
- * VPC / all interfaces) from the UI — no editing the generated .env, which is unreachable on a remote host.
+ * VPC / all interfaces) from the UI - no editing the generated .env, which is unreachable on a remote host.
  */
 export default function ArmoryNetworkField({ stackId }: { stackId: string }) {
   const qc = useQueryClient()
@@ -119,7 +119,7 @@ export default function ArmoryNetworkField({ stackId }: { stackId: string }) {
             disabled={save.isPending}
             className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="all">Anywhere — all interfaces (0.0.0.0)</option>
+            <option value="all">Anywhere - all interfaces (0.0.0.0)</option>
             <option value="local">This machine only (127.0.0.1)</option>
             <option value="custom">A specific IP…</option>
             <option value="inherit">Inherit default ({data.isLocalDeployment ? 'this machine' : 'all interfaces'})</option>
@@ -169,7 +169,7 @@ export default function ArmoryNetworkField({ stackId }: { stackId: string }) {
             onClick={onSave}
             disabled={save.isPending || !dirty}
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-            title="Save and apply — recreates the armory/client containers if the stack is running"
+            title="Save and apply - recreates the armory/client containers if the stack is running"
           >
             {save.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save &amp; apply

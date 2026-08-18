@@ -316,7 +316,7 @@ public sealed class BuildService : IBuildService
         if (Directory.Exists(repoPath))
         {
             // A previously interrupted clone/build (or a `git pull` on a shallow clone) can leave the
-            // working tree incomplete — most visibly missing src/cmake/macros, which makes CMake fail
+            // working tree incomplete - most visibly missing src/cmake/macros, which makes CMake fail
             // with "Unknown CMake command GetScriptModuleList". Only reuse a checkout we can verify is
             // intact; otherwise wipe it and re-clone from scratch.
             if (IsCoreCheckoutValid(repoPath))
@@ -409,17 +409,17 @@ public sealed class BuildService : IBuildService
     /// daemon through the docker-socket-proxy, which exposes the classic <c>/build</c> endpoint but not
     /// BuildKit's session/gRPC endpoints, so builds run with DOCKER_BUILDKIT=0):
     /// <list type="number">
-    /// <item>BuildKit-only flags — <c>RUN --mount=type=cache/bind</c>, <c>COPY --chmod=</c>,
-    /// <c>COPY --link</c> — which are stripped. Safe: the ccache mount is a speed-up, the .git bind mount
+    /// <item>BuildKit-only flags - <c>RUN --mount=type=cache/bind</c>, <c>COPY --chmod=</c>,
+    /// <c>COPY --link</c> - which are stripped. Safe: the ccache mount is a speed-up, the .git bind mount
     /// only feeds the embedded revision string (AzerothCore degrades gracefully without .git), <c>--chmod</c>
     /// is superseded by the file's git mode bits, and <c>--link</c> only affects layer reuse.</item>
     /// <item>The <c>$DOCKER_USER</c> ARG referenced across FROM boundaries. In stages that <em>have</em>
-    /// the <c>acore</c> account (the <c>runtime</c> stage — which runs <c>adduser</c> — and everything
+    /// the <c>acore</c> account (the <c>runtime</c> stage - which runs <c>adduser</c> - and everything
     /// <c>FROM runtime</c>), the ARG is re-declared after FROM so <c>COPY --chown=$DOCKER_USER</c> /
     /// <c>USER $DOCKER_USER</c> resolve. In stages that do <em>not</em> create the account (e.g.
     /// <c>client-data</c>, which is <c>FROM skeleton</c>), those references can't resolve to a real user on
     /// the classic builder ("no such user: acore"), so the <c>--chown</c> is dropped and <c>USER</c> is
-    /// removed — the step then runs as root, which is fine for an init container populating a volume that
+    /// removed - the step then runs as root, which is fine for an init container populating a volume that
     /// worldserver only reads.</item>
     /// </list>
     /// No-op when BuildKit is enabled.
@@ -707,7 +707,7 @@ public sealed class BuildService : IBuildService
             var composeArgs = string.IsNullOrEmpty(argPrefix) ? "build" : $"{argPrefix} build";
 
             // Build the default (non-profiled) services: db-import, worldserver, authserver, and
-            // client-data. `ac-client-data-init` (target client-data) IS required — it populates the
+            // client-data. `ac-client-data-init` (target client-data) IS required - it populates the
             // stack's `_ac-client-data` volume that the manager's dbc/maps migration pipeline reads (see
             // MigrationService.Apply) and that worldserver mounts. `ac-tools` / `ac-dev-server` carry
             // compose `profiles:` so a bare `docker compose build` skips them automatically.
@@ -755,7 +755,7 @@ public sealed class BuildService : IBuildService
             var dockerCommand = File.Exists("/usr/bin/podman") ? "podman" : "docker";
             
             // Images are tagged with stackId for isolation. client-data is an init image (populates the
-            // shared data volume worldserver reads), so it must build too — verify all four.
+            // shared data volume worldserver reads), so it must build too - verify all four.
             var imageNames = new[]
             {
                 $"localhost/acore/ac-wotlk-worldserver:{stackId}",
@@ -987,7 +987,7 @@ public sealed class BuildService : IBuildService
         {
             buildStatus.CurrentPhase = BuildPhase.Failed;
             buildStatus.CurrentStep = rollbackMessage?.StartsWith("Automatic rollback", StringComparison.Ordinal) == true
-                ? "Update failed — rolled back"
+                ? "Update failed - rolled back"
                 : "Build failed";
             buildStatus.ErrorMessage = finalMessage;
             buildStatus.RecentLogs.Add($"ERROR: {errorMessage}");
@@ -1022,7 +1022,7 @@ public sealed class BuildService : IBuildService
         try
         {
             await UpdateBuildStatusAsync(
-                stackId, BuildPhase.Failed, 0, "Update failed — rolling back to pre-update snapshot...", null);
+                stackId, BuildPhase.Failed, 0, "Update failed - rolling back to pre-update snapshot...", null);
             await AddLogAsync(stackId, $"Restoring pre-update snapshot {revisionId}...");
 
             using var scope = _scopeFactory.CreateScope();

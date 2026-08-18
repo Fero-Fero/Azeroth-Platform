@@ -161,7 +161,7 @@ public static class ClientManifestBuilder
     public static ManifestFileGroup ResolveGroup(IReadOnlyList<string> managedPrefixes, string relativePath)
     {
         // Standard Blizzard MPQs match the managed "Data/patch-" prefix but are shared base client
-        // content — never per-profile overlay (see launcher README).
+        // content - never per-profile overlay (see launcher README).
         if (SharedClientDataFiles.IsSharedBaseDataFile(relativePath))
         {
             return ManifestFileGroup.Base;

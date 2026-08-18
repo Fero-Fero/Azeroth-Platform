@@ -688,7 +688,7 @@ export class Armory {
 	/**
 	 * Sends an error response, rendering the Handlebars error page when possible. If that render itself
 	 * fails (e.g. the static web bundle / templates are missing from the image, or a helper throws), it
-	 * degrades to JSON or plain text instead of falling through to Express's default handler — which
+	 * degrades to JSON or plain text instead of falling through to Express's default handler - which
 	 * would otherwise leak a raw stack trace to the client.
 	 */
 	private sendError(req: express.Request, res: express.Response, status: number): void {

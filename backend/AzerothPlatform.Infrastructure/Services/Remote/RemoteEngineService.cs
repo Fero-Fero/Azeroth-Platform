@@ -507,7 +507,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Passed = true,
                 Message = composeVersion is not null
                     ? $"Compose {composeVersion} also available on the VPC (optional)."
-                    : "Runs on the platform manager — not required on the VPC host."
+                    : "Runs on the platform manager - not required on the VPC host."
             });
 
             await AppendHostSecurityPrerequisiteChecksAsync(contextName, prerequisites, cancellationToken);
@@ -861,7 +861,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 return new RemoteBootstrapResultDto
                 {
                     Success = false,
-                    Message = "Bootstrap stopped — could not configure passwordless sudo.",
+                    Message = "Bootstrap stopped - could not configure passwordless sudo.",
                     Output = FormatBootstrapStepsOutput(steps),
                 };
             }
@@ -952,8 +952,8 @@ public sealed class RemoteEngineService : IRemoteEngineService
             {
                 Success = true,
                 Message = string.IsNullOrWhiteSpace(dockerVersion)
-                    ? "Bootstrap completed — Docker is installed on the remote host."
-                    : $"Bootstrap completed — Docker {dockerVersion} is running.",
+                    ? "Bootstrap completed - Docker is installed on the remote host."
+                    : $"Bootstrap completed - Docker {dockerVersion} is running.",
                 Output = output,
                 DockerVersion = dockerVersion,
             };
@@ -1053,7 +1053,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (!sudoPassed)
             {
-                return FailSetup(steps, "Hardening stopped — could not use passwordless sudo as the operator user.");
+                return FailSetup(steps, "Hardening stopped - could not use passwordless sudo as the operator user.");
             }
 
             var writeInstanceConnect = enableAwsInstanceConnect
@@ -1082,7 +1082,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (writeExit != 0)
             {
-                return FailSetup(steps, "Hardening stopped — could not write sshd config.");
+                return FailSetup(steps, "Hardening stopped - could not write sshd config.");
             }
 
             var clearKeys = RemotePathSetup
@@ -1107,7 +1107,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (clearExit != 0)
             {
-                return FailSetup(steps, "Hardening stopped — could not clear default-user SSH keys.");
+                return FailSetup(steps, "Hardening stopped - could not clear default-user SSH keys.");
             }
 
             var reload = RemotePathSetup
@@ -1128,7 +1128,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (reloadExit != 0)
             {
-                return FailSetup(steps, "Hardening stopped — could not reload sshd.");
+                return FailSetup(steps, "Hardening stopped - could not reload sshd.");
             }
 
             var (verifyExit, verifyStdout, verifyErr) = await ProbeSshEchoAsync(contextName, cancellationToken, retry: true);
@@ -1239,7 +1239,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             });
             if (!sudoPassed)
             {
-                return FailSetup(steps, "Setup stopped — could not configure passwordless sudo.");
+                return FailSetup(steps, "Setup stopped - could not configure passwordless sudo.");
             }
 
             var dockerReady = await IsRemoteDockerReadyAsync(contextName, cancellationToken);
@@ -1380,7 +1380,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
         {
-            result.Message = "SSH credentials are missing — reconnect from the SSH tab.";
+            result.Message = "SSH credentials are missing - reconnect from the SSH tab.";
             return result;
         }
 
@@ -1431,7 +1431,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             else if (!result.UfwActive)
             {
                 check.Status = "warning";
-                check.Message = "ufw is inactive — verify your cloud security group instead.";
+                check.Message = "ufw is inactive - verify your cloud security group instead.";
             }
             else if (IsUfwPortAllowed(statusOut, rule.Port))
             {
@@ -1441,7 +1441,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             else
             {
                 check.Status = "error";
-                check.Message = $"Port {rule.Port}/tcp is not allowed in ufw — run Sync VPC firewall or allow it manually.";
+                check.Message = $"Port {rule.Port}/tcp is not allowed in ufw - run Sync VPC firewall or allow it manually.";
             }
 
             result.Checks.Add(check);
@@ -1465,7 +1465,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             else if (IsUfwPortAllowed(statusOut, rule.Port))
             {
                 check.Status = "error";
-                check.Message = $"Port {rule.Port}/tcp is allowed publicly in ufw — it should stay manager/VPC-only.";
+                check.Message = $"Port {rule.Port}/tcp is allowed publicly in ufw - it should stay manager/VPC-only.";
             }
             else
             {
@@ -1494,7 +1494,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 c.Status is "ok" or "unknown" or "not-applicable");
         result.Message = result.OverallHealthy
             ? "Host firewall checks passed. Cloud security group rules must still be verified manually."
-            : "One or more host firewall checks failed — review the items below.";
+            : "One or more host firewall checks failed - review the items below.";
         return result;
     }
 
@@ -1513,7 +1513,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         if (string.IsNullOrWhiteSpace(stack.ExternalSshPrivateKey))
         {
-            result.Message = "SSH credentials are missing — reconnect from the SSH tab.";
+            result.Message = "SSH credentials are missing - reconnect from the SSH tab.";
             return result;
         }
 
@@ -1856,7 +1856,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             Passed = composeExit == 0,
             Message = composeExit == 0
                 ? SummarizeAptOutput(composeOut, composeErr, "Install Docker Compose (optional)")
-                : "Optional — Compose runs on the platform manager when unavailable on the VPC."
+                : "Optional - Compose runs on the platform manager when unavailable on the VPC."
         });
 
         if (!await RemoteDockerSystemdUnitExistsAsync(contextName, cancellationToken)
@@ -1927,7 +1927,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             Passed = true,
             Message = composeVersion is not null
                 ? $"Compose {composeVersion} available on the VPC (optional)."
-                : "Compose runs on the platform manager — not required on the VPC host."
+                : "Compose runs on the platform manager - not required on the VPC host."
         });
 
         return null;
@@ -1988,7 +1988,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             {
                 Name = "Configure host firewall (ufw)",
                 Passed = true,
-                Message = "ufw is already active — verifying SSH and player/web port rules."
+                Message = "ufw is already active - verifying SSH and player/web port rules."
             });
         }
         else
@@ -2096,7 +2096,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
             Name = "Configure firewall rules",
             Passed = statusExit == 0,
             Message = statusExit == 0
-                ? "Host firewall configured. Management ports (MySQL/SOAP) are not opened — Docker binds them on the VPC interface only."
+                ? "Host firewall configured. Management ports (MySQL/SOAP) are not opened - Docker binds them on the VPC interface only."
                 : "Firewall configured; status check failed."
         });
 
@@ -2397,7 +2397,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
                 Name = $"ufw deny {port}/tcp ({label})",
                 Passed = !allowed,
                 Message = allowed
-                    ? $"{label} port {port}/tcp is publicly allowed in ufw — it should stay VPC-only."
+                    ? $"{label} port {port}/tcp is publicly allowed in ufw - it should stay VPC-only."
                     : $"{label} is not opened in ufw (expected)."
             });
         }
@@ -3087,7 +3087,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
     /// <summary>
     /// Starts and enables the Docker systemd units after package install, then waits until the engine API responds.
-    /// Ubuntu's docker.io package uses socket activation — docker.service may stay inactive until first use.
+    /// Ubuntu's docker.io package uses socket activation - docker.service may stay inactive until first use.
     /// </summary>
     private async Task<(bool Passed, string Message)> EnsureRemoteDockerServiceAsync(
         string contextName,
@@ -3386,7 +3386,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
     /// SSRF allowlist check: returns true when <paramref name="host"/> resolves to a loopback or
     /// link-local address (the latter includes the 169.254.169.254 cloud-metadata endpoint). Hostnames are
     /// resolved so a name pointing at a blocked IP (or DNS rebinding) is also caught. Private LAN ranges
-    /// are deliberately allowed — real remote Docker engines commonly live there. On resolution failure we
+    /// are deliberately allowed - real remote Docker engines commonly live there. On resolution failure we
     /// return false and let the subsequent SSH attempt fail normally.
     /// </summary>
     private static async Task<bool> IsDisallowedRemoteHostAsync(string host, CancellationToken cancellationToken)
@@ -4082,7 +4082,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
 
         summary.VolumeExists = true;
         // Prefer cheap checks (Wow.exe / Data/*.MPQ / du) over a full-tree file count, which can
-        // fail or time out on large (~17 GB) client volumes — especially over a remote docker context.
+        // fail or time out on large (~17 GB) client volumes - especially over a remote docker context.
         const string summaryScript =
             "set +e; " +
             "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
@@ -5014,7 +5014,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         }
         else if (SshProbe.IsConnectivityFailure(message))
         {
-            message += " This is usually a network or firewall issue, not bad credentials — confirm the " +
+            message += " This is usually a network or firewall issue, not bad credentials - confirm the " +
                        "instance is running, the host/IP is correct (EC2 public IPs change after stop/start " +
                        "unless you use an Elastic IP), and SSH port " + port +
                        " is allowed from this manager in your cloud security group.";
@@ -5075,7 +5075,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         else if (message.Contains("docker daemon", StringComparison.OrdinalIgnoreCase)
                  || message.Contains("docker.sock", StringComparison.OrdinalIgnoreCase))
         {
-            message += " The Docker client is installed but the daemon is not running — on the remote " +
+            message += " The Docker client is installed but the daemon is not running - on the remote " +
                        "host run: sudo systemctl start docker && sudo systemctl enable docker";
         }
 

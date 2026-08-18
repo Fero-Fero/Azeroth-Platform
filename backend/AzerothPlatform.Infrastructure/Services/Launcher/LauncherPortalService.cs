@@ -743,7 +743,7 @@ public sealed class LauncherPortalService : ILauncherPortalService
         }
         catch
         {
-            // Not a decodable/encodable image for this extension — store the bytes verbatim.
+            // Not a decodable/encodable image for this extension - store the bytes verbatim.
             buffer.Position = 0;
             await using var fs = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.None);
             await buffer.CopyToAsync(fs, cancellationToken);

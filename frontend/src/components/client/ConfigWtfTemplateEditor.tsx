@@ -6,7 +6,7 @@ import { apiErrorMessage as errorMessage } from '@/lib/utils'
 /**
  * Editor for the stack's WTF/Config.wtf settings template (the file the launcher seeds on a player's
  * first install). Placeholders {{HOST}}/{{PORT}} are substituted per launcher when served. After the
- * first install Config.wtf is player-owned — later launches only patch the realmlist line — so edits
+ * first install Config.wtf is player-owned - later launches only patch the realmlist line - so edits
  * here affect fresh installs (or installs where the player deleted Config.wtf).
  */
 export default function ConfigWtfTemplateEditor({ stackId }: { stackId: string }) {

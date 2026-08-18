@@ -46,7 +46,7 @@
 		function makeBossRow(boss) {
 			const $row = $('<div class="ptt-boss"></div>').toggleClass("done", boss.bestMs > 0);
 			$row.append($('<span class="ptt-boss-name"></span>').text(boss.name));
-			$row.append($('<span class="ptt-boss-time"></span>').text(boss.bestMs > 0 ? formatTime(boss.bestMs) : "—"));
+			$row.append($('<span class="ptt-boss-time"></span>').text(boss.bestMs > 0 ? formatTime(boss.bestMs) : "-"));
 			return $row;
 		}
 
@@ -64,7 +64,7 @@
 			const last = formatTime(raid.clear.lastMs);
 			let summary;
 			if (raid.clear.completions > 0) {
-				summary = `Best ${best ?? "—"}` + (last ? ` · Last ${last}` : "") + ` · ${raid.clear.completions} ${raid.clear.completions === 1 ? "clear" : "clears"}`;
+				summary = `Best ${best ?? "-"}` + (last ? ` · Last ${last}` : "") + ` · ${raid.clear.completions} ${raid.clear.completions === 1 ? "clear" : "clears"}`;
 			} else {
 				summary = "No recorded clears yet.";
 			}

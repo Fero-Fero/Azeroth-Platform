@@ -11,7 +11,7 @@ namespace AzerothPlatform.Api.Controllers;
 /// </summary>
 [Authorize]
 [ApiController]
-[Route("api/stacks/{stackId}")]
+[Route("api/stacks/{stackId}/server-wide-progression")]
 public class ServerWideProgressionController : ControllerBase
 {
     private readonly IServerWideProgressionService _progression;
@@ -21,14 +21,12 @@ public class ServerWideProgressionController : ControllerBase
         _progression = progression;
     }
 
-    [HttpPost("server-wide-progression/bootstrap")]
-    [HttpPost("migrations/individual-progression/bootstrap")]
+    [HttpPost("bootstrap")]
     public Task<IActionResult> Bootstrap(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.BootstrapAsync(stackId, cancellationToken));
 
     /// <summary>Creates any missing Server Wide Progression patch template folders without resetting config.</summary>
-    [HttpPost("server-wide-progression/recreate-missing-patches")]
-    [HttpPost("migrations/individual-progression/recreate-missing-patches")]
+    [HttpPost("recreate-missing-patches")]
     public Task<IActionResult> RecreateMissingPatches(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.RecreateMissingPatchesAsync(stackId, cancellationToken));
 
@@ -36,36 +34,30 @@ public class ServerWideProgressionController : ControllerBase
     /// Verifies patch templates and config overrides. When Server Wide Progression is bootstrapped and
     /// Azeroth-Platform-Progression is synced, validates folder structure against the repository as well.
     /// </summary>
-    [HttpPost("server-wide-progression/validate-patches")]
-    [HttpPost("migrations/individual-progression/validate-patches")]
+    [HttpPost("validate-patches")]
     public Task<IActionResult> ValidatePatches(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.ValidatePatchesAsync(stackId, cancellationToken));
 
-    [HttpGet("server-wide-progression/sync/status")]
-    [HttpGet("migrations/individual-progression/sync/status")]
+    [HttpGet("sync/status")]
     public Task<IActionResult> GetSyncStatus(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.GetSyncStatusAsync(stackId, cancellationToken));
 
-    [HttpPost("server-wide-progression/sync/run")]
-    [HttpPost("migrations/individual-progression/sync/run")]
+    [HttpPost("sync/run")]
     public Task<IActionResult> RunSync(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.RunSyncAsync(stackId, cancellationToken));
 
-    [HttpPost("server-wide-progression/sync/resolve-optional")]
-    [HttpPost("migrations/individual-progression/sync/resolve-optional")]
+    [HttpPost("sync/resolve-optional")]
     public Task<IActionResult> ResolveOptionalFiles(
         string stackId,
         [FromBody] ResolveOptionalFilesRequest request,
         CancellationToken cancellationToken)
         => Execute(() => _progression.ResolveOptionalFilesAsync(stackId, request, cancellationToken));
 
-    [HttpGet("server-wide-progression/sync/ignored-files")]
-    [HttpGet("migrations/individual-progression/sync/ignored-files")]
+    [HttpGet("sync/ignored-files")]
     public Task<IActionResult> GetIgnoredFiles(string stackId, CancellationToken cancellationToken)
         => Execute(() => _progression.GetIgnoredFilesAsync(stackId, cancellationToken));
 
-    [HttpPost("server-wide-progression/sync/reprompt")]
-    [HttpPost("migrations/individual-progression/sync/reprompt")]
+    [HttpPost("sync/reprompt")]
     public Task<IActionResult> RepromptIgnoredFile(
         string stackId,
         [FromQuery] string source,

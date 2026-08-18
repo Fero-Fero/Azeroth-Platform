@@ -327,7 +327,7 @@ export function CloudInstanceSetupDialog({
                 <option value="">{loadingInstances ? 'Loading instances…' : 'Select an instance…'}</option>
                 {(instances ?? []).map((instance) => (
                   <option key={instance.id} value={instance.id}>
-                    {instance.name} — {instance.publicHost} ({instance.region}, {instance.state})
+                    {instance.name} - {instance.publicHost} ({instance.region}, {instance.state})
                   </option>
                 ))}
               </select>
@@ -337,7 +337,7 @@ export function CloudInstanceSetupDialog({
                   {!loadingInstances && (instances?.length ?? 0) === 0 ? (
                 <p className="mt-1 text-xs text-gray-600">
                   No running instances with a public address were found. Start the VM in the cloud console,
-                  then Refresh{setup?.canCreate ? ' — or create a new VM.' : '.'}
+                  then Refresh{setup?.canCreate ? ' - or create a new VM.' : '.'}
                 </p>
               ) : (
                 <p className="mt-1 text-xs text-gray-500">

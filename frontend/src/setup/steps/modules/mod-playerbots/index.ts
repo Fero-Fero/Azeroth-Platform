@@ -11,7 +11,7 @@ export {
   playerbotsDisabledPhase,
 } from '@/setup/steps/modules/mod-playerbots/playerbotsStatus'
 
-/** Pipeline-only on the Individual Progression server type — not spread via the module registry. */
+/** Pipeline-only on the Individual Progression server type - not spread via the module registry. */
 export function playerbotsModuleSteps(): SetupStep[] {
   return [disablePlayerbotsStep(), reenablePlayerbotsStep()]
 }

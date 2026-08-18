@@ -22,9 +22,9 @@ function currentValueLabel(entry: PatchConfigOverrideDto): string {
     return 'Config file not found'
   }
   if (entry.keyFound === false) {
-    return '(not set — will be added)'
+    return '(not set - will be added)'
   }
-  return entry.currentValue ?? '—'
+  return entry.currentValue ?? '-'
 }
 
 export function PatchConfigOverridesPreviewButton({

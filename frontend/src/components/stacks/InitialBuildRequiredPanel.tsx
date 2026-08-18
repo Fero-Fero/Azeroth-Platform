@@ -36,7 +36,7 @@ export default function InitialBuildRequiredPanel({
     (buildStatus?.errorMessage?.length ?? 0) > 0
   const errorMessage =
     buildStatus?.errorMessage ??
-    (buildStatusQuery.isError ? 'No build record found — the initial build may not have started.' : null)
+    (buildStatusQuery.isError ? 'No build record found - the initial build may not have started.' : null)
 
   if (stack.status === StackStatus.Building) {
     return (

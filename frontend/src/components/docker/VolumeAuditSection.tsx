@@ -132,11 +132,11 @@ export default function VolumeAuditSection({ stackId }: VolumeAuditSectionProps)
             {audit.duplicateCopies.length > 0 && (
               <details className="rounded-lg border border-gray-200 bg-gray-50/50">
                 <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-900">
-                  Duplicate copies ({audit.duplicateCopies.length}) — informational
+                  Duplicate copies ({audit.duplicateCopies.length}) - informational
                 </summary>
                 <div className="border-t border-gray-200 px-3 py-3">
                   <p className="mb-2 text-xs text-gray-500">
-                    These exist on manager disk and in Docker by design — not selectable for cleanup.
+                    These exist on manager disk and in Docker by design - not selectable for cleanup.
                   </p>
                   <div className="overflow-x-auto rounded-md border border-gray-200 bg-white">
                     <table className="min-w-full text-left text-sm">
@@ -236,7 +236,7 @@ export default function VolumeAuditSection({ stackId }: VolumeAuditSectionProps)
                           ) : null}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs">{volume.volumeName}</td>
-                        <td className="px-3 py-2 text-gray-600">{volume.inferredStackId ?? '—'}</td>
+                        <td className="px-3 py-2 text-gray-600">{volume.inferredStackId ?? '-'}</td>
                         <td className="px-3 py-2">{formatBytes(volume.sizeBytes)}</td>
                         <td className="px-3 py-2 text-xs text-gray-600">{volume.reason}</td>
                       </tr>

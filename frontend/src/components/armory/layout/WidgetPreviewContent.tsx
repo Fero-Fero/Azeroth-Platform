@@ -191,7 +191,7 @@ export default function WidgetPreviewContent({
                       {row.class}
                     </td>
                     <td className="truncate border px-1 py-0.5" style={{ borderColor: 'var(--armory-border)' }}>
-                      {row.guild ?? '—'}
+                      {row.guild ?? '-'}
                     </td>
                   </tr>
                 ))}

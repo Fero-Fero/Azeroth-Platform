@@ -197,7 +197,7 @@ export default function ProgressionSyncPanel({ stackId, onReapplyAllRecommended 
                 patches are left unchanged.
               </p>
               <p className="max-w-2xl text-xs text-indigo-800">
-                The progression repository lives on the stack only — nothing is cloned beside the platform or
+                The progression repository lives on the stack only - nothing is cloned beside the platform or
                 onto the host outside the stack data directory. Validation compares{' '}
                 <code className="rounded bg-indigo-100 px-1">migrations/</code> against that on-stack checkout.
               </p>

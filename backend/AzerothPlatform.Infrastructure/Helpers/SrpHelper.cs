@@ -5,7 +5,7 @@ using System.Text;
 namespace AzerothPlatform.Infrastructure.Helpers;
 
 /// <summary>
-/// WoW SRP6 credential helper — shared between services that need to create game accounts.
+/// WoW SRP6 credential helper - shared between services that need to create game accounts.
 /// </summary>
 internal static class SrpHelper
 {

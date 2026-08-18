@@ -1,15 +1,21 @@
 import { z } from 'zod'
 import { ServerType, DeploymentTarget, RemoteHostOs } from '@/types/stack.types'
 import { DEFAULT_ARMORY_EMAIL } from '@/lib/armory-email-defaults'
+import { normalizeStackNameInput } from '@/lib/stack-name'
 
 export const serverConfigSchema = z.object({
   stackName: z
     .string()
-    .min(2, 'Stack name must be at least 2 characters')
-    .max(64, 'Stack name must be at most 64 characters')
-    .regex(
-      /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
-      'Lowercase letters, numbers, hyphens only; cannot start or end with a hyphen'
+    .transform((value) => normalizeStackNameInput(value, { trimEdges: true }))
+    .pipe(
+      z
+        .string()
+        .min(2, 'Stack name must be at least 2 characters')
+        .max(64, 'Stack name must be at most 64 characters')
+        .regex(
+          /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
+          'Use letters and numbers; words are joined with a hyphen',
+        ),
     ),
   serverType: z.nativeEnum(ServerType),
   // Only used when the selected server type allows a custom repository (e.g. Custom).

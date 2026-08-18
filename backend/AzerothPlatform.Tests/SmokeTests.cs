@@ -40,7 +40,7 @@ public sealed class SmokeTests : IClassFixture<AzerothPlatformWebApplicationFact
     }
 
     // ------------------------------------------------------------------
-    // IAsyncLifetime — wipe DB rows before every test for full isolation
+    // IAsyncLifetime - wipe DB rows before every test for full isolation
     // ------------------------------------------------------------------
 
     public async Task InitializeAsync()
@@ -74,7 +74,7 @@ public sealed class SmokeTests : IClassFixture<AzerothPlatformWebApplicationFact
     }
 
     // ------------------------------------------------------------------
-    // 2. Stacks list — empty on a fresh database
+    // 2. Stacks list - empty on a fresh database
     // ------------------------------------------------------------------
 
     [Fact]
@@ -115,13 +115,13 @@ public sealed class SmokeTests : IClassFixture<AzerothPlatformWebApplicationFact
     }
 
     // ------------------------------------------------------------------
-    // 4. Validate — valid minimal configuration → isValid: true
+    // 4. Validate - valid minimal configuration → isValid: true
     // ------------------------------------------------------------------
 
     [Fact]
     public async Task PostValidate_WithValidMinimalConfig_ReturnsIsValidTrue()
     {
-        // Given — a complete, valid minimal configuration
+        // Given - a complete, valid minimal configuration
         var config = BuildValidConfig("smoke-valid");
 
         // When
@@ -139,13 +139,13 @@ public sealed class SmokeTests : IClassFixture<AzerothPlatformWebApplicationFact
     }
 
     // ------------------------------------------------------------------
-    // 5. Validate — empty name → isValid: false
+    // 5. Validate - empty name → isValid: false
     // ------------------------------------------------------------------
 
     [Fact]
     public async Task PostValidate_WithEmptyStackName_ReturnsIsValidFalse()
     {
-        // Given — configuration with an empty stack name
+        // Given - configuration with an empty stack name
         var config = BuildValidConfig("");
 
         // When

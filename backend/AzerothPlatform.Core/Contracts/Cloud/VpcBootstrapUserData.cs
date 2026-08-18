@@ -169,7 +169,7 @@ public static class VpcBootstrapUserData
         var user = SanitizeSshUser(operatorUser);
         var allow = enableAwsInstanceConnect ? $"{user} ubuntu" : user;
         var builder = new StringBuilder();
-        builder.AppendLine("# Managed by Azeroth Platform — do not edit");
+        builder.AppendLine("# Managed by Azeroth Platform - do not edit");
         builder.AppendLine("PermitRootLogin no");
         builder.AppendLine("PasswordAuthentication no");
         builder.AppendLine("KbdInteractiveAuthentication no");

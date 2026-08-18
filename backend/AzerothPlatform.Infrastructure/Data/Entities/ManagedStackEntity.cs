@@ -48,7 +48,7 @@ public class ManagedStackEntity
     /// Host interface the player-facing HTTP services (armory + client file server) are published on.
     /// Blank inherits the manager default (<c>Docker:PublishBindAddress</c>, loopback for local stacks;
     /// all-interfaces for external). Set to <c>0.0.0.0</c> (all interfaces) or a specific IP to expose the
-    /// armory beyond localhost — e.g. so a LAN/VPC/remote machine can reach it — without hand-editing the
+    /// armory beyond localhost - e.g. so a LAN/VPC/remote machine can reach it - without hand-editing the
     /// generated <c>.env</c>. Applied on the next armory/client recreate.
     /// </summary>
     public string PublishBindAddress { get; set; } = string.Empty;

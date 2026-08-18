@@ -117,7 +117,7 @@ public class SoapProxyService : ISoapProxyService
         if (await IsContainerRunningAsync(dockerContext, containerName, cancellationToken) == false)
         {
             throw new InvalidOperationException(
-                "The world server container is not running. SOAP commands require ac-worldserver — " +
+                "The world server container is not running. SOAP commands require ac-worldserver - " +
                 "starting auth and database alone is not enough.");
         }
 
@@ -276,7 +276,7 @@ public class SoapProxyService : ISoapProxyService
         {
             throw new InvalidOperationException(
                 "Timed out waiting for the worldserver SOAP interface on the external stack. " +
-                "The VPC may be under heavy load — try again when the stack is idle or upgrade instance resources.");
+                "The VPC may be under heavy load - try again when the stack is idle or upgrade instance resources.");
         }
         catch (Exception ex)
         {

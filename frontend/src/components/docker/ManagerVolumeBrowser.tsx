@@ -61,7 +61,7 @@ export function ManagerVolumeBrowser() {
               <li key={key.name} className="flex items-center gap-2">
                 <span className={`inline-block h-2 w-2 rounded-full ${key.present ? 'bg-green-500' : 'bg-red-500'}`} />
                 <span className="font-mono">{key.name}</span>
-                <span className="text-gray-500">{key.present ? 'present' : 'missing — may require re-login or external stack reconnect'}</span>
+                <span className="text-gray-500">{key.present ? 'present' : 'missing - may require re-login or external stack reconnect'}</span>
               </li>
             ))}
           </ul>
@@ -118,9 +118,9 @@ export function ManagerVolumeBrowser() {
                     </button>
                   </td>
                   <td className="px-3 py-2 text-gray-600">
-                    {entry.isDirectory ? '—' : formatBytes(entry.sizeBytes)}
+                    {entry.isDirectory ? '-' : formatBytes(entry.sizeBytes)}
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{entry.detail ?? '—'}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500">{entry.detail ?? '-'}</td>
                   <td className="px-3 py-2 text-right">
                     {entry.isDeletable ? (
                       <button

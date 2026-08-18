@@ -36,7 +36,7 @@ export default function RealmsTab({ stackId }: RealmsTabProps) {
   const { data: realms, isLoading, error, refetch } = useRealms(stackId)
   const [creating, setCreating] = useState(false)
   const [search, setSearch] = useState('')
-  // Realms are collapsed by default — an id is only present here once explicitly expanded.
+  // Realms are collapsed by default - an id is only present here once explicitly expanded.
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
   if (isLoading) {
@@ -365,7 +365,7 @@ function RealmCard({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // Reset local edit state to match the server when a fresh realm object arrives (e.g. after
-  // save/refresh) — the React-recommended "adjust state during render" pattern.
+  // save/refresh) - the React-recommended "adjust state during render" pattern.
   const [syncedRealm, setSyncedRealm] = useState(realm)
   if (syncedRealm !== realm) {
     setSyncedRealm(realm)

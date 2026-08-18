@@ -193,7 +193,7 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
               disabled={!dirty || busy || !canBuild}
               title={
                 !dirty
-                  ? 'No changes to save — use Recompile worldserver to rebuild with the current selection'
+                  ? 'No changes to save - use Recompile worldserver to rebuild with the current selection'
                   : 'Save module selection without rebuilding'
               }
               className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -211,7 +211,7 @@ export default function StackModulesTab({ stack }: StackModulesTabProps) {
               )}
               title={
                 pendingRebuildCount > 0
-                  ? 'Recompile required — selected modules are not yet built into the worldserver'
+                  ? 'Recompile required - selected modules are not yet built into the worldserver'
                   : 'Rebuild the worldserver with the current module selection'
               }
             >

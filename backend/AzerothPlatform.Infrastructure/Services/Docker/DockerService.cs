@@ -179,7 +179,7 @@ public sealed class DockerService : IDockerService
             }
             catch
             {
-                // Best effort — the caller is already bailing out.
+                // Best effort - the caller is already bailing out.
             }
 
             throw;

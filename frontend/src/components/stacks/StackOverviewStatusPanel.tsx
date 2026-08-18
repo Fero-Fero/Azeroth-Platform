@@ -91,7 +91,7 @@ function RemoteSetupStepsList({ steps }: { steps: RemotePrerequisiteCheckDto[] }
           )}
           <span>
             {step.name}
-            {step.message ? ` — ${step.message}` : ''}
+            {step.message ? ` - ${step.message}` : ''}
           </span>
         </li>
       ))}
@@ -263,7 +263,7 @@ export default function StackOverviewStatusPanel({
             details={
               <p className="text-sm">
                 The manager is retrying the SSH connection to your remote Docker engine. On small VPS
-                instances this can take a moment when the host is under load — status will update automatically
+                instances this can take a moment when the host is under load - status will update automatically
                 once the connection is restored.
               </p>
             }
@@ -285,7 +285,7 @@ export default function StackOverviewStatusPanel({
             details={
               <div className="space-y-2">
                 <p>
-                  This is a network or connectivity problem — not a Docker daemon issue. After a cloud
+                  This is a network or connectivity problem - not a Docker daemon issue. After a cloud
                   instance reboot or stop/start, the public IP often changes unless you use an Elastic IP.
                 </p>
                 <p>
@@ -326,7 +326,7 @@ export default function StackOverviewStatusPanel({
                   <p>
                     Use <strong>Start Docker on VPC</strong> to run{' '}
                     <span className="font-mono text-xs">systemctl start docker</span> (and install Docker
-                    if needed) over SSH — no manual login required.
+                    if needed) over SSH - no manual login required.
                   </p>
                   {dockerSetupMessage && (
                     <div
@@ -422,7 +422,7 @@ export default function StackOverviewStatusPanel({
             id="armory-email"
             level="warning"
             title="Complete email setup"
-            summary="Email confirmation is enabled but SMTP is not configured — armory registration stays disabled."
+            summary="Email confirmation is enabled but SMTP is not configured - armory registration stays disabled."
             details={
               <p>
                 Configure SMTP on the Armory Email tab so confirmation messages can be delivered to new
@@ -440,7 +440,7 @@ export default function StackOverviewStatusPanel({
             title={isRebuildRunning ? 'Rebuilding armory image' : 'Armory rebuild required'}
             summary={
               isRebuildRunning
-                ? 'This runs in the background — you can navigate away while it completes.'
+                ? 'This runs in the background - you can navigate away while it completes.'
                 : 'Saved styling or layout changes are not live until you rebuild the armory image.'
             }
             forceCollapsed={isRebuildRunning}

@@ -9,6 +9,6 @@ public enum RemoteConnectionTestPhase
     /// <summary>SSH connectivity only (step 1 of the wizard progress bar).</summary>
     SshOnly = 1,
 
-    /// <summary>Docker Engine and Compose only — assumes SSH already succeeded.</summary>
+    /// <summary>Docker Engine and Compose only - assumes SSH already succeeded.</summary>
     PrerequisitesOnly = 2,
 }

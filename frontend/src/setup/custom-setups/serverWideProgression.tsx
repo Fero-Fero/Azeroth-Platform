@@ -4,7 +4,7 @@ import { prepareProgressionStep } from '@/setup/steps/modules/mod-individual-pro
 import type { CustomSetup } from '@/server-types/types'
 
 /**
- * Server Wide Progression Setup — optional custom setup (not a module install).
+ * Server Wide Progression Setup - optional custom setup (not a module install).
  * Called from the mod-individual-progression module setup.
  */
 export const serverWideProgressionSetup: CustomSetup = {

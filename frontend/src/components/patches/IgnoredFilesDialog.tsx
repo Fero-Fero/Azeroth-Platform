@@ -65,7 +65,7 @@ export default function IgnoredFilesDialog({ stackId, onClose }: IgnoredFilesDia
           ) : !ignoredFiles || ignoredFiles.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-sm text-gray-400">
               <CheckCircle2 className="h-8 w-8" />
-              <p>No ignored files — all optional files have been accepted.</p>
+              <p>No ignored files - all optional files have been accepted.</p>
             </div>
           ) : (
             <ul className="space-y-2">

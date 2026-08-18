@@ -7,7 +7,7 @@ import type { SetupStep } from '@/setup/types'
 /**
  * Default-order module steps. Playerbots disable/re-enable stay off this list (IP server-type
  * pipeline only). Server Wide Progression is registered here via the IP module, which calls that
- * custom setup — the IP server type sequences those steps and does not import them again.
+ * custom setup - the IP server type sequences those steps and does not import them again.
  */
 const moduleStepRegistry: Record<string, () => SetupStep[]> = {
   [MODULE_IDS.ahBot]: ahBotModuleSteps,

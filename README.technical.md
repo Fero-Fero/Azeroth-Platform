@@ -1,4 +1,4 @@
-# Azeroth Platform — Technical Reference
+# Azeroth Platform - Technical Reference
 
 Companion to the high-level **[README](./README.md)**. This document covers architecture, install,
 the first-tour walkthrough, configuration, development, troubleshooting, and a full feature
@@ -8,8 +8,8 @@ reference.
 
 Azeroth Platform is a web-based control panel for private World of Warcraft 3.3.5a (Wrath of the
 Lich King) servers built on [AzerothCore](https://www.azerothcore.org/). It deploys, builds,
-configures, and manages your servers in Docker — and it distributes the game client and a branded
-launcher to your players — all from one dashboard.
+configures, and manages your servers in Docker - and it distributes the game client and a branded
+launcher to your players - all from one dashboard.
 
 You only need **Docker** on your machine. The .NET and Node toolchains run inside containers.
 
@@ -27,8 +27,8 @@ You only need **Docker** on your machine. The .NET and Node toolchains run insid
    - [Data model (named volumes)](#data-model-named-volumes)
 3. [Installation & Setup](#3-installation--setup)
    - [Prerequisites](#prerequisites)
-   - [Local setup — everything on this machine](#local-setup--everything-on-this-machine)
-   - [External setup — servers on a remote host](#external-setup--servers-on-a-remote-host)
+   - [Local setup - everything on this machine](#local-setup--everything-on-this-machine)
+   - [External setup - servers on a remote host](#external-setup--servers-on-a-remote-host)
      - [Cloud wizard (DigitalOcean, AWS, GCP)](#cloud-wizard-digitalocean-aws-gcp)
      - [Cloud credentials & IAM policies](#cloud-credentials--iam-policies)
    - [Security hardening](#security-hardening)
@@ -58,8 +58,8 @@ You only need **Docker** on your machine. The .NET and Node toolchains run insid
 
 ## 1. Overview
 
-Azeroth Platform turns the whole lifecycle of an AzerothCore server — cloning, compiling,
-configuring, patching, updating, monitoring, and distributing to players — into point-and-click
+Azeroth Platform turns the whole lifecycle of an AzerothCore server - cloning, compiling,
+configuring, patching, updating, monitoring, and distributing to players - into point-and-click
 operations. You create **stacks** (each one a full server: auth + world + database), run them locally
 or on remote hosts, and manage everything through a React + ASP.NET Core dashboard that talks to
 Docker through an allowlisted socket proxy.
@@ -68,60 +68,60 @@ Docker through an allowlisted socket proxy.
 
 **Deploy & build**
 - 🧙 **6-step guided setup wizard** with real-time validation (port conflicts, name uniqueness).
-- 🔨 **Automated builds** — clones, compiles, and containerizes AzerothCore from source with live
+- 🔨 **Automated builds** - clones, compiles, and containerizes AzerothCore from source with live
   progress via SignalR, plus streaming build logs.
-- 🏗️ **Multi-stack support** — run unlimited isolated servers side by side.
-- 🖥️☁️ **Local or external deployment** — run a stack on this machine, or ship it to a remote host
+- 🏗️ **Multi-stack support** - run unlimited isolated servers side by side.
+- 🖥️☁️ **Local or external deployment** - run a stack on this machine, or ship it to a remote host
   over SSH (SSH keys encrypted at rest).
-- 💾 **Draft persistence** — the wizard saves progress to your browser.
+- 💾 **Draft persistence** - the wizard saves progress to your browser.
 
 **Run & operate**
-- 🎛️ **Lifecycle control** — Start / Stop / Restart run as **background jobs** (safe to navigate away).
-- 🩺 **DB Maintenance** — bring up only the database for patching/maintenance while the game servers
+- 🎛️ **Lifecycle control** - Start / Stop / Restart run as **background jobs** (safe to navigate away).
+- 🩺 **DB Maintenance** - bring up only the database for patching/maintenance while the game servers
   stay down (`Degraded` state).
-- 📊 **Real-time monitoring** — live container status, health checks, and uptime.
-- 📋 **Container log viewing** — per-container streaming logs with filter/search/auto-scroll.
+- 📊 **Real-time monitoring** - live container status, health checks, and uptime.
+- 📋 **Container log viewing** - per-container streaming logs with filter/search/auto-scroll.
 - 🔄 **Automatic update detection** (hourly) + 🔁 **one-click Update** that snapshots first, rebuilds,
   and reapplies your patch SQL in order.
-- 🕓 **Revisions** — point-in-time DB + config snapshots with one-click restore.
+- 🕓 **Revisions** - point-in-time DB + config snapshots with one-click restore.
 
 **Content & customization**
-- 📦 **Module system** — browse/select community modules in the wizard, and manage the catalog (add
+- 📦 **Module system** - browse/select community modules in the wizard, and manage the catalog (add
   your own from a git repo or an uploaded `.zip`, read each module's README).
 - ⚙️ **Guided module configuration** for AH Bot, AutoBalance, Playerbots, and Transmog (others fall
   back to generic `.conf`/env editing).
-- 🧩 **Stack patches/migrations** — incremental SQL, DBC edits (via the WDBX sidecar), map overrides,
+- 🧩 **Stack patches/migrations** - incremental SQL, DBC edits (via the WDBX sidecar), map overrides,
   client MPQ patches, **config overrides** (`config/*.json` → server and module `.conf` files), and
   **patch Lua scripts** (`lua/` → worldserver), applied strictly in order with per-file SQL transactions
   and tracing.
-- 🌙 **Lua scripts** — ship Lua scripts (via the AzerothCore Lua Engine, `mod-ale`) to the worldserver
+- 🌙 **Lua scripts** - ship Lua scripts (via the AzerothCore Lua Engine, `mod-ale`) to the worldserver
   from the **Lua Scripts** tab or from a patch's `lua/` folder on apply.
-- 🛡️ **Armory** — per-stack character/guild site with equipment tooltips and a 3D model viewer;
+- 🛡️ **Armory** - per-stack character/guild site with equipment tooltips and a 3D model viewer;
   upload the model-viewer assets and one-click **DBC sync** for rich tooltips/titles.
 
 **Players & distribution**
-- 👥 **Account management** (SOAP) — create, set GM level, ban/unban, reset password, delete.
-- 🧑‍🤝‍🧑 **Character management** — kick, ban, mute, revive, set level, rename, customize, send
+- 👥 **Account management** (SOAP) - create, set GM level, ban/unban, reset password, delete.
+- 🧑‍🤝‍🧑 **Character management** - kick, ban, mute, revive, set level, rename, customize, send
   messages/items/money, add items, view inventory.
-- 🤖 **AH Bot setup** — one-click Auction House Bot account with Alliance & Horde characters.
-- 🚀 **Player launcher** — compile a branded, self-contained Windows launcher (in a Docker sidecar),
+- 🤖 **AH Bot setup** - one-click Auction House Bot account with Alliance & Horde characters.
+- 🚀 **Player launcher** - compile a branded, self-contained Windows launcher (in a Docker sidecar),
   with per-stack profiles, shared base client + per-profile overlays, and verified self-update.
-- 📡 **Launcher propagation check** — ping every stack to confirm the built launcher reached it, with
+- 📡 **Launcher propagation check** - ping every stack to confirm the built launcher reached it, with
   a re-send button per stack.
-- 🧾 **Signed client manifests** — the launcher rejects tampered files and only enables **Play** when
+- 🧾 **Signed client manifests** - the launcher rejects tampered files and only enables **Play** when
   the client is verified and up to date.
-- 🧰 **Client & addon distribution** — serve a WoW client and managed addons (global and per-stack).
-- 📰 **News / patch notes** — global default plus per-stack overrides, delivered into the launcher.
+- 🧰 **Client & addon distribution** - serve a WoW client and managed addons (global and per-stack).
+- 📰 **News / patch notes** - global default plus per-stack overrides, delivered into the launcher.
 
 **Configuration**
-- 🔧 **Server Config editor** — edit real `worldserver.conf`, `authserver.conf`, and module `.conf`
+- 🔧 **Server Config editor** - edit real `worldserver.conf`, `authserver.conf`, and module `.conf`
   files, then apply & restart.
-- 🧪 **Environment Variables editor** — searchable, per-container env-var overrides.
-- ⚙️ **Edit Configuration** — change ports, passwords, max players, and realm name.
+- 🧪 **Environment Variables editor** - searchable, per-container env-var overrides.
+- ⚙️ **Edit Configuration** - change ports, passwords, max players, and realm name.
 
 **Security (default deployment)**
 - 🔐 TLS reverse proxy (Caddy) + HSTS + security headers; the manager binds to loopback only.
-- 🚫 No raw Docker socket — an allowlisted socket proxy, manager runs non-root with dropped caps.
+- 🚫 No raw Docker socket - an allowlisted socket proxy, manager runs non-root with dropped caps.
 - 🛑 Deny-by-default auth on every endpoint; rate-limited login/registration; encrypted secrets at rest.
 
 ### Planned
@@ -178,13 +178,13 @@ the raw Docker socket).
 ### Data model (named volumes)
 
 The manager drives the host Docker daemon through the allowlisted proxy and keeps everything in
-**Docker-managed named volumes** — there are no host bind mounts:
+**Docker-managed named volumes** - there are no host bind mounts:
 
 - Manager state (SQLite DB, builds, client base, launcher builds/branding, custom modules) lives in
   the `azeroth-platform-data` volume at `/app/data`.
 - Each stack's runtime data (databases, config, logs, client base/overlay/cache, `ac-client-data`,
   `lua_scripts`, armory assets) lives in **per-stack named volumes**.
-- The manager seeds those volumes from its own data volume via short-lived helper containers — a
+- The manager seeds those volumes from its own data volume via short-lived helper containers - a
   volume-to-volume copy locally, or a `tar` stream over SSH for external stacks.
 
 See [DOCKER.md](./DOCKER.md) for the full container/volume reference and endpoint tables.
@@ -197,12 +197,12 @@ See [DOCKER.md](./DOCKER.md) for the full container/volume reference and endpoin
 
 - **Docker** 20.10+ with **Docker Compose v2** ([install Docker](https://docs.docker.com/get-docker/))
 - **OS**: Linux, macOS, or Windows with WSL2
-- **RAM**: 8 GB minimum (16 GB+ recommended — each running server uses ~2–4 GB)
+- **RAM**: 8 GB minimum (16 GB+ recommended - each running server uses ~2–4 GB)
 - **Disk**: 20 GB+ free per server (compiling produces large build artifacts)
 - **Free ports**: `80` and `443` on the machine
 - **Internet** access (to download the game server source and Docker images)
 
-### Local setup — everything on this machine
+### Local setup - everything on this machine
 
 Run the dashboard **and** your servers on the same computer. Ideal for a home server, a spare PC, or
 just trying things out.
@@ -217,9 +217,9 @@ cp .env.example .env
 
 Open `.env` and set two things:
 
-1. **`ADMIN_PASSWORD`** — your dashboard login. Pick something strong. (Leave it blank and the
+1. **`ADMIN_PASSWORD`** - your dashboard login. Pick something strong. (Leave it blank and the
    platform generates one and logs where it saved it on first startup.)
-2. **`HOST_LAN_IP`** — this machine's LAN IP so friends on your network can connect. Skip it and only
+2. **`HOST_LAN_IP`** - this machine's LAN IP so friends on your network can connect. Skip it and only
    *this* machine can connect:
    ```bash
    # macOS
@@ -228,7 +228,7 @@ Open `.env` and set two things:
    echo "HOST_LAN_IP=$(hostname -I | awk '{print $1}')" >> .env
    ```
 
-Then start it (no folders to create — all state lives in Docker):
+Then start it (no folders to create - all state lives in Docker):
 
 ```bash
 docker compose up -d --build
@@ -237,14 +237,14 @@ docker compose up -d --build
 Open **https://localhost/admin** (accept the self-signed certificate warning) and log in with your
 `ADMIN_PASSWORD`. Continue to [Getting Started](#4-getting-started-first-tour).
 
-### External setup — servers on a remote host
+### External setup - servers on a remote host
 
 The **dashboard still runs on your machine**, but a stack whose deployment target is **External** is
 built locally and shipped to a remote Docker host (a cloud VPS/droplet) over **SSH**, where it
 actually runs.
 
 - Containers and all per-stack data volumes live **on the remote host**. Your machine only stores that
-  stack's config row and its (encrypted) SSH key — no game data. Turning your laptop off doesn't stop
+  stack's config row and its (encrypted) SSH key - no game data. Turning your laptop off doesn't stop
   a remote server.
 - You can mix local and external stacks freely from the same dashboard.
 
@@ -269,7 +269,7 @@ See [`plans_support/00-implementation-order.md`](plans_support/00-implementation
 
 > The SSH key that reaches a remote host is powerful. Keep the manager machine and its
 > `azeroth-platform-data` volume secure, use a dedicated least-privilege key, and prefer a non-root
-> SSH user in the `docker` group. **Back up `secret-protection.key`** inside that volume — without it,
+> SSH user in the `docker` group. **Back up `secret-protection.key`** inside that volume - without it,
 > encrypted SSH keys and cloud tokens cannot be decrypted after a restore (see
 > [Security hardening](#security-hardening)).
 
@@ -281,10 +281,10 @@ GCP, and Azure**.
 
 | Step | What you do |
 | --- | --- |
-| **1 — OS** | VPC hosts must be **Ubuntu or Debian**. Windows Server is not supported. |
-| **2 — Connect** | Link a cloud account, pick an existing VM or launch a new one, or enter a host and SSH key. |
-| **3 — Verify certificate** | Launch downloads two files named after the SSH users: **`ubuntu.pem` or `root.pem`**, and **`azp-admin.pem`**. Verify **`azp-admin.pem`**. |
-| **4 — Verify VPC** | SSH as ubuntu/root with the manager key, create/lock azp-admin, disable internet SSH for ubuntu/root, then confirm azp-admin SSH, Docker, ufw, and the cloud firewall. Resume skips ubuntu/root after the Linux lock. |
+| **1 - OS** | VPC hosts must be **Ubuntu or Debian**. Windows Server is not supported. |
+| **2 - Connect** | Link a cloud account, pick an existing VM or launch a new one, or enter a host and SSH key. |
+| **3 - Verify certificate** | Launch downloads two files named after the SSH users: **`ubuntu.pem` or `root.pem`**, and **`azp-admin.pem`**. Verify **`azp-admin.pem`**. |
+| **4 - Verify VPC** | SSH as ubuntu/root with the manager key, create/lock azp-admin, disable internet SSH for ubuntu/root, then confirm azp-admin SSH, Docker, ufw, and the cloud firewall. Resume skips ubuntu/root after the Linux lock. |
 
 **Pick from cloud account** vs **Launch via platform** (both use the same linked account):
 
@@ -334,7 +334,7 @@ on air-gapped installs and use **Advanced → paste API token** instead.
 | List droplets (pick existing) | Read |
 | Launch droplet + Cloud Firewall | Read + Write |
 
-Create a **dedicated** personal access token under **API → Tokens/Keys** for the Advanced fallback —
+Create a **dedicated** personal access token under **API → Tokens/Keys** for the Advanced fallback -
 do not persist the team owner's unrestricted root key for daily API use. Launch attaches Cloud Firewall
 `azeroth-platform-{dropletId}` (SSH, auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306
 or SOAP 7878). Verify VPC probes that firewall.
@@ -344,7 +344,7 @@ or SOAP 7878). Verify VPC probes that firewall.
 Hetzner has no OAuth. Use **Connect Hetzner project** and paste a **Read & Write** project token from
 **Security → API tokens** (not the account password). Connect probes write access by creating and deleting
 a short-lived Cloud Firewall; a read-only token fails at connect, not at Verify VPC. There is no refresh
-token — Reconnect with a new token if the current one is revoked.
+token - Reconnect with a new token if the current one is revoked.
 
 | Use case | Token permission |
 | --- | --- |
@@ -377,7 +377,7 @@ CloudOAuth:Vultr:ProviderId
 Optional `CloudOAuth:Vultr:AuthorizeUrl` overrides OIDC discovery for the consent page. Draft-mode
 applications can only be authorized by users on the app allowlist until Vultr approves the app
 (funded account, HTTPS callback, at least one scope). Access tokens last one hour and rotate on
-refresh — the platform refreshes them before launch and Verify VPC.
+refresh - the platform refreshes them before launch and Verify VPC.
 
 Leave ClientId blank on air-gapped installs and use **Advanced → paste API key** instead.
 
@@ -386,7 +386,7 @@ Leave ClientId blank on air-gapped installs and use **Advanced → paste API key
 | List instances (pick existing) | Read |
 | Launch instance + firewall group | Read + Write (including firewall) |
 
-Create a **dedicated** API key under **Account → API** for the Advanced fallback — do not persist the
+Create a **dedicated** API key under **Account → API** for the Advanced fallback - do not persist the
 account root key for daily API use. Launch attaches firewall group `azeroth-platform-{instanceId}`
 (SSH, auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306 or SOAP 7878). Verify VPC
 probes that group.
@@ -416,7 +416,7 @@ Use a dedicated IAM user (access key). Three common permission sets:
 }
 ```
 
-*Launch new EC2 (user_data bootstrap)* — add to the above, or use standalone. Requires a **default VPC**
+*Launch new EC2 (user_data bootstrap)* - add to the above, or use standalone. Requires a **default VPC**
 in the target region; the platform creates security group `azeroth-platform-launch` (SSH from your
 admin IP when known, plus auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306 or SOAP
 7878) if needed:
@@ -449,7 +449,7 @@ admin IP when known, plus auth 3724, world 8085, armory 8100, client 8101; never
 }
 ```
 
-*Bootstrap an existing instance via SSM* — instance needs SSM agent and instance profile
+*Bootstrap an existing instance via SSM* - instance needs SSM agent and instance profile
 `AmazonSSMManagedInstanceCore`. IAM user also needs:
 
 ```json
@@ -470,7 +470,7 @@ admin IP when known, plus auth 3724, world 8085, armory 8100, client 8101; never
 
 You can combine EC2 create and SSM statements in one policy if you use both launch modes.
 
-*Apply stack security group rules (opt-in)* — from the stack **VPC security** panel after deploy.
+*Apply stack security group rules (opt-in)* - from the stack **VPC security** panel after deploy.
 Finds the EC2 instance by public IP (or optional instance id + region) and adds ingress rules from
 the stack profile. SSH is restricted to your admin CIDR; game/web ports use `0.0.0.0/0`. Duplicate
 rules are skipped. Requires:
@@ -523,7 +523,7 @@ Leave ClientId blank on air-gapped installs and use **Advanced → paste service
 | Launch VM + VPC firewall | `compute` or `roles/compute.instanceAdmin.v1` plus `compute.firewalls.create` / `compute.instances.setTags` |
 | List projects | `cloudplatformprojects.readonly` |
 
-Create a **dedicated** service account for the Advanced fallback — do not persist the Google Cloud org
+Create a **dedicated** service account for the Advanced fallback - do not persist the Google Cloud org
 owner key. Launch tags the VM `azeroth-platform` and creates ingress rules `azp-{name}-p{port}` (SSH,
 auth 3724, world 8085, armory 8100, client 8101; never MySQL 3306 or SOAP 7878). Verify VPC probes the
 tag and those firewall rules. Break-glass after Verify VPC locks ubuntu/root is serial console or IAP.
@@ -565,7 +565,7 @@ Leave ClientId blank on air-gapped installs and use **Advanced → paste a servi
 Documented minimum: **Virtual Machine Contributor** + **Network Contributor** on the resource group.
 Pick existing applies host bootstrap (operator user, Docker, ufw) via Run Command and NSG inbound
 `azp-tcp-{port}` (SSH from admin CIDR; auth 3724, world 8085, armory 8100, client 8101; never MySQL
-3306 or SOAP 7878). Verify VPC probes those NSG rules. **Create VM from the platform is coming soon** —
+3306 or SOAP 7878). Verify VPC probes those NSG rules. **Create VM from the platform is coming soon** -
 create the Linux VM in Azure Portal first, then pick it. Break-glass after Verify VPC locks ubuntu/root is Bastion,
 serial console, or Run Command.
 
@@ -579,10 +579,10 @@ from the wizard (or provider user-data at VM create time).
 The default `docker compose` deployment is safe to expose to an untrusted network. Do the essentials
 before letting anyone else reach it:
 
-1. **Set a strong `ADMIN_PASSWORD`** — never leave the default.
-2. **Keep it behind the reverse proxy** — only the `caddy` service should be reachable from other
+1. **Set a strong `ADMIN_PASSWORD`** - never leave the default.
+2. **Keep it behind the reverse proxy** - only the `caddy` service should be reachable from other
    machines; the manager binds to `127.0.0.1` only. Don't publish its internal port publicly.
-3. **Use real TLS for a public server** — point a domain at this host, open `80`/`443`, and set:
+3. **Use real TLS for a public server** - point a domain at this host, open `80`/`443`, and set:
    ```bash
    SITE_ADDRESS=play.yourdomain.com
    TLS_EMAIL=you@yourdomain.com
@@ -601,7 +601,7 @@ self-update, and encrypted secrets at rest. More in [DOCKER.md → Security Note
 
 **Backup the encryption key:** external-stack SSH keys, saved cloud SSH keys, and linked cloud account
 credentials are encrypted with AES-256-GCM. The data key is stored as `secret-protection.key` in the
-manager data directory (same Docker volume as the SQLite database — typically `azeroth-platform-data` at
+manager data directory (same Docker volume as the SQLite database - typically `azeroth-platform-data` at
 `/app/data/secret-protection.key`). **Include this file in your backup.** If you restore the database
 without the same key, encrypted secrets cannot be decrypted and you must re-enter SSH keys and re-link
 cloud accounts. Optional override: set `Auth:KeyDir` in configuration to pin the key directory.
@@ -625,7 +625,7 @@ server you can log into.
 ### Log in
 
 Open **https://localhost/admin** (or your `SITE_ADDRESS`) and sign in with your `ADMIN_PASSWORD`. The
-entire dashboard is the admin panel — players never see it.
+entire dashboard is the admin panel - players never see it.
 
 ### Dashboard layout: global vs. per-stack
 
@@ -663,7 +663,7 @@ Think *"global applies to every stack; per-stack is just that one server."*
 
 1. Click **Create Stack** and follow the 6-step wizard. Defaults are fine for a first server; just
    give it a name.
-2. On the **Advanced** step pick where it runs — **Local** or **External**.
+2. On the **Advanced** step pick where it runs - **Local** or **External**.
 3. Finish. The **first build takes ~15–30 minutes** (it compiles the game server once); progress
    streams live.
 4. Open the stack and press **Start** on the **Overview** tab.
@@ -674,7 +674,7 @@ Think *"global applies to every stack; per-stack is just that one server."*
    Account management uses SOAP, so this must be done once before you can create accounts.
 2. Stack → **Accounts** tab → **Create Account** (username/password). Set **GM level** 3 to be an
    in-game admin.
-3. Provide a WoW 3.3.5a client (**you supply the client files** — the platform doesn't ship them) and
+3. Provide a WoW 3.3.5a client (**you supply the client files** - the platform doesn't ship them) and
    upload them from the stack → **Client** tab.
 4. Build the shareable launcher from the top-bar **Launcher** page, or point players at your realmlist
    address directly, and log in.
@@ -702,13 +702,13 @@ The root `.env` (copied from `.env.example`) configures the **platform/manager**
 Game protocol ports (auth `3724`, world `8085`) are always published on all interfaces. The
 Per-stack armory settings (`ACORE_ARMORY_*`) are documented in
 [`frontend-armory/.env.example`](./frontend-armory/.env.example) and managed from each stack's
-[Environment Variables](#configuration-configs--environment-variables) tab — a different scope from the
+[Environment Variables](#configuration-configs--environment-variables) tab - a different scope from the
 platform `.env`.
 
 ### Where data lives
 
 There is no host `data/` directory to create. All manager state is in the `azeroth-platform-data`
-named volume, and each server's runtime data is in per-stack named volumes seeded from it — for local
+named volume, and each server's runtime data is in per-stack named volumes seeded from it - for local
 *and* external stacks. See [Data model](#data-model-named-volumes) and
 [DOCKER.md → Volumes](./DOCKER.md#volumes).
 
@@ -765,13 +765,13 @@ Docker.DotNet. See `.github/copilot-instructions.md` for coding standards.
 
 ## 7. Troubleshooting
 
-- **Port already in use** — free `80`/`443`/`8080`, or change the published ports in
+- **Port already in use** - free `80`/`443`/`8080`, or change the published ports in
   `docker-compose.yml`.
-- **Certificate warning on `https://localhost`** — expected with the self-signed cert; set
+- **Certificate warning on `https://localhost`** - expected with the self-signed cert; set
   `SITE_ADDRESS` + `TLS_EMAIL` for a trusted certificate.
-- **Forgot/blank admin password** — check `docker compose logs azeroth-platform` for the generated
+- **Forgot/blank admin password** - check `docker compose logs azeroth-platform` for the generated
   one's location.
-- **Manager crash-loops with `SQLite Error 8: attempt to write a readonly database`** — the
+- **Manager crash-loops with `SQLite Error 8: attempt to write a readonly database`** - the
   `azeroth-platform-data` volume predates the non-root switch, so files are root-owned. Fix once (the
   manager runs as uid `1654`/`app`):
   ```bash
@@ -779,19 +779,19 @@ Docker.DotNet. See `.github/copilot-instructions.md` for coding standards.
     -c 'chown -R app:app /data'
   docker restart azeroth-platform
   ```
-- **Stack actions fail with Docker errors** — check the proxy: `docker compose ps docker-socket-proxy`
+- **Stack actions fail with Docker errors** - check the proxy: `docker compose ps docker-socket-proxy`
   and `docker compose logs docker-socket-proxy`. If an operation is rejected, the manager may need an
-  API group that isn't enabled — add it to the `docker-socket-proxy` environment (keep the allowlist
+  API group that isn't enabled - add it to the `docker-socket-proxy` environment (keep the allowlist
   tight).
-- **External stack won't start/build** — verify the remote host is reachable over SSH, the key/user
+- **External stack won't start/build** - verify the remote host is reachable over SSH, the key/user
   are correct, and Docker is installed with the SSH user able to run it.
-- **Players on other machines can't connect** — set `HOST_LAN_IP` (local stacks) and restart the
+- **Players on other machines can't connect** - set `HOST_LAN_IP` (local stacks) and restart the
   stack; external stacks default their realmlist to the remote host.
-- **Stack build fails** — usually out of disk (~5–10 GB per build), out of memory (~4 GB free during
+- **Stack build fails** - usually out of disk (~5–10 GB per build), out of memory (~4 GB free during
   compilation), or a git-clone network hiccup. Check `docker logs azeroth-platform`.
-- **Armory has no item icons / achievement titles** — run **Sync DBCs from server** (they come from
+- **Armory has no item icons / achievement titles** - run **Sync DBCs from server** (they come from
   DBC data, not the model-viewer download).
-- **Armory 3D models don't load** — upload `armory.data.zip` (+ `armory.textures.zip`) from the
+- **Armory 3D models don't load** - upload `armory.data.zip` (+ `armory.textures.zip`) from the
   [Armory release](https://github.com/Fero-Fero/AzerothPlatform/releases/tag/Armory).
 
 ---
@@ -800,7 +800,7 @@ Docker.DotNet. See `.github/copilot-instructions.md` for coding standards.
 
 A plain-language breakdown of **every feature**, roughly in the order you'll use it. Each entry gives
 **what it is**, **where to find it**, and **beginner** vs **advanced** usage. Several features exist
-both **globally** (a top-bar default) and **per-stack** (an override for one server) — those are
+both **globally** (a top-bar default) and **per-stack** (an override for one server) - those are
 flagged inline. For API endpoints and internals, see [DOCKER.md](./DOCKER.md).
 
 ### Your servers (stacks)
@@ -828,7 +828,7 @@ A **stack** is one complete game server: authentication + world + database, buil
 #### Lifecycle: Start / Stop / Restart / DB Maintenance
 - **What:** the power controls for a server.
 - **Where:** open a stack → **Overview**.
-- **Beginner:** Start/Stop/Restart run as background jobs, so you can navigate away — the button shows
+- **Beginner:** Start/Stop/Restart run as background jobs, so you can navigate away - the button shows
   "Starting…/Stopping…" while it works.
 - **Advanced:** **DB Maintenance** brings up *only* the database (world/auth stopped) for patches/SQL,
   from a stopped or running stack; the stack reports `Degraded` until fully started.
@@ -874,36 +874,36 @@ A **stack** is one complete game server: authentication + world + database, buil
   applied per launch; files under `Client:ManagedPrefixes` (default `Data/patch-`) are kept in sync
   and pruned when removed. See [`client-example/`](./client-example/).
 
-#### Launcher — global & stack
+#### Launcher - global & stack
 - **What:** a branded Windows launcher you compile and hand to players; it downloads/updates the
   client, lets players pick a server profile, and only enables **Play** when files verify.
 - **Where:**
-  - **Global** — top bar → **Launcher**: app-wide identity/branding, the **Build launcher** button
+  - **Global** - top bar → **Launcher**: app-wide identity/branding, the **Build launcher** button
     (which compiles the **base launcher and pushes it to every stack**), and a **propagation check**
     that pings all stacks to confirm they got the current build, with a per-stack **re-send**.
-  - **Per-stack** — stack → **Client** group → **Launcher**: that server's profile (display name, sort
+  - **Per-stack** - stack → **Client** group → **Launcher**: that server's profile (display name, sort
     order, realmlist override, its own background/logo), shown when **Show in launcher** is on.
 - **Global vs. per-stack:** the global page builds and **distributes one base launcher to all stacks**
   and sets the shared branding; each opted-in stack then appears as a **profile** inside that launcher.
-  New stacks show up automatically — no recompile needed.
+  New stacks show up automatically - no recompile needed.
 - **Beginner:** set an app name/branding globally and press **Build launcher**; it's pushed to your
   stacks and you share the **Download exe** link.
 - **Advanced:** per-profile overlays (custom MPQs + addons) layer on the shared base client so
   switching profiles never re-downloads the base; the launcher self-updates by verifying a published
   SHA-256 before replacing itself. See [DOCKER.md](./DOCKER.md#compiling-the-launcher-docker-sidecar).
 
-#### News — global & stack
+#### News - global & stack
 - **What:** the patch-notes/news feed shown inside the launcher.
-- **Where:** **Global** — top bar → **Global News**; **Per-stack** — stack → **News** tab.
+- **Where:** **Global** - top bar → **Global News**; **Per-stack** - stack → **News** tab.
 - **Global vs. per-stack:** saving **Global News pushes the articles to every launcher-visible stack**,
   so one set of news articles shows up in every launcher (re-push on demand at any time). A stack's
   **News** tab manages that one server's own articles for realm-specific news.
-- **Beginner:** write a news article in **Global News** and save — it's pushed to all your stacks and
+- **Beginner:** write a news article in **Global News** and save - it's pushed to all your stacks and
   shown in their launchers.
 - **Advanced:** global news articles are pushed into each stack's own news store; per-stack news is
   delivered as patch-notes XML for that profile, so each realm can also publish its own articles.
 
-#### Addons — global & stack
+#### Addons - global & stack
 - **What:** WoW addons the launcher installs for players automatically (via the client manifest, under
   `Interface/AddOns/`).
 - **Where:** stack → **Client** group → **Addons** (a global client has addons too).
@@ -944,14 +944,14 @@ A **stack** is one complete game server: authentication + world + database, buil
 - **Where:** stack → **Game** group → **Lua Scripts** (live scripts), or a patch's **`lua/`** folder (versioned with patch apply).
 - **Beginner:** upload a `.zip` of scripts or edit `.lua` files inline, then **Apply & reload**. Patch
   `lua/` files are copied into the same live folder when you **Apply** that patch.
-- **Advanced:** scripts run only if a **Lua engine** is compiled into the worldserver — add
+- **Advanced:** scripts run only if a **Lua engine** is compiled into the worldserver - add
   `mod-ale` from the catalog, select it for the stack, and rebuild; the tab warns when no Lua
   engine is detected. Re-applying patches redeploys each patch's `lua/` tree in order (later files
   overwrite earlier ones).
 
 #### Patches
-- **What:** incremental content layered onto a server over time — SQL, DBC edits, map overrides, client
-  MPQ patches, **config overrides**, and **Lua scripts** — applied strictly in order.
+- **What:** incremental content layered onto a server over time - SQL, DBC edits, map overrides, client
+  MPQ patches, **config overrides**, and **Lua scripts** - applied strictly in order.
 - **Where:** stack → **Game** group → **Patches**.
 - **Beginner:** create a numbered patch folder (e.g. `patch 1.1 my_patch`), drop files into its
   `sql/`, `dbc/`, `map/`, `mpq/`, `config/`, and/or `lua/` sections, and **Apply**.
@@ -962,14 +962,14 @@ A **stack** is one complete game server: authentication + world + database, buil
   `modules/individualProgression.conf`, and other module configs by base name). Use **Preview changes**
   on a patch to compare live config values with what apply will write. Servers with
   **mod-individual-progression** can **Sync with mod-individual-progression** to seed patches from
-  [Azeroth-Platform-Progression](https://github.com/Fero-Fero/Azeroth-Platform-Progression) — see that
+  [Azeroth-Platform-Progression](https://github.com/Fero-Fero/Azeroth-Platform-Progression) - see that
   repository's README for the reference patch layout. See
   [DOCKER.md → Stack Migrations / Patches](./DOCKER.md#stack-migrations--patches).
 
 ### Configuration (Configs & Environment Variables)
 
 #### Server Config (Configs)
-- **What:** direct editing of the real config files — `worldserver.conf`, `authserver.conf`, and each
+- **What:** direct editing of the real config files - `worldserver.conf`, `authserver.conf`, and each
   installed module's `.conf`.
 - **Where:** stack → **Server Config** tab.
 - **Beginner:** start the stack once (files are created on first start), edit a setting, then **Apply &
@@ -980,10 +980,10 @@ A **stack** is one complete game server: authentication + world + database, buil
 
 #### Environment Variables
 - **What:** container environment variables that override server/module behavior.
-- **Where:** **Per-stack** — stack → **Advanced** group → **Environment Variables** (searchable,
-  per-container). **Global** — the root `.env` configures the *manager* itself.
+- **Where:** **Per-stack** - stack → **Advanced** group → **Environment Variables** (searchable,
+  per-container). **Global** - the root `.env` configures the *manager* itself.
 - **Global vs. per-stack:** the root `.env` configures the **platform**; the tab configures a **single
-  server's containers** — different scopes, not duplicates.
+  server's containers** - different scopes, not duplicates.
 - **Beginner:** search for a variable, set its value, **Save** (applied on the next restart).
 - **Advanced:** edit per container (worldserver, authserver, database, armory, …). Each container has
   its own env bucket; there is no flat override.
@@ -992,23 +992,23 @@ A **stack** is one complete game server: authentication + world + database, buil
 
 #### Outdated & Update Stack
 - **What:** detection of new AzerothCore/module commits, and a safe one-click update.
-- **Where:** stack → **Overview** ("Updates Available"; **Check for Updates** forces a check — it also
+- **Where:** stack → **Overview** ("Updates Available"; **Check for Updates** forces a check - it also
   runs hourly).
-- **Beginner:** click **Update Stack** — it stops the server, updates the code, rebuilds, and reboots;
+- **Beginner:** click **Update Stack** - it stops the server, updates the code, rebuilds, and reboots;
   the notice clears when done.
 - **Advanced:** Update snapshots a `pre-update` **revision** first, then reapplies every applied
   **patch**'s SQL in order after the core update so it can't clobber your custom SQL. Plain **Rebuild**
   does not snapshot or reapply patches.
 
 #### Revisions
-- **What:** point-in-time snapshots of a server's three databases plus its config files — your undo
+- **What:** point-in-time snapshots of a server's three databases plus its config files - your undo
   button.
 - **Where:** stack → **Advanced** group → **Revisions**.
 - **Beginner:** **Create snapshot** before risky changes; **Restore** rolls the databases and config
   back.
 - **Advanced:** one is captured automatically before every **Update** (`pre-update`); restore
   drops/recreates the databases from dumps and restores the `.conf` files. Snapshots capture
-  data + config, not the multi-GB client volume — restoring old *code* still needs a rebuild at the SHA
+  data + config, not the multi-GB client volume - restoring old *code* still needs a rebuild at the SHA
   recorded in the revision.
 
 #### Logs
@@ -1040,30 +1040,30 @@ steps, relevant `docker logs azeroth-platform` output, and screenshots if applic
 
 ### Groundwork this project is built on
 
-- **[Witte1985 — AzerothCore Manager](https://github.com/Witte1985/AzerothCoreManager)** — Azeroth
+- **[Witte1985 - AzerothCore Manager](https://github.com/Witte1985/AzerothCoreManager)** - Azeroth
   Platform grew directly out of Witte's AzerothCore Manager. It provided the original architecture and
   feature foundation (the guided wizard, Docker stack orchestration, build pipeline, account/character
-  management, and more) that everything here builds upon. **Huge thanks, Witte — this is your
+  management, and more) that everything here builds upon. **Huge thanks, Witte - this is your
   groundwork extended.**
-- **[r-o-b-o-t-o — AzerothCore Armory](https://github.com/r-o-b-o-t-o/azerothcore-armory)** — the
+- **[r-o-b-o-t-o - AzerothCore Armory](https://github.com/r-o-b-o-t-o/azerothcore-armory)** - the
   entire armory feature is built on r-o-b-o-t-o's (Axel Cocat) azerothcore-armory. It laid the
   groundwork for the per-stack character & guild pages, equipment tooltips, and the 3D model viewer
-  that Azeroth Platform serves. **Thank you for the armory groundwork.** (Used under its MIT license —
+  that Azeroth Platform serves. **Thank you for the armory groundwork.** (Used under its MIT license -
   see [`frontend-armory/LICENSE`](./frontend-armory/LICENSE).)
 
 ### AzerothCore & its community
 
-- **[AzerothCore and all of its contributors](https://github.com/azerothcore/azerothcore-wotlk)** —
+- **[AzerothCore and all of its contributors](https://github.com/azerothcore/azerothcore-wotlk)** -
   the open-source WotLK server emulator at the heart of everything Azeroth Platform does. Thank you to
   the entire AzerothCore team and **every single contributor** who keeps it alive.
-- **[AzerothCore Playermap](https://github.com/azerothcore/playermap)** — AzerothCore's live player
+- **[AzerothCore Playermap](https://github.com/azerothcore/playermap)** - AzerothCore's live player
   world-map project. Thanks to AzerothCore and its maintainers (originally by Dmitry Koterov,
   maintained by Helias).
-- **MaNGOS, TrinityCore & SunwellCore** — the foundational code AzerothCore itself builds upon.
+- **MaNGOS, TrinityCore & SunwellCore** - the foundational code AzerothCore itself builds upon.
 
 ### Tools & integrations
 
-- **[WowDevTools — WDBX Editor](https://github.com/WowDevTools/WDBXEditor)** — the communal
+- **[WowDevTools - WDBX Editor](https://github.com/WowDevTools/WDBXEditor)** - the communal
   DBC/DB2/WDB editor that powers Azeroth Platform's DBC patching (the WDBX sidecar image). Thank you to
   **WowDevTools** and everyone who contributes to it (and to Ladislav Zezula for StormLib and the
   WoWDev wiki community behind it).
@@ -1071,14 +1071,14 @@ steps, relevant `docker logs azeroth-platform` output, and screenshots if applic
 ### …and everyone else
 
 - The **Docker** community, the **WoW private-server** community, and **anyone we may have
-  forgotten.** If your work belongs here and isn't listed, please open an issue or PR — you deserve
+  forgotten.** If your work belongs here and isn't listed, please open an issue or PR - you deserve
   the credit. 💙
 
 ---
 
 ## 11. License & disclaimer
 
-This project is licensed under the **MIT** license — see the [`LICENSE`](./LICENSE) file.
+This project is licensed under the **MIT** license - see the [`LICENSE`](./LICENSE) file.
 
 This project is not affiliated with or endorsed by Blizzard Entertainment or World of Warcraft. It is
 intended for educational purposes and private server testing only; the authors do not support or

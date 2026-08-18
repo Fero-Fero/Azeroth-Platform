@@ -85,7 +85,7 @@ function AdminIpHint({ suggestedAdminSourceCidr }: { suggestedAdminSourceCidr?: 
       Your public IP (paste as SSH source):
       <CopyableCidr value={suggestedAdminSourceCidr} label="IP" />
       <span className="mt-1 block text-[11px] text-blue-800/80">
-        This is looked up from your browser, not from the platform container — use this value, not Docker
+        This is looked up from your browser, not from the platform container - use this value, not Docker
         addresses like <span className="font-mono">172.18.0.1</span>.
       </span>
     </span>
@@ -141,7 +141,7 @@ function ProviderSteps({
           <span className="font-medium">Add rule</span> for each row in the table below.
         </li>
         <li>
-          For SSH (port {sshPort}), set <span className="font-medium">Source</span> to your admin IP — do not
+          For SSH (port {sshPort}), set <span className="font-medium">Source</span> to your admin IP - do not
           use <span className="font-mono">0.0.0.0/0</span> for SSH.
           <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
         </li>
@@ -190,7 +190,7 @@ function ProviderSteps({
           Add inbound TCP rules for each row in the table below. Outbound can stay allow-all.
         </li>
         <li>
-          For SSH (port {sshPort}), set sources to your admin IP — do not use{' '}
+          For SSH (port {sshPort}), set sources to your admin IP - do not use{' '}
           <span className="font-mono">0.0.0.0/0</span> for SSH.
           <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
         </li>
@@ -239,7 +239,7 @@ function ProviderSteps({
           Add inbound IPv4 TCP rules for each row in the table below.
         </li>
         <li>
-          For SSH (port {sshPort}), set the source to your admin IP — do not use{' '}
+          For SSH (port {sshPort}), set the source to your admin IP - do not use{' '}
           <span className="font-mono">0.0.0.0/0</span> for SSH.
           <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
         </li>
@@ -321,7 +321,7 @@ function ProviderSteps({
           Add inbound TCP rules for each row in the table below.
         </li>
         <li>
-          For SSH (port {sshPort}), set sources to your admin IP — do not use{' '}
+          For SSH (port {sshPort}), set sources to your admin IP - do not use{' '}
           <span className="font-mono">0.0.0.0/0</span> for SSH.
           <AdminIpHint suggestedAdminSourceCidr={suggestedAdminSourceCidr} />
         </li>
@@ -511,7 +511,7 @@ export function CloudSecurityGroupGuideDialog({
           )}
 
           <p className="text-xs text-gray-500">
-            If you run multiple stacks on the same VPC, later stacks may use higher ports — update cloud
+            If you run multiple stacks on the same VPC, later stacks may use higher ports - update cloud
             rules from the stack VPC overview tab when that happens.
           </p>
         </div>

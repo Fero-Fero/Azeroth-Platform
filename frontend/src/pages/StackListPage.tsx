@@ -138,7 +138,7 @@ export default function StackListPage() {
             trackJob(stack.stackId, res.data)
           }
         } catch {
-          // Ignore — list view still works without reattached jobs.
+          // Ignore - list view still works without reattached jobs.
         }
       }
     })()
@@ -448,7 +448,7 @@ export default function StackListPage() {
                     )}
                     {isExternal && isStopped && !vpcHostAlert && !isProbing && stack.dockerEngineAvailable === true && (
                       <p className="mt-2 text-xs text-gray-500">
-                        Stack containers are stopped. The VPC host is online — use Start to bring the server back up.
+                        Stack containers are stopped. The VPC host is online - use Start to bring the server back up.
                       </p>
                     )}
                     {isSetupIncomplete ? (

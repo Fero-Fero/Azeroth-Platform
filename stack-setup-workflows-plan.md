@@ -1,4 +1,4 @@
-# Plan — Stack setup workflow orchestrator
+# Plan - Stack setup workflow orchestrator
 
 **Status:** Implemented  
 **Scope:** Refactor stack Overview setup notifications into a composable step pipeline: cross-cutting steps, server-type workflows, and shared module steps.  
@@ -22,7 +22,7 @@ We need a structure that is easy to extend per server type and per module withou
 ## Goals
 
 1. **One orchestrator** renders all applicable setup notifications on Overview.
-2. **Cross-cutting global onboarding** — the first three setup steps on every stack are always, in order: **SOAP admin**, **upload client**, **upload armory DBC**. Client and armory are **skippable** (recommended but not required); SOAP is required.
+2. **Cross-cutting global onboarding** - the first three setup steps on every stack are always, in order: **SOAP admin**, **upload client**, **upload armory DBC**. Client and armory are **skippable** (recommended but not required); SOAP is required.
 3. **Server-type files** define step order and inject module steps at the right position in the pipeline.
 4. **Module step factories** live under `steps/modules/` (module-specific, not generic stack ops); server types compose them by module id.
 5. **Conditional applicability** is declared on each step (`applies(ctx)`), not in the orchestrator.
@@ -40,7 +40,7 @@ We need a structure that is easy to extend per server type and per module withou
 
 ```text
 StackOverviewStatusPanel
-  └── (infra warnings — unchanged for now)
+  └── (infra warnings - unchanged for now)
   └── StackSetupOverview          ← new orchestrator
         ├── globalSteps[]         ← fixed order: SOAP → client → armory DBC (first 3 always)
         └── serverTypeSteps[]     ← from registry[stack.configuration.serverType]
@@ -62,7 +62,7 @@ flowchart TD
 
 ### Rendering rules
 
-1. Build a single `SetupStepContext` via `useSetupStepContext()` — prefetches all status needed for `applies` / `isComplete` (see [Context and hooks](#context-and-hooks)).
+1. Build a single `SetupStepContext` via `useSetupStepContext()` - prefetches all status needed for `applies` / `isComplete` (see [Context and hooks](#context-and-hooks)).
 2. Concatenate: `[...globalSteps, ...serverTypeSteps(ctx)]`.
 3. Apply [sequencing](#sequencing) so ordered workflows (e.g. Individual Progression + playerbots) show **one primary step at a time**, while independent steps (SOAP, AH bot, dungeon sim notes) may appear in parallel.
 4. For each visible step: render one `StackStatusItemRow` using step metadata + `Component`.
@@ -77,8 +77,8 @@ Two kinds of step live under `steps/`:
 
 | Location | Purpose | Examples |
 |----------|---------|----------|
-| `steps/stack/` | **Generic stack operations** — reusable on any server type, no module-specific business logic | start, stop, restart |
-| `steps/modules/` | **Module-specific setup** — custom behaviour tied to a module id (DB injection, conf quirks, patch prep, notes) | AH bot characters, dungeon sim SQL, IP bootstrap |
+| `steps/stack/` | **Generic stack operations** - reusable on any server type, no module-specific business logic | start, stop, restart |
+| `steps/modules/` | **Module-specific setup** - custom behaviour tied to a module id (DB injection, conf quirks, patch prep, notes) | AH bot characters, dungeon sim SQL, IP bootstrap |
 
 Cross-cutting steps that are not module-specific and not stack-generic (e.g. SOAP admin) stay in `global-steps/`.
 
@@ -87,13 +87,13 @@ frontend/src/setup/
   types.ts                          # SetupStep, SetupStepContext, SetupWorkflowBuilder
   StackSetupOverview.tsx            # orchestrator used by ModuleSetupStatusRows
   global-steps/
-    index.ts                        # exports globalSteps — fixed onboarding order (see below)
-    soapAdminStep.tsx               # 1 — required
-    uploadClientStep.tsx            # 2 — skippable
-    uploadArmoryDbcStep.tsx         # 3 — skippable
+    index.ts                        # exports globalSteps - fixed onboarding order (see below)
+    soapAdminStep.tsx               # 1 - required
+    uploadClientStep.tsx            # 2 - skippable
+    uploadArmoryDbcStep.tsx         # 3 - skippable
   steps/
     index.ts                        # re-exports generic stack step factories
-    stack/                          # generic — not tied to a module
+    stack/                          # generic - not tied to a module
       startStackStep.tsx
       stopStackStep.tsx
       restartStackStep.tsx
@@ -124,15 +124,15 @@ frontend/src/setup/
     setupProgressStore.ts           # unified localStorage by stackId + stepId
   useSetupStepContext.ts            # prefetches status for all steps
   resolveVisibleSteps.ts            # independent vs sequenced pipeline resolution
-  hasActiveSetupSteps.ts            # useHasActiveSetupSteps — shared with StackOverviewStatusPanel
+  hasActiveSetupSteps.ts            # useHasActiveSetupSteps - shared with StackOverviewStatusPanel
 ```
 
 ### When to put a step where
 
-- **`global-steps/`** — applies to every stack regardless of server type or modules. **Order is fixed:** SOAP → upload client → upload armory DBC, then any future global steps. Client and armory steps are skippable; SOAP is not.
-- **`steps/stack/`** — operates on the stack itself (containers, status transitions); no module catalog knowledge.
-- **`steps/modules/{moduleId}/`** — knows about that module’s conf paths, SQL, API calls, or patch workflow. Registered in `steps/modules/index.ts` so `resolveModuleSteps()` can inject them by installed `moduleIds`.
-- **`server-types/`** — only **ordering** and **which generic steps** to interleave; imports from `steps/stack/` and receives `moduleSteps` from the registry.
+- **`global-steps/`** - applies to every stack regardless of server type or modules. **Order is fixed:** SOAP → upload client → upload armory DBC, then any future global steps. Client and armory steps are skippable; SOAP is not.
+- **`steps/stack/`** - operates on the stack itself (containers, status transitions); no module catalog knowledge.
+- **`steps/modules/{moduleId}/`** - knows about that module’s conf paths, SQL, API calls, or patch workflow. Registered in `steps/modules/index.ts` so `resolveModuleSteps()` can inject them by installed `moduleIds`.
+- **`server-types/`** - only **ordering** and **which generic steps** to interleave; imports from `steps/stack/` and receives `moduleSteps` from the registry.
 
 ---
 
@@ -145,7 +145,7 @@ export type SetupStepContext = {
   stack: StackDetailsDto
   patchesHref: string
   onSelectTab: (tab: 'addons' | 'patches' | 'client' | 'armory') => void
-  /** Prefetched by useSetupStepContext — keeps applies/isComplete pure */
+  /** Prefetched by useSetupStepContext - keeps applies/isComplete pure */
   status: SetupStepStatus
 }
 
@@ -178,7 +178,7 @@ export type SetupStepStatus = {
 export type SetupStep = {
   /** Stable id for StackStatusItemRow and progress persistence */
   id: string
-  /** Owning module id — set on steps from steps/modules/ for filtering in server-type builders */
+  /** Owning module id - set on steps from steps/modules/ for filtering in server-type builders */
   moduleId?: string
   /**
    * When true, operator may dismiss the step without completing the underlying action
@@ -203,7 +203,7 @@ export type SetupStep = {
   summary: (ctx: SetupStepContext) => string
   /** Return false to skip this step entirely */
   applies: (ctx: SetupStepContext) => boolean
-  /** Return true when the operator no longer needs this step — must be pure given ctx.status */
+  /** Return true when the operator no longer needs this step - must be pure given ctx.status */
   isComplete: (ctx: SetupStepContext) => boolean
   defaultExpanded?: boolean
   /** Detail panel + actions */
@@ -290,7 +290,7 @@ export function resolveModuleSteps(moduleIds: string[]): SetupStep[] {
 }
 ```
 
-Server types may also import module step factories **directly** when they need custom pipeline order — see [Ordered server types vs module registry](#ordered-server-types-vs-module-registry).
+Server types may also import module step factories **directly** when they need custom pipeline order - see [Ordered server types vs module registry](#ordered-server-types-vs-module-registry).
 
 ---
 
@@ -303,7 +303,7 @@ The current IP playerbots hint is a **phase machine**, not a set of independent 
 | Mode | When | Behaviour |
 |------|------|-----------|
 | **Independent** | `sequenced` unset/false (AH bot, dungeon sim notes, skippable global steps after onboarding) | Show whenever `applies && !isComplete` |
-| **Pipeline** | Steps in a server-type pipeline with `sequenced: true` | Show **at most one** primary incomplete step — the first in pipeline order whose predecessors are complete |
+| **Pipeline** | Steps in a server-type pipeline with `sequenced: true` | Show **at most one** primary incomplete step - the first in pipeline order whose predecessors are complete |
 
 Global steps are always independent. Server-type builders may return a mix: one pipeline + parallel independent module steps.
 
@@ -338,7 +338,7 @@ function resolvePipelineStep(steps: SetupStep[], ctx: SetupStepContext): SetupSt
 Mark the ordered slice with `sequenced: true`:
 
 ```typescript
-// server-types/individualProgression.setup.ts — pipeline only (see registry section for full builder)
+// server-types/individualProgression.setup.ts - pipeline only (see registry section for full builder)
 
 const ipPipeline: SetupStep[] = [
   { ...disablePlayerbotsStep(), sequenced: true },
@@ -347,7 +347,7 @@ const ipPipeline: SetupStep[] = [
   { ...reenablePlayerbotsStep(), sequenced: true, dependsOn: ['ip-prepare-progression'] },
 ]
 
-// ipSyncHintStep: sequenced false — dismissible hint, applies after pipeline complete
+// ipSyncHintStep: sequenced false - dismissible hint, applies after pipeline complete
 ```
 
 **Without `mod-playerbots`:** pipeline steps whose `applies` is false are skipped; the first visible sequenced step is typically `prepareProgressionStep`.
@@ -387,12 +387,12 @@ SOAP remains blocking for stacks that need SOAP commands; skipping client/armory
 ### Global onboarding order
 
 ```typescript
-// global-steps/index.ts — order is contractual; do not reorder without updating docs/tests
+// global-steps/index.ts - order is contractual; do not reorder without updating docs/tests
 
 export const globalSteps: SetupStep[] = [
-  soapAdminStep(),       // id: soap-admin — required
-  uploadClientStep(),    // id: upload-client — skippable
-  uploadArmoryDbcStep(), // id: upload-armory-dbc — skippable
+  soapAdminStep(),       // id: soap-admin - required
+  uploadClientStep(),    // id: upload-client - skippable
+  uploadArmoryDbcStep(), // id: upload-armory-dbc - skippable
 ]
 ```
 
@@ -400,8 +400,8 @@ Migrate today’s client/armory upload rows from `StackOverviewStatusPanel` into
 
 **Applies (matches current behaviour):**
 
-- **Upload client** — `applies` when client container is running and base client not uploaded (`useClientBaseInfo`).
-- **Upload armory DBC** — `applies` when armory container is running and model-viewer dataset not uploaded (`useArmoryAssetsInfo`).
+- **Upload client** - `applies` when client container is running and base client not uploaded (`useClientBaseInfo`).
+- **Upload armory DBC** - `applies` when armory container is running and model-viewer dataset not uploaded (`useArmoryAssetsInfo`).
 
 If the relevant container is not running yet, the step may show a “start the stack / container first” message instead of an upload action (same as today’s infra panel copy).
 
@@ -415,8 +415,8 @@ Replace scattered localStorage keys (`azp_ip_playerbots_phase_*`, etc.) with `pr
 
 ### Overlap guard (IP)
 
-- `prepareProgressionStep` — active while bootstrap/sync incomplete (`isComplete` from API status in `ctx.status`).
-- `ipSyncHintStep` — `applies` only when pipeline is complete **and** hint not dismissed; never shown alongside active pipeline steps.
+- `prepareProgressionStep` - active while bootstrap/sync incomplete (`isComplete` from API status in `ctx.status`).
+- `ipSyncHintStep` - `applies` only when pipeline is complete **and** hint not dismissed; never shown alongside active pipeline steps.
 
 ---
 
@@ -472,7 +472,7 @@ export default function StackSetupOverview({ stack, onSelectTab }: Props) {
 export function useSetupStepContext(stack: StackDetailsDto, onSelectTab: ...): SetupStepContext {
   const patchesHref = `/stacks/${stack.stackId}?tab=patches`
 
-  // Compose existing hooks — single place for query subscriptions
+  // Compose existing hooks - single place for query subscriptions
   const clientBase = useClientBaseInfo(stack.stackId)
   const armoryAssets = useArmoryAssetsInfo(stack.stackId)
   const playerbots = usePlayerbotsConf(stack.stackId)
@@ -545,7 +545,7 @@ Do **not** duplicate logic in a static `buildStaticContext`. Export a shared res
 ```typescript
 // setup/hasActiveSetupSteps.ts
 
-/** Used inside StackOverviewStatusPanel — must run under the same data rules as StackSetupOverview */
+/** Used inside StackOverviewStatusPanel - must run under the same data rules as StackSetupOverview */
 export function useHasActiveSetupSteps(stack: StackDetailsDto): boolean {
   const ctx = useSetupStepContext(stack, () => {})
   const moduleSteps = resolveModuleSteps(stack.configuration.moduleIds ?? [])
@@ -557,7 +557,7 @@ export function useHasActiveSetupSteps(stack: StackDetailsDto): boolean {
 
 `StackOverviewStatusPanel` calls `useHasActiveSetupSteps(stack)` instead of hardcoded module id checks. Both Overview rendering and panel visibility stay in sync.
 
-**Rule:** Never implement completion checks only inside `Component` — the orchestrator must be able to hide completed steps without mounting them.
+**Rule:** Never implement completion checks only inside `Component` - the orchestrator must be able to hide completed steps without mounting them.
 
 ---
 
@@ -657,9 +657,9 @@ Individual Progression previously imported steps **directly** and also spread `m
 
 ### Rules
 
-1. **Default server types** — register every module in `steps/modules/index.ts`; server-type builder is `(ctx, moduleSteps) => [...moduleSteps]`.
-2. **Ordered server types (IP v1)** — import pipeline steps explicitly; pass `sequenced: true` on ordered steps; spread only **non-sequenced** module steps for parallel setup (AH bot, solo craft, etc.).
-3. **Every step in `steps/modules/` must set `moduleId`** — required for filtering and debugging.
+1. **Default server types** - register every module in `steps/modules/index.ts`; server-type builder is `(ctx, moduleSteps) => [...moduleSteps]`.
+2. **Ordered server types (IP v1)** - import pipeline steps explicitly; pass `sequenced: true` on ordered steps; spread only **non-sequenced** module steps for parallel setup (AH bot, solo craft, etc.).
+3. **Every step in `steps/modules/` must set `moduleId`** - required for filtering and debugging.
 4. **Do not** register the same step factory in both the IP pipeline array and an unfiltered `...moduleSteps` spread.
 
 ### Module registry exports for IP
@@ -674,7 +674,7 @@ They are **not** duplicated via spread on the IP server type builder.
 
 ### `steps/stack/` predicates
 
-Generic stack steps accept optional `when` predicates injected by the server type (e.g. `playerbotsDisabledPhase`). They must not import module folders directly — keep module knowledge in the server-type builder or in `applies` on the module step.
+Generic stack steps accept optional `when` predicates injected by the server type (e.g. `playerbotsDisabledPhase`). They must not import module folders directly - keep module knowledge in the server-type builder or in `applies` on the module step.
 
 ---
 
@@ -698,9 +698,9 @@ Extract from existing components:
 
 Shared hooks (colocated with their module step folder):
 
-- `steps/modules/mod-playerbots/usePlayerbotsConf.ts` — conf path, enabled flag, toggle save
-- `steps/modules/mod-individual-progression/useIpProgressionStatus.ts` — bootstrapped, sync completed
-- `progress/setupProgressStore.ts` — replace scattered `localStorage` keys; backs `ctx.status.progress`
+- `steps/modules/mod-playerbots/usePlayerbotsConf.ts` - conf path, enabled flag, toggle save
+- `steps/modules/mod-individual-progression/useIpProgressionStatus.ts` - bootstrapped, sync completed
+- `progress/setupProgressStore.ts` - replace scattered `localStorage` keys; backs `ctx.status.progress`
 
 Pure status helpers (for unit tests, colocated with module steps):
 
@@ -714,7 +714,7 @@ Delete after migration:
 
 Keep (may shrink):
 
-- `IndividualProgressionSyncHint.tsx` — either fold into `ipSyncHintStep` or re-export from step file
+- `IndividualProgressionSyncHint.tsx` - either fold into `ipSyncHintStep` or re-export from step file
 
 ---
 
@@ -746,7 +746,7 @@ Replace with `useHasActiveSetupSteps(stack)` from [Context and hooks](#context-a
 
 ## Implementation phases
 
-### Phase 1 — Scaffold (no behaviour change)
+### Phase 1 - Scaffold (no behaviour change)
 
 - [ ] Add `frontend/src/setup/` types (`SetupStep`, `SetupStepContext`, `SetupStepStatus`, sequencing fields)
 - [ ] Add `useSetupStepContext`, `resolveVisibleSteps`, stub `useHasActiveSetupSteps`
@@ -754,7 +754,7 @@ Replace with `useHasActiveSetupSteps(stack)` from [Context and hooks](#context-a
 - [ ] Wire `StackSetupOverview` beside existing `ModuleSetupStatusRows` behind a feature flag or parallel render for dev comparison
 - [ ] Add `server-types/index.ts` with passthrough builders (`() => moduleSteps`)
 
-### Phase 2 — Migrate cross-cutting + module steps
+### Phase 2 - Migrate cross-cutting + module steps
 
 - [ ] Move SOAP into `global-steps/` (step 1)
 - [ ] Add `uploadClientStep` and `uploadArmoryDbcStep` (steps 2–3, skippable) + `uploadStatus.ts`
@@ -765,7 +765,7 @@ Replace with `useHasActiveSetupSteps(stack)` from [Context and hooks](#context-a
 - [ ] Add pure status helpers + colocated hooks
 - [ ] Delete duplicate `ModuleSetupWarnings`
 
-### Phase 3 — Individual Progression pipeline
+### Phase 3 - Individual Progression pipeline
 
 - [ ] Extract playerbots + IP steps from `IndividualProgressionPlayerbotsSetupHint`
 - [ ] Implement `individualProgression.setup.ts` with **explicit pipeline** + `sequenced: true` (see Ordered server types)
@@ -774,16 +774,16 @@ Replace with `useHasActiveSetupSteps(stack)` from [Context and hooks](#context-a
 - [ ] Define non-overlapping `applies` for `prepareProgressionStep` vs `ipSyncHintStep`
 - [ ] Remove backend `mod-playerbots` required for IP + update tests
 
-### Phase 4 — Cutover
+### Phase 4 - Cutover
 
 - [ ] Replace `ModuleSetupStatusRows` implementation with orchestrator only
 - [ ] Update `StackOverviewStatusPanel` to use `useHasActiveSetupSteps`
 - [ ] Delete monolith components
-- [ ] Manual QA — see [Testing](#testing) matrix
+- [ ] Manual QA - see [Testing](#testing) matrix
 
-### Phase 5 — Documentation
+### Phase 5 - Documentation
 
-- [ ] Add short section to `frontend/README.md` — “Adding a setup step” (include sequencing + registry rules)
+- [ ] Add short section to `frontend/README.md` - “Adding a setup step” (include sequencing + registry rules)
 - [ ] Comment in each `server-types/*.setup.ts` explaining ordering intent
 
 ---
@@ -800,11 +800,11 @@ Replace with `useHasActiveSetupSteps(stack)` from [Context and hooks](#context-a
 
 3. **Server-type-specific ordering:** edit `server-types/myType.setup.ts`. For pipelines, import factories explicitly and set `sequenced: true`; do not spread the same steps from `moduleSteps`. See [Ordered server types vs module registry](#ordered-server-types-vs-module-registry).
 
-4. **Truly global (every stack):** append to `global-steps/index.ts` **after** the three onboarding steps — never insert before SOAP / client / armory.
+4. **Truly global (every stack):** append to `global-steps/index.ts` **after** the three onboarding steps - never insert before SOAP / client / armory.
 
-5. **Sequenced workflow:** mark ordered steps with `sequenced: true` and optional `dependsOn`; use `resolveVisibleSteps` — do not rely on showing all incomplete steps at once.
+5. **Sequenced workflow:** mark ordered steps with `sequenced: true` and optional `dependsOn`; use `resolveVisibleSteps` - do not rely on showing all incomplete steps at once.
 
-Do not add conditions to `StackSetupOverview` or `StackOverviewStatusPanel` — only to the step’s `applies`.
+Do not add conditions to `StackSetupOverview` or `StackOverviewStatusPanel` - only to the step’s `applies`.
 
 ### Example: adding `mod-solo-craft`
 
@@ -839,8 +839,8 @@ Register in `steps/modules/index.ts`. Standard server types include it via `...m
 
 ## Open questions
 
-1. **Patches tab duplication** — IP bootstrap buttons stay on Patches tab; Overview steps link there. Revisit if operators want bootstrap inline in Overview later.
-2. **`stopStackStep`** — omitted from v1 IP pipeline unless a concrete operator workflow requires stopping the stack between patch apply and re-enable.
+1. **Patches tab duplication** - IP bootstrap buttons stay on Patches tab; Overview steps link there. Revisit if operators want bootstrap inline in Overview later.
+2. **`stopStackStep`** - omitted from v1 IP pipeline unless a concrete operator workflow requires stopping the stack between patch apply and re-enable.
 
 ---
 
@@ -852,7 +852,7 @@ Register in `steps/modules/index.ts`. Standard server types include it via `...m
 - Overview never prompts to disable playerbots unless `mod-playerbots` is installed.
 - Sequenced workflows (IP + playerbots) show **one primary pipeline step at a time**, matching current monolith UX.
 - `useHasActiveSetupSteps` and `StackSetupOverview` use the same visibility logic.
-- Ordered server types use explicit pipeline imports — no duplicate steps from registry spread.
+- Ordered server types use explicit pipeline imports - no duplicate steps from registry spread.
 - New module setup = one folder in `setup/steps/modules/mod-foo/` + registry entry; no edits to orchestrator.
 - New server type ordering = one file in `setup/server-types/` + registry entry.
 - No duplicate SOAP/AH bot/IP UI code paths.

@@ -74,7 +74,7 @@ export default function GlobalDockerPage() {
         msg += ` ${verb} about ${formatBytes(cleanupJob.freedBytes)}.`
       } else if (reclaimable > 0) {
         msg +=
-          ' Nothing was freed — the estimate may include Docker cache or images still in use by protected stacks.'
+          ' Nothing was freed - the estimate may include Docker cache or images still in use by protected stacks.'
       }
       setNotice(msg)
       setActionError(null)
@@ -288,7 +288,7 @@ export default function GlobalDockerPage() {
           message={
             reclaimable > 0
               ? `Prunes build cache and removes up to ${formatBytes(reclaimable)} of unused images and orphaned build checkouts. Managed stack images and volumes are kept. Delete unused volumes separately under the Volumes tab.`
-              : 'Prunes build cache and dangling image layers if present. Unused Docker volumes are not removed — delete those under the Volumes tab.'
+              : 'Prunes build cache and dangling image layers if present. Unused Docker volumes are not removed - delete those under the Volumes tab.'
           }
           onCancel={() => setConfirmCleanup(false)}
           onConfirm={() => void handleCleanup()}
@@ -496,7 +496,7 @@ function OverviewPanel({
 
       <p className="text-xs text-slate-500">
         <strong>Reclaim disk space</strong> prunes Docker build cache and unused images.{' '}
-        <strong>Volumes</strong> must be deleted individually under the Volumes tab — they are never removed
+        <strong>Volumes</strong> must be deleted individually under the Volumes tab - they are never removed
         automatically.
       </p>
     </div>
@@ -832,7 +832,7 @@ function ManagerPanel({
                   <tr key={dir.name} className="border-t border-gray-100">
                     <td className="px-4 py-2 font-mono text-xs">{dir.name}</td>
                     <td className="px-4 py-2">{formatBytes(dir.sizeBytes)}</td>
-                    <td className="px-4 py-2 text-xs text-gray-600 hidden sm:table-cell">{dir.detail ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-600 hidden sm:table-cell">{dir.detail ?? '-'}</td>
                     <td className="px-4 py-2 text-right">
                       {dir.isDeletable ? (
                         <button
@@ -895,7 +895,7 @@ function GlobalVolumeAuditPanel() {
         </label>
         <p className="mt-1 text-xs text-gray-500">
           Audits use this stack&apos;s Docker engine connection. Orphan volumes from deleted stacks appear in any
-          stack&apos;s audit — pick whichever stack you manage most often.
+          stack&apos;s audit - pick whichever stack you manage most often.
         </p>
         <select
           id="audit-stack"

@@ -150,7 +150,7 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
         {
             Id = "mod-mount-feeding",
             Name = "Mount Feeding",
-            Description = "Mount satisfaction system for AzerothCore 3.3.5a. Mounts must be fed to maintain full speed — similar to the hunter pet happiness mechanic.",
+            Description = "Mount satisfaction system for AzerothCore 3.3.5a. Mounts must be fed to maintain full speed - similar to the hunter pet happiness mechanic.",
             Repository = "https://github.com/claudevandort/mod-mount-feeding",
             Branch = "master",
             IsBuiltIn = true
@@ -204,7 +204,7 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
         {
             Id = "mod-weather-vibe",
             Name = "Weather Vibe",
-            Description = "Bring your world to life with mod_weather_vibe. This module gives each zone a distinct mood — misty mornings in Elwynn, a gloomy Duskwood that rumbles to life, biting Wintergrasp squalls, and rolling thunderheads over Stranglethorn. Weather no longer just flips; it evolves naturally over time with smooth intensity transitions, seasonal awareness, fog as a natural bridge between states, and regional syncing that makes the world feel alive and immersive.",
+            Description = "Bring your world to life with mod_weather_vibe. This module gives each zone a distinct mood - misty mornings in Elwynn, a gloomy Duskwood that rumbles to life, biting Wintergrasp squalls, and rolling thunderheads over Stranglethorn. Weather no longer just flips; it evolves naturally over time with smooth intensity transitions, seasonal awareness, fog as a natural bridge between states, and regional syncing that makes the world feel alive and immersive.",
             Repository = "https://github.com/hermensbas/mod_weather_vibe",
             Branch = "main",
             IsBuiltIn = true
@@ -213,7 +213,7 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
         {
             Id = "mod-dungeon-clear",
             Name = "Dungeon Clear",
-            Description = "Autonomous tank-led 5-man dungeon clears for playerbots — the tank drives the party boss to boss, clears trash, and handles scripted events. Requires mod-playerbots. Pairs with the DungeonClear client addon for in-game control.",
+            Description = "Autonomous tank-led 5-man dungeon clears for playerbots - the tank drives the party boss to boss, clears trash, and handles scripted events. Requires mod-playerbots. Pairs with the DungeonClear client addon for in-game control.",
             Repository = "https://github.com/jrad7/mod-dungeon-clear.git",
             Branch = "master",
             IsBuiltIn = true

@@ -131,7 +131,7 @@ export function CloudInstancePicker({
       >
         <span className="flex items-center gap-2 text-sm font-medium text-indigo-950">
           <Cloud className="h-4 w-4 shrink-0" aria-hidden="true" />
-          Pick from cloud account — existing servers (optional)
+          Pick from cloud account - existing servers (optional)
         </span>
         {expanded ? (
           <ChevronUp className="h-4 w-4 text-indigo-700" aria-hidden="true" />
@@ -253,7 +253,7 @@ export function CloudInstancePicker({
                 </option>
                 {(instances ?? []).map((instance) => (
                   <option key={instance.id} value={instance.id}>
-                    {instance.name} — {instance.publicHost} ({instance.region}, {instance.state})
+                    {instance.name} - {instance.publicHost} ({instance.region}, {instance.state})
                   </option>
                 ))}
               </select>

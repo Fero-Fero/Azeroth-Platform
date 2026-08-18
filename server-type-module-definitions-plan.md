@@ -1,9 +1,9 @@
-# Plan — Server-type definitions as the product center
+# Plan - Server-type definitions as the product center
 
 **Status:** Phase 1 implemented (string ids and catalog-exposed addon ids still later)  
-**Scope:** Frontend (and catalog) — one definition file per server type: wizard notices, recommended addons, setup workflow, and other operator-facing information.  
-**Out of scope:** Module DBC/MPQ install hooks — see `module-install-hooks-plan.md`. CSV/`server_dbc` baseline work — later.  
-**Related:** `stack-setup-workflows-plan.md` (Overview setup — implemented), `ServerTypeCatalogOptions`, `ModulesStep.tsx`, `AddonService` (`atlas-loot-individual-progression`).
+**Scope:** Frontend (and catalog) - one definition file per server type: wizard notices, recommended addons, setup workflow, and other operator-facing information.  
+**Out of scope:** Module DBC/MPQ install hooks - see `module-install-hooks-plan.md`. CSV/`server_dbc` baseline work - later.  
+**Related:** `stack-setup-workflows-plan.md` (Overview setup - implemented), `ServerTypeCatalogOptions`, `ModulesStep.tsx`, `AddonService` (`atlas-loot-individual-progression`).
 
 ---
 
@@ -11,7 +11,7 @@
 
 - **`recommendedAddonIds` live on the server type** and are rendered by a shared component that looks up the addon catalog (name, description, install link). Not hardcoded GitHub markup in `ModulesStep`.
 - **Server Wide Progression Setup** is a **custom setup** (`src/setup/custom-setups/serverWideProgression.ts`). The **mod-individual-progression module setup calls it**. The IP server type lists it for wizard copy and sequences those steps around the playerbots pipeline. Not a module install hook.
-- **Every server type gets a definition file**, even if most slots are empty — types will grow copy, requirements, and addons over time.
+- **Every server type gets a definition file**, even if most slots are empty - types will grow copy, requirements, and addons over time.
 - **Backend module extract/merge** is a **separate plan** (`module-install-hooks-plan.md`).
 - **Monolith is acceptable** if the folder is neat (one file per type, shared renderers).
 - **Catalog data is not duplicated** in frontend consts (repos, required modules, visibility stay on the API).
@@ -75,7 +75,7 @@ export type ServerTypeDefinition = {
   id: string
   wizardModulesNotice?: (ctx: WizardNoticeContext) => React.ReactNode
   wizardReviewNotes?: (ctx: WizardNoticeContext) => React.ReactNode
-  /** Addon catalog ids — rendered dynamically from the addons API */
+  /** Addon catalog ids - rendered dynamically from the addons API */
   recommendedAddonIds: string[]
   /** Named workflows that are not modules (e.g. Server Wide Progression) */
   customSetups?: CustomSetup[]
@@ -135,7 +135,7 @@ wizardModulesNotice: ({ selectedModuleIds, browseTab }) => {
 
 ## Registry match (frontend ↔ backend)
 
-Concern 5 was **not** “backend vs backend.” It was: we already have `frontend/src/setup/server-types/` and were about to add `frontend/src/server-types/` — two lists to keep in sync.
+Concern 5 was **not** “backend vs backend.” It was: we already have `frontend/src/setup/server-types/` and were about to add `frontend/src/server-types/` - two lists to keep in sync.
 
 **Fix:** one frontend registry. Setup builders are fields on the same definition (re-export the existing `*.setup.ts` files).
 
@@ -154,7 +154,7 @@ Same idea later for `recommendedAddonIds` vs addon catalog ids.
 
 ---
 
-## Why the `ServerType` enum does not scale — and how to fix it
+## Why the `ServerType` enum does not scale - and how to fix it
 
 **Today** the id is a **closed C# enum** plus a **closed TypeScript enum**. Adding type #6 means:
 
@@ -192,9 +192,9 @@ The catalog is already the real list (enable/disable, repo, required modules). T
 
 ## Implementation phases
 
-### Phase 1 — Definition template + IP/AH bot
+### Phase 1 - Definition template + IP/AH bot
 
-- [x] `frontend/src/server-types/` — `definitions/`, `notices/`, `registry/`
+- [x] `frontend/src/server-types/` - `definitions/`, `notices/`, `registry/`
 - [x] One file per existing type (Standard, Playerbots, IP, NpcBots, Custom)
 - [x] IP: `recommendedAddonIds: ['atlas-loot-individual-progression']`
 - [x] IP: `customSetups: [server-wide-progression]` requiring `mod-individual-progression` (module setup calls `buildSteps()`)
@@ -204,7 +204,7 @@ The catalog is already the real list (enable/disable, repo, required modules). T
 - [x] Registry match test: frontend ids ↔ default catalog ids; runtime assert vs API
 - [x] `ModulesStep` / `ReviewStep`: notices from `ServerTypeSlot` / `ServerTypeReviewNotes`
 
-### Phase 2 — String server-type ids
+### Phase 2 - String server-type ids
 
 - [ ] API/DTO: `id: string`
 - [ ] C# `ServerTypeIds` constants; catalog `Id` is string
@@ -212,7 +212,7 @@ The catalog is already the real list (enable/disable, repo, required modules). T
 - [ ] Migrate stored stack `ServerType` if numeric
 - [ ] Unknown catalog id without a frontend file → throw (same match rule)
 
-### Phase 3 — Catalog-exposed addon ids (optional)
+### Phase 3 - Catalog-exposed addon ids (optional)
 
 - [ ] `RecommendedAddonIds` on `ServerTypeInfoDto` if you want operators to edit addons without a frontend deploy
 - [ ] Frontend still supplies notice **copy**; ids can come from API and merge with the definition

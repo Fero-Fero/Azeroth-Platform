@@ -212,7 +212,7 @@ function isImportArchive(file: File): boolean {
   return IMPORT_ARCHIVE_EXTENSIONS.some((ext) => lower.endsWith(ext))
 }
 
-/** Primary label for a patch row — uses the name from the patch folder (repo label after index). */
+/** Primary label for a patch row - uses the name from the patch folder (repo label after index). */
 function patchRowTitle(patch: PatchSummaryDto): string {
   if (patch.name) {
     return patch.name
@@ -929,7 +929,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Patches</h2>
             <p className="mt-1 max-w-2xl text-sm text-gray-500">
-              Manage stack migrations in order — SQL, DBC, maps, and client MPQs per patch index.
+              Manage stack migrations in order - SQL, DBC, maps, and client MPQs per patch index.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1150,9 +1150,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 <p className="font-medium">
                   {validationResult.passed ? 'Validation passed' : 'Validation failed'}
                   {validationResult.expectedPatchCount > 0
-                    ? ` — ${validationResult.patchCount} / ${validationResult.expectedPatchCount} progression patches`
+                    ? ` - ${validationResult.patchCount} / ${validationResult.expectedPatchCount} progression patches`
                     : validationResult.patchCount > 0
-                    ? ` — ${validationResult.patchCount} progression patch${validationResult.patchCount === 1 ? '' : 'es'}`
+                    ? ` - ${validationResult.patchCount} progression patch${validationResult.patchCount === 1 ? '' : 'es'}`
                     : ''}
                 </p>
                 <button
@@ -1197,8 +1197,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                           key={`${check.patchKey ?? 'none'}:${check.configSource ?? check.configPath}:${check.key}`}
                           className="border-t border-gray-100"
                         >
-                          <td className="py-1 pr-4 font-mono">{check.patchKey ?? '—'}</td>
-                          <td className="py-1 pr-4 font-mono">{check.configSource ?? '—'}</td>
+                          <td className="py-1 pr-4 font-mono">{check.patchKey ?? '-'}</td>
+                          <td className="py-1 pr-4 font-mono">{check.configSource ?? '-'}</td>
                           <td className="py-1 pr-4 font-mono">{check.configPath}</td>
                           <td className="py-1 pr-4 font-mono">{check.key}</td>
                           <td className="py-1 pr-4">
@@ -1258,7 +1258,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
               {applyStatus.isApplying && <Loader2 className="w-4 h-4 animate-spin" />}
               {applyStatus.isApplying
                 ? `Applying ${applyStatus.patchKey === '*' ? 'all patches' : applyStatus.patchKey ?? ''}${
-                    applyStatus.phase ? ` — ${applyStatus.phase}` : ''
+                    applyStatus.phase ? ` - ${applyStatus.phase}` : ''
                   }...`
                 : applyStatus.success
                 ? 'Operation completed successfully.'
@@ -1276,7 +1276,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
           </div>
           {applyStatus.isApplying && (
             <p className="text-xs opacity-80 mb-1">
-              Running in the background — this cannot be cancelled. You can safely leave this page; the
+              Running in the background - this cannot be cancelled. You can safely leave this page; the
               run continues on the server.
             </p>
           )}
@@ -1315,8 +1315,8 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
             {`collection.zip
 ├── classic/                         (or tbc/, wotlk/)
 │   └── patch 1.1/                   e.g. patch 1.0, patch 1.1, patch 2.0, patch 3.1 my_content
-│       ├── description.md           optional — shown on the Description tab
-│       ├── description.txt          optional — alternative to description.md
+│       ├── description.md           optional - shown on the Description tab
+│       ├── description.txt          optional - alternative to description.md
 │       ├── sql/
 │       │   ├── world/*.sql
 │       │   ├── auth/*.sql
@@ -1324,7 +1324,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
 │       ├── dbc/**                   CSV, .txt, or .dbc files (subfolders allowed)
 │       ├── map/**                   map files (subfolders allowed)
 │       └── mpq/*.mpq                client patch archives (not patch-D.MPQ)
-│           mpq.json                 optional — { "remove": ["Patch-L.MPQ"] } retires a published MPQ on apply
+│           mpq.json                 optional - { "remove": ["Patch-L.MPQ"] } retires a published MPQ on apply
 
 Flat layout also works:
 └── patch 1.1/sql/world/...         at the zip root when expansion folders are omitted`}
@@ -1817,7 +1817,7 @@ Flat layout also works:
                 onDelete={(fileName) => handleDelete('lua', fileName)}
               />
               <ContainerFileCategory
-                title="SQL — world"
+                title="SQL - world"
                 accept=".sql"
                 collapseStorageKey={sectionCollapseKey('sql/world')}
                 files={filesByCategory['sql/world'] ?? []}
@@ -1827,7 +1827,7 @@ Flat layout also works:
                 onDelete={(fileName) => handleDelete('sql/world', fileName)}
               />
               <ContainerFileCategory
-                title="SQL — auth"
+                title="SQL - auth"
                 accept=".sql"
                 collapseStorageKey={sectionCollapseKey('sql/auth')}
                 files={filesByCategory['sql/auth'] ?? []}
@@ -1837,7 +1837,7 @@ Flat layout also works:
                 onDelete={(fileName) => handleDelete('sql/auth', fileName)}
               />
               <ContainerFileCategory
-                title="SQL — characters"
+                title="SQL - characters"
                 accept=".sql"
                 collapseStorageKey={sectionCollapseKey('sql/characters')}
                 files={filesByCategory['sql/characters'] ?? []}
@@ -1987,7 +1987,7 @@ Flat layout also works:
                 </p>
                 {!applyProgressionPreview.meta.incrementsProgression && (
                   <p className="text-sm text-amber-700 mt-2">
-                    START patch — does not increment progression counters.
+                    START patch - does not increment progression counters.
                   </p>
                 )}
                 {applyProgressionPreview.meta.incrementsProgression && (

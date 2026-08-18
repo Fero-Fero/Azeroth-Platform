@@ -1268,7 +1268,7 @@ public sealed class ArmoryAssetsService : IArmoryAssetsService
         try
         {
             // 7z is a random-access-only format (no forward-only reader), so open it as an archive.
-            // Everything else (zip, rar, tar, and — crucially — compressed tarballs .tar.gz/.tar.bz2/
+            // Everything else (zip, rar, tar, and - crucially - compressed tarballs .tar.gz/.tar.bz2/
             // .tar.xz) goes through ReaderFactory, which transparently unwraps the outer compression and
             // then reads the inner tar. ArchiveFactory would instead treat a .tar.gz as a single-entry
             // gzip and never expose the dataset, so this is required for those formats to work at all.

@@ -136,7 +136,7 @@ public sealed class ArmoryDbcService : IArmoryDbcService
                 if (tablePresent == 0)
                 {
                     result.Failed.Add($"{table}: not present in the server's DBC set");
-                    Report($"[{index}/{RequiredDbcTables.Length}] Skipped {table} — not present on the server.");
+                    Report($"[{index}/{RequiredDbcTables.Length}] Skipped {table} - not present on the server.");
                     continue;
                 }
 
@@ -337,7 +337,7 @@ public sealed class ArmoryDbcService : IArmoryDbcService
     }
 
     /// <summary>
-    /// When the manager runs in Docker, tool containers must mount the manager data volume — not a path
+    /// When the manager runs in Docker, tool containers must mount the manager data volume - not a path
     /// under <c>/tmp</c> inside the manager container, which the host daemon cannot see.
     /// </summary>
     private (string MountArgs, string WorkDir) ResolveLocalToolMount(string hostWorkDir)

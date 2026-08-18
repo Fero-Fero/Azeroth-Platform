@@ -15,7 +15,7 @@ public interface IArmoryDbcService
     /// <summary>
     /// Extracts the stack's server DBCs, converts the armory's required tables to CSV, and writes them
     /// into the stack's armory dataset (<c>data/dbc</c>). Does NOT rebuild the armory image or restart
-    /// the armory — the caller (background job) is responsible for that. The optional
+    /// the armory - the caller (background job) is responsible for that. The optional
     /// <paramref name="onProgress"/> callback receives human-readable step lines for the job log.
     /// </summary>
     Task<ArmoryDbcSyncResultDto> SyncFromServerAsync(

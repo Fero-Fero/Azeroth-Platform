@@ -38,7 +38,7 @@ public class CloudController : ControllerBase
         _cloudAuthOrchestrator = cloudAuthOrchestrator;
     }
 
-    /// <summary>Lists saved SSH keys (metadata only — private key material is never returned).</summary>
+    /// <summary>Lists saved SSH keys (metadata only - private key material is never returned).</summary>
     [HttpGet("ssh-keys")]
     public async Task<ActionResult<IReadOnlyList<CloudSshKeyDto>>> ListSshKeys(CancellationToken cancellationToken)
         => Ok(await _cloudSshKeyService.ListAsync(cancellationToken));

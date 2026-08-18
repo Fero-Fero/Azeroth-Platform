@@ -441,7 +441,7 @@ export function CloudLaunchPanel({
       >
         <span className="flex items-center gap-2 text-sm font-medium text-emerald-950">
           <Rocket className="h-4 w-4 shrink-0" aria-hidden="true" />
-          Launch via platform — new server (optional)
+          Launch via platform - new server (optional)
         </span>
         {expanded ? (
           <ChevronUp className="h-4 w-4 text-emerald-700" aria-hidden="true" />
@@ -458,7 +458,7 @@ export function CloudLaunchPanel({
             <span className="font-medium">Different from “Pick from cloud account” above:</span> this creates a{' '}
             <span className="font-medium">new</span> VM on DigitalOcean, Hetzner, Vultr, AWS, or GCP (bootstrap script injected
             automatically), bootstraps an <span className="font-medium">existing</span> AWS instance via SSM, or an
-            Azure VM via Run Command. You must link an account first (above) — the same linked account is used here.
+            Azure VM via Run Command. You must link an account first (above) - the same linked account is used here.
           </p>
           )}
 
@@ -728,7 +728,7 @@ export function CloudLaunchPanel({
                       </option>
                       {(instances ?? []).map((instance) => (
                         <option key={instance.id} value={instance.id}>
-                          {instance.name} — {isAzureAccount ? instance.region : instance.id} (
+                          {instance.name} - {isAzureAccount ? instance.region : instance.id} (
                           {instance.publicHost || 'no public IP'})
                         </option>
                       ))}

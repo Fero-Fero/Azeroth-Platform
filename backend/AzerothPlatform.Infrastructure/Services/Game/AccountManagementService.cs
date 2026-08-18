@@ -683,7 +683,7 @@ public class AccountManagementService : IAccountManagementService
             var command = $"ban character {characterName} {duration} {reason}";
             var result = await _soapProxy.ExecuteCommandAsync(stackId, command, cancellationToken);
 
-            // "ban" alone is too broad — it matches error messages like "cannot ban"
+            // "ban" alone is too broad - it matches error messages like "cannot ban"
             var success = result.Contains("banned", StringComparison.OrdinalIgnoreCase) &&
                           !result.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
                           !result.Contains("error", StringComparison.OrdinalIgnoreCase);
@@ -737,7 +737,7 @@ public class AccountManagementService : IAccountManagementService
             var command = $"mute {characterName} {minutes} {reason}";
             var result = await _soapProxy.ExecuteCommandAsync(stackId, command, cancellationToken);
 
-            // AC sends mute notifications to online GMs, not the console/SOAP caller — empty response = success
+            // AC sends mute notifications to online GMs, not the console/SOAP caller - empty response = success
             var success = !result.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
                           !result.Contains("error", StringComparison.OrdinalIgnoreCase);
 
@@ -763,7 +763,7 @@ public class AccountManagementService : IAccountManagementService
             var command = $"unmute {characterName}";
             var result = await _soapProxy.ExecuteCommandAsync(stackId, command, cancellationToken);
 
-            // AC returns "You have enabled {}'s chat." on success, or "Player's chat is already enabled." — both are fine
+            // AC returns "You have enabled {}'s chat." on success, or "Player's chat is already enabled." - both are fine
             var success = result.Contains("enabled", StringComparison.OrdinalIgnoreCase) ||
                           (!result.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
                            !result.Contains("error", StringComparison.OrdinalIgnoreCase));
@@ -814,7 +814,7 @@ public class AccountManagementService : IAccountManagementService
             if (copperAmount <= 0)
             {
                 // .modify money #money requires a selected target in-game; it cannot remove gold via SOAP.
-                _logger.LogWarning("Cannot remove money from character {CharacterName} via SOAP — .modify money requires a selected target", characterName);
+                _logger.LogWarning("Cannot remove money from character {CharacterName} via SOAP - .modify money requires a selected target", characterName);
                 return false;
             }
 
@@ -850,7 +850,7 @@ public class AccountManagementService : IAccountManagementService
             var command = $"additem {characterName} {itemId} {count}";
             var result = await _soapProxy.ExecuteCommandAsync(stackId, command, cancellationToken);
 
-            // AC responds with "You have added N of item #X to Y's inventory." — "added" is reliable.
+            // AC responds with "You have added N of item #X to Y's inventory." - "added" is reliable.
             var success = result.Contains("added", StringComparison.OrdinalIgnoreCase) ||
                           (!result.Contains("error", StringComparison.OrdinalIgnoreCase) &&
                            !result.Contains("not found", StringComparison.OrdinalIgnoreCase) &&
@@ -922,7 +922,7 @@ public class AccountManagementService : IAccountManagementService
                 if (row.Slot <= 18)
                     result.EquippedItems.Add(slot);
                 else if (row.Slot >= 19 && row.Slot <= 22)
-                    EnsureBag(result.BagItems, row, slot);   // container itself — will be created by EnsureBag
+                    EnsureBag(result.BagItems, row, slot);   // container itself - will be created by EnsureBag
                 else if (row.Slot >= 23 && row.Slot <= 38)
                     result.BackpackItems.Add(slot);
                 else if (row.Slot >= 39 && row.Slot <= 66)
@@ -1058,7 +1058,7 @@ public class AccountManagementService : IAccountManagementService
 
         if (!existingAllianceGuid.HasValue)
         {
-            // Human Warrior — starts in Northshire Valley (Map 0, Zone 12)
+            // Human Warrior - starts in Northshire Valley (Map 0, Zone 12)
             await charConn.ExecuteAsync(@"
                 INSERT INTO characters
                     (guid, account, name, race, class, gender, level, money,
@@ -1073,7 +1073,7 @@ public class AccountManagementService : IAccountManagementService
 
         if (!existingHordeGuid.HasValue)
         {
-            // Orc Warrior — starts in Valley of Trials (Map 1, Zone 14)
+            // Orc Warrior - starts in Valley of Trials (Map 1, Zone 14)
             await charConn.ExecuteAsync(@"
                 INSERT INTO characters
                     (guid, account, name, race, class, gender, level, money,

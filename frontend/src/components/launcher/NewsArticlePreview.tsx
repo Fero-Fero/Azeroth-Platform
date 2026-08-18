@@ -49,7 +49,7 @@ export function extractNewsExcerpt(html: string, maxLength = 110): string {
   return `${text.slice(0, maxLength).trimEnd()}…`
 }
 
-/** Canonical launcher reading preview — matches the desktop launcher WebView reading view. */
+/** Canonical launcher reading preview - matches the desktop launcher WebView reading view. */
 export function LauncherNewsArticlePreview({
   article,
   accentColor = DEFAULT_ACCENT,
@@ -141,13 +141,13 @@ export function LauncherNewsCardPreview({
         </div>
       </div>
       <p className="launcher-news-preview-strip__caption">
-        Launcher card at 156×210 px proportions — scales with preview width.
+        Launcher card at 156×210 px proportions - scales with preview width.
       </p>
     </div>
   )
 }
 
-/** Armory article detail page preview — uses stack armory theme tokens when provided. */
+/** Armory article detail page preview - uses stack armory theme tokens when provided. */
 export function ArmoryNewsArticlePreview({
   article,
   className,
@@ -178,7 +178,7 @@ export function ArmoryNewsArticlePreview({
   )
 }
 
-/** Armory home/news list card preview — horizontal card from widget-news.hbs. */
+/** Armory home/news list card preview - horizontal card from widget-news.hbs. */
 export function ArmoryNewsCardPreview({ article }: { article: NewsPreviewArticle }) {
   const title = article.title?.trim() || 'Untitled'
   const tag = article.tag?.trim().toLowerCase() ?? ''

@@ -10,7 +10,7 @@ namespace AzerothPlatform.Launcher.Services;
 /// Talks to a single stack's own portal/client container: the self-describing <c>/portal</c> document
 /// (registry + branding + launcher artifact), <c>/health</c>, <c>/login</c> and <c>/launcher/*</c>.
 /// Manifest + file downloads use <see cref="ManifestClient.ForContent"/> against the same base URL. This
-/// is the launcher's stack-facing channel — the manager is no longer in the player path.
+/// is the launcher's stack-facing channel - the manager is no longer in the player path.
 /// </summary>
 public sealed class PortalClient : ILauncherArtifactSource
 {

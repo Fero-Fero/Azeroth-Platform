@@ -55,7 +55,7 @@ export default function RebuildClientManifestButton({ stackId }: { stackId: stri
         {result && (
           <span className="inline-flex items-center gap-1 text-sm text-green-700">
             <CheckCircle2 className="h-4 w-4" />
-            Manifest rebuilt — clients will full-sync on next check
+            Manifest rebuilt - clients will full-sync on next check
           </span>
         )}
       </div>

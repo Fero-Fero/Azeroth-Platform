@@ -88,7 +88,7 @@ Edit `AzerothPlatform.Api/appsettings.json` to configure:
 
 - **Database**: SQLite connection string (default: `azeroth-platform.db`)
 - **Docker**: Socket path (local dev) or the socket-proxy TCP endpoint (production), and builds directory
-- **CORS**: Allowed frontend origins (scoped to specific methods/headers — no `AllowAny*`)
+- **CORS**: Allowed frontend origins (scoped to specific methods/headers - no `AllowAny*`)
 - **Auth**: `Admin:Password` (blank generates one at startup); JWT keys are auto-generated/persisted
 
 ```json

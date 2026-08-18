@@ -198,7 +198,7 @@ try
 
     // Missing hashed bundles under /assets must 404 anonymously. If the request falls through to the
     // global FallbackPolicy (RequireAuthenticatedUser), browsers load lazy chunks without a JWT and
-    // get 401 + empty/wrong MIME — which surfaces as "disallowed MIME type" on module import.
+    // get 401 + empty/wrong MIME - which surfaces as "disallowed MIME type" on module import.
     app.Use(async (context, next) =>
     {
         if (context.Request.Path.StartsWithSegments("/assets", out _))
@@ -249,7 +249,7 @@ try
     app.MapHub<StackProgressHub>("/hubs/stack-progress");
     app.MapHub<CloudTerminalHub>("/hubs/cloud-terminal");
 
-    // Fallback to index.html for client-side routing (SPA). Only for extensionless paths — if a hashed
+    // Fallback to index.html for client-side routing (SPA). Only for extensionless paths - if a hashed
     // bundle under /assets is missing (stale deploy / cache mismatch), return 404 instead of serving
     // HTML, which browsers reject as a JS module with a MIME/type error.
     app.MapFallback(async (HttpContext context) =>

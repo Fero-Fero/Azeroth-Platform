@@ -6,9 +6,9 @@ namespace AzerothPlatform.Infrastructure.Configuration;
 /// Each stack has its own subtree (<c>{RootPath}/stacks/{stackId}</c>). Everything lives under a single
 /// <c>static/</c> root so uploads and the image build read one place:
 /// <list type="bullet">
-/// <item><c>.../static</c> — the armory web static assets (armory.static.zip): <c>js/</c>, <c>css/</c>,
+/// <item><c>.../static</c> - the armory web static assets (armory.static.zip): <c>js/</c>, <c>css/</c>,
 /// <c>img/</c> (incl. <c>img/wow-icons</c>). Baked into the stack's armory image on rebuild.</item>
-/// <item><c>.../static/data</c> — the 3D model-viewer dataset (armory.data.zip + armory.textures.zip):
+/// <item><c>.../static/data</c> - the 3D model-viewer dataset (armory.data.zip + armory.textures.zip):
 /// <c>bone/</c>, <c>dbc/</c>, <c>dbc_transmog/</c>, <c>meta/</c>, <c>mo3/</c>, <c>textures/</c>,
 /// <c>progression/</c>, background PNGs. The small parts (dbc, progression, backgrounds) are baked into
 /// the image; the heavy parts (mo3/meta/bone/textures) are excluded from the image and served to

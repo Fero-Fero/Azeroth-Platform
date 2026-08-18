@@ -48,7 +48,7 @@ public static class RealmlistHostResolver
         }
         catch (Exception)
         {
-            // Same as above — do not block stack creation/start on DNS hiccups.
+            // Same as above - do not block stack creation/start on DNS hiccups.
         }
 
         cancellationToken.ThrowIfCancellationRequested();

@@ -57,10 +57,10 @@ Context:
 
 For features requiring full-stack work and quality assurance, follow this order:
 
-1. **Define backend contracts first** — Use the standard cloud agent with the repository setup workflow.
-2. **Frontend Specialist** — Implement UI based on those contracts.
-3. **QA Engineer** — Verify both layers against the spec, write tests, and report any gaps or bugs back to the developer agents.
-4. **Iterate** — Developer agents fix reported issues, QA Engineer re-validates.
+1. **Define backend contracts first** - Use the standard cloud agent with the repository setup workflow.
+2. **Frontend Specialist** - Implement UI based on those contracts.
+3. **QA Engineer** - Verify both layers against the spec, write tests, and report any gaps or bugs back to the developer agents.
+4. **Iterate** - Developer agents fix reported issues, QA Engineer re-validates.
 
 ## Updating Agent Specs
 

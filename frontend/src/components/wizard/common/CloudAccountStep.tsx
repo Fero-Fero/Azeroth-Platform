@@ -327,7 +327,7 @@ export function CloudAccountStep({
             <div className="space-y-2">
               <p className="text-[11px] text-amber-950">
                 Launch downloaded {bootstrapPemName} (first SSH as that user) and {operatorPemName} (daily SSH).
-                Verify {operatorPemName} — not the bootstrap file.
+                Verify {operatorPemName} - not the bootstrap file.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {activeBootstrapKey ? (

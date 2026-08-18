@@ -7,9 +7,9 @@ interface PortsStepProps {
 }
 
 const PORT_FIELDS = [
-  { name: 'ports.authServer' as const, label: 'Auth Server Port', hint: 'Default: 3724 — WoW login server', id: 'port-auth' },
-  { name: 'ports.worldServer' as const, label: 'World Server Port', hint: 'Default: 8085 — game world connection', id: 'port-world' },
-  { name: 'ports.soapPort' as const, label: 'SOAP Admin Port', hint: 'Default: 7878 — remote admin interface', id: 'port-soap' },
+  { name: 'ports.authServer' as const, label: 'Auth Server Port', hint: 'Default: 3724 - WoW login server', id: 'port-auth' },
+  { name: 'ports.worldServer' as const, label: 'World Server Port', hint: 'Default: 8085 - game world connection', id: 'port-world' },
+  { name: 'ports.soapPort' as const, label: 'SOAP Admin Port', hint: 'Default: 7878 - remote admin interface', id: 'port-soap' },
 ] as const
 
 export function PortsStep({ form }: PortsStepProps) {

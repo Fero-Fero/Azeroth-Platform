@@ -47,7 +47,7 @@ export function prepareProgressionStep(): SetupStep {
     isComplete: (ctx) =>
       isStepDoneOrSkipped(STEP_IDS.prepareProgression, isIpProgressionReady(ctx.status), ctx.status.progress),
     summary: () =>
-      'Optional — bootstrap Individual Progression and sync patches, or skip for a standard realm.',
+      'Optional - bootstrap Individual Progression and sync patches, or skip for a standard realm.',
     Component: () => <PrepareDetails />,
     Action: (ctx) => <PrepareAction {...ctx} />,
   }

@@ -49,7 +49,7 @@ public sealed class DockerOptions
     /// reaches their database/SOAP over the network via the stack's <c>ExternalHost</c>. Because loopback
     /// on the remote is not reachable by the manager, these ports cannot simply be pinned to loopback the
     /// way local stacks are. Leaving this empty (the default) publishes them on <b>all interfaces</b>
-    /// (<c>0.0.0.0</c>) of the remote host — i.e. potentially the public internet. Set this to the remote's
+    /// (<c>0.0.0.0</c>) of the remote host - i.e. potentially the public internet. Set this to the remote's
     /// private/VPC interface IP (typically the same address the manager uses as <c>ExternalHost</c>, e.g. a
     /// WireGuard/VPC address) to keep MySQL/SOAP off the public internet while remaining reachable by the
     /// manager. The game protocol ports (auth 3724, world 8085) and player-facing HTTP (armory, client)

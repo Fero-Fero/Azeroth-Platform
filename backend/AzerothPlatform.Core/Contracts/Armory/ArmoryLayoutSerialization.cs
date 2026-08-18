@@ -5,7 +5,7 @@ namespace AzerothPlatform.Core.Contracts;
 
 /// <summary>
 /// Serializes armory layout JSON for the Node runtime (<c>static/data/armory-layout.json</c>).
-/// Must use camelCase property names — the armory loader reads <c>widgets</c>, not <c>Widgets</c>.
+/// Must use camelCase property names - the armory loader reads <c>widgets</c>, not <c>Widgets</c>.
 /// </summary>
 public static class ArmoryLayoutSerialization
 {

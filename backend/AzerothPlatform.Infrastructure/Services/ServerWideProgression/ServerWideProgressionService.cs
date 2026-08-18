@@ -188,7 +188,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         var settings = await LoadSettingsAsync(GetStackRoot(stackId), cancellationToken);
         if (!settings.Bootstrapped)
         {
-            applyLog.Add("Individual Progression: settings not bootstrapped — skipping config sync.");
+            applyLog.Add("Individual Progression: settings not bootstrapped - skipping config sync.");
             return;
         }
 
@@ -206,7 +206,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         }
         else
         {
-            applyLog.Add("Individual Progression: START patch applied — progression counters unchanged.");
+            applyLog.Add("Individual Progression: START patch applied - progression counters unchanged.");
         }
 
         var expansion = ResolveExpansionForPatch(metadata);

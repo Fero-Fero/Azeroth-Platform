@@ -53,7 +53,7 @@ internal static class AwsLaunchInstanceTypeCatalog
         var memory = type.MemoryMiB >= 1024
             ? $"{Math.Max(1, type.MemoryMiB / 1024)} GiB"
             : $"{type.MemoryMiB} MiB";
-        return $"{type.Type} — Free Tier · {type.VCpus} vCPU · {memory}";
+        return $"{type.Type} - Free Tier · {type.VCpus} vCPU · {memory}";
     }
 
     private static IReadOnlyList<LaunchType> Sort(IReadOnlyList<LaunchType> types)

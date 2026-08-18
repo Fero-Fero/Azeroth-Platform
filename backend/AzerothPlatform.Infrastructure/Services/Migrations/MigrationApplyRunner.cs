@@ -13,7 +13,7 @@ namespace AzerothPlatform.Infrastructure.Services.Migrations;
 /// <summary>
 /// Runs patch apply / reapply operations on a background task with a DB-backed cross-user lock and a
 /// persisted, downloadable trace log. Registered as a singleton (like the launcher build service) so a
-/// second operator — even on another machine hitting the same manager — is blocked while a run is in
+/// second operator - even on another machine hitting the same manager - is blocked while a run is in
 /// flight and can poll live progress. Modeled on <c>LauncherBuildService</c>.
 /// </summary>
 public sealed class MigrationApplyRunner : IMigrationApplyRunner
@@ -213,7 +213,7 @@ public sealed class MigrationApplyRunner : IMigrationApplyRunner
                 {
                     AutoFlush = true
                 };
-                _writer.WriteLine($"# Apply trace log — patch {patchKey}, run {runId}, started {_startedAt:O}");
+                _writer.WriteLine($"# Apply trace log - patch {patchKey}, run {runId}, started {_startedAt:O}");
             }
             catch
             {

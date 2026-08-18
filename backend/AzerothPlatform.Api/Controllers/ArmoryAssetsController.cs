@@ -279,7 +279,7 @@ public class ArmoryAssetsController : ControllerBase
 
     /// <summary>
     /// Extracts the stack's live server DBCs, converts the armory's required tables to CSV, bakes them
-    /// into the armory image and restarts it — all as a detached background job (survives a page
+    /// into the armory image and restarts it - all as a detached background job (survives a page
     /// refresh). Requires the stack to have started at least once so its client data is populated.
     /// </summary>
     [HttpPost("sync-dbcs")]

@@ -153,7 +153,7 @@ export default function RevisionsTab({ stackId }: { stackId: string }) {
                     </span>
                   </td>
                   <td className="px-4 py-2 font-mono text-gray-700">
-                    {rev.coreCommitSha ? rev.coreCommitSha.substring(0, 7) : '—'}
+                    {rev.coreCommitSha ? rev.coreCommitSha.substring(0, 7) : '-'}
                   </td>
                   <td className="px-4 py-2 text-gray-700">{rev.appliedPatchLevel}</td>
                   <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{formatBytes(rev.sizeBytes)}</td>

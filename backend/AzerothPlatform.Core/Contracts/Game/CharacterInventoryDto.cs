@@ -5,16 +5,16 @@ namespace AzerothPlatform.Core.Contracts;
 /// </summary>
 public class CharacterInventoryDto
 {
-    /// <summary>Equipped gear — slots 0–18 (bag = 0)</summary>
+    /// <summary>Equipped gear - slots 0–18 (bag = 0)</summary>
     public List<ItemSlotDto> EquippedItems { get; set; } = [];
 
-    /// <summary>Backpack items — slots 23–38 (bag = 0)</summary>
+    /// <summary>Backpack items - slots 23–38 (bag = 0)</summary>
     public List<ItemSlotDto> BackpackItems { get; set; } = [];
 
     /// <summary>Contents of the 4 equipped bag containers</summary>
     public List<BagDto> BagItems { get; set; } = [];
 
-    /// <summary>Bank main storage — slots 39–66 (bag = 0)</summary>
+    /// <summary>Bank main storage - slots 39–66 (bag = 0)</summary>
     public List<ItemSlotDto> BankItems { get; set; } = [];
 
     /// <summary>Contents of the 7 bank bag containers</summary>

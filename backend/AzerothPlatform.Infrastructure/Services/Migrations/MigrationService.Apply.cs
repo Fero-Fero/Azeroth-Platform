@@ -392,7 +392,7 @@ public sealed partial class MigrationService
 
             // 9) Run the patch's SQL LAST, once every other stage (DBC, maps, MPQ, rescan) has succeeded.
             //    SQL is the most failure-prone step (e.g. duplicate keys in third-party content), so
-            //    keeping it final means a SQL error never leaves the client/data work half-applied — all
+            //    keeping it final means a SQL error never leaves the client/data work half-applied - all
             //    of it is already done and only the SQL needs fixing/re-running.
             if (hasSql)
             {
@@ -913,7 +913,7 @@ public sealed partial class MigrationService
                 // error (default in batch mode). If any statement fails, mysql exits non-zero before
                 // reaching COMMIT and the connection closes with the transaction uncommitted, so
                 // InnoDB rolls back the whole file. NOTE: DDL (CREATE/ALTER/DROP) auto-commits in
-                // MySQL and cannot be rolled back — this protects the DML that AC patch SQL uses.
+                // MySQL and cannot be rolled back - this protects the DML that AC patch SQL uses.
                 await using var stream = OpenTransactionalSqlStream(sqlFile);
                 // --disable-local-infile prevents operator SQL from pulling files off the manager host
                 // via LOAD DATA LOCAL INFILE (server-side is also blocked by local-infile=0).
@@ -933,7 +933,7 @@ public sealed partial class MigrationService
     /// <summary>
     /// Compiles the patch's CSVs onto the extracted baseline DBCs (promoting each result back into
     /// <c>server_dbc/</c>) and returns the names of the DBCs that were updated. The updated DBCs are
-    /// NOT pushed to the live data volume here — that override runs after the SQL stage.
+    /// NOT pushed to the live data volume here - that override runs after the SQL stage.
     /// </summary>
     private async Task<List<string>> ApplyDbcAsync(
         Data.Entities.ManagedStackEntity stack, string stackRoot, string patchKey, List<string> dbcTxtFiles,
@@ -1329,7 +1329,7 @@ public sealed partial class MigrationService
 
                 if (confPath is null)
                 {
-                    AddLog(result, $"Config target not found: {baseName}.conf — skipping {Path.GetFileName(jsonFile)}.");
+                    AddLog(result, $"Config target not found: {baseName}.conf - skipping {Path.GetFileName(jsonFile)}.");
                     continue;
                 }
 
@@ -1613,7 +1613,7 @@ public sealed partial class MigrationService
 
         // Exec curl inside the container against its own loopback: no host networking assumptions, and
         // the client image already ships curl for its healthcheck. Build argv explicitly (no shell) so the
-        // bearer header (which contains a space) and the URL survive intact — a single quoted/escaped
+        // bearer header (which contains a space) and the URL survive intact - a single quoted/escaped
         // command string gets re-tokenized and mangled ("curl: (2) no URL specified").
         var args = new List<string>();
         if (!string.IsNullOrEmpty(_engineContext))

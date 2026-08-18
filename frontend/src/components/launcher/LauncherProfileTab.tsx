@@ -143,7 +143,7 @@ export default function LauncherProfileTab({ stackId }: { stackId: string }) {
     <div className="space-y-5">
       <StackTabHeader
         title="Launcher profile"
-        subtitle="How this server appears in the desktop launcher — name, branding, and visibility."
+        subtitle="How this server appears in the desktop launcher - name, branding, and visibility."
       />
 
       <div
@@ -413,7 +413,7 @@ function BrandingUploadCard({
             </button>
           </div>
         ) : (
-          <p className="text-sm text-slate-500">No override — global theme artwork is used.</p>
+          <p className="text-sm text-slate-500">No override - global theme artwork is used.</p>
         )}
       </div>
     </StackTabPanel>

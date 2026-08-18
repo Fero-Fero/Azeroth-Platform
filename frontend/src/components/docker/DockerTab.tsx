@@ -166,7 +166,7 @@ export default function DockerTab({ stackId }: DockerTabProps) {
         <AlertCircle className="mr-2 inline h-4 w-4" />
         {errorMessage(
           error,
-          'For external stacks the manager queries the remote Docker engine over SSH — this usually takes 15–60 seconds.',
+          'For external stacks the manager queries the remote Docker engine over SSH - this usually takes 15–60 seconds.',
         )}
       </div>
     )
@@ -272,7 +272,7 @@ export default function DockerTab({ stackId }: DockerTabProps) {
           title="Reclaim disk space?"
           message={
             reclaimableBytes > 0
-              ? `This will reclaim up to ${reclaimEstimate} by pruning build cache and dangling image layers, removing unused platform images from deleted stacks, and deleting orphaned on-disk build checkouts. Images and volumes belonging to your managed stacks are always kept — even when those stacks are stopped or only partially running.`
+              ? `This will reclaim up to ${reclaimEstimate} by pruning build cache and dangling image layers, removing unused platform images from deleted stacks, and deleting orphaned on-disk build checkouts. Images and volumes belonging to your managed stacks are always kept - even when those stacks are stopped or only partially running.`
               : 'Little reclaimable space was detected, but this will still prune build cache and dangling image layers if present. Images and volumes belonging to your managed stacks are always kept.'
           }
           onCancel={() => setConfirmCleanup(false)}
@@ -578,7 +578,7 @@ function ResourcesSubTab({
   return (
     <div className="space-y-4">
       <ResourceSection
-        title="This stack — images"
+        title="This stack - images"
         icon={<ImageIcon className="h-4 w-4" />}
         emptyLabel="No stack images found on the Docker engine."
       >
@@ -704,7 +704,7 @@ function DiskUsageSubTab({ data }: { data: StackDockerOverviewDto }) {
           <h3 className="font-medium text-gray-900">Where disk space is used</h3>
           <p className="mt-1 text-xs text-gray-500">
             Breakdown of Docker engine storage and on-disk build checkouts across all managed stacks. Host disk usage
-            includes everything on the machine — not only Docker.
+            includes everything on the machine - not only Docker.
           </p>
         </div>
         <DiskUsageCategoryTable breakdown={breakdown} />
@@ -842,7 +842,7 @@ function DiskUsageCategoryTable({ breakdown }: { breakdown: DockerDiskUsageBreak
                 <div className="text-sm font-medium text-gray-900">{row.label}</div>
                 <div className="text-xs text-gray-500">{row.detail}</div>
               </td>
-              <td className="px-4 py-3 text-sm text-gray-600">{row.count > 0 ? row.count : '—'}</td>
+              <td className="px-4 py-3 text-sm text-gray-600">{row.count > 0 ? row.count : '-'}</td>
               <td className="px-4 py-3 text-sm font-medium text-gray-800">{formatBytes(row.bytes)}</td>
               <td className="px-4 py-3">
                 {row.tone === 'active' ? (
@@ -928,7 +928,7 @@ function ReclaimableBreakdownSection({ breakdown }: { breakdown: DockerReclaimab
     },
     {
       label: 'Unused tagged images',
-      detail: 'Images from deleted stacks or old builds — not required by any managed stack',
+      detail: 'Images from deleted stacks or old builds - not required by any managed stack',
       bytes: breakdown.unusedTaggedImageBytes,
       count: breakdown.unusedTaggedImageCount,
     },
@@ -969,7 +969,7 @@ function ReclaimableBreakdownSection({ breakdown }: { breakdown: DockerReclaimab
                   <div className="text-sm font-medium text-gray-900">{row.label}</div>
                   <div className="text-xs text-gray-500">{row.detail}</div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-600">{row.count > 0 ? row.count : '—'}</td>
+                <td className="px-4 py-3 text-sm text-gray-600">{row.count > 0 ? row.count : '-'}</td>
                 <td className="px-4 py-3 text-sm text-gray-800">{formatBytes(row.bytes)}</td>
               </tr>
             ))}

@@ -103,7 +103,7 @@ export default function LuaScriptsTab({ stackId }: { stackId: string }) {
     setNotice(null)
     try {
       await applyLua.mutateAsync()
-      setNotice('Worldserver restarting — scripts are being loaded.')
+      setNotice('Worldserver restarting - scripts are being loaded.')
     } catch (err) {
       setNotice(errorMessage(err))
     }

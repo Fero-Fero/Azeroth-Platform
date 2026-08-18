@@ -4,7 +4,7 @@ namespace AzerothPlatform.Core.Contracts;
 /// Per-stack network settings for the player-facing HTTP services (armory + client file server): which
 /// host ports they publish on and which host interface those ports bind to. Lets an operator expose the
 /// armory beyond localhost (LAN / VPC / all interfaces) from the UI, without editing the generated
-/// <c>.env</c> — which is unreachable once the stack runs on a remote host.
+/// <c>.env</c> - which is unreachable once the stack runs on a remote host.
 /// </summary>
 public class ArmoryNetworkConfigDto
 {

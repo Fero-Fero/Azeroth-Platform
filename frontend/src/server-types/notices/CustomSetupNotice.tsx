@@ -21,7 +21,7 @@ export function CustomSetupNotice({
         <p key={setup.id} className="text-violet-800">
           {setup.notice ?? (
             <>
-              After creating the stack, complete <strong>{setup.title}</strong> — {setup.description}
+              After creating the stack, complete <strong>{setup.title}</strong> - {setup.description}
             </>
           )}
         </p>

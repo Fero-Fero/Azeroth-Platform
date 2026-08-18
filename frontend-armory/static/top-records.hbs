@@ -34,7 +34,7 @@
 
 		function formatTime(ms) {
 			if (!ms || ms <= 0) {
-				return "—";
+				return "-";
 			}
 			const totalSeconds = Math.floor(ms / 1000);
 			const hours = Math.floor(totalSeconds / 3600);
@@ -174,9 +174,9 @@
 				target = "Fastest kills";
 			} else if (Number($("#select-target").val()) !== 0) {
 				const boss = instance.bosses.find((b) => b.id === Number($("#select-target").val()));
-				target = `Fastest kills — ${boss ? boss.name : ""}`;
+				target = `Fastest kills - ${boss ? boss.name : ""}`;
 			}
-			$("#top-records-heading").text(`${target} — ${instance.name}`);
+			$("#top-records-heading").text(`${target} - ${instance.name}`);
 		}
 
 		let requestSeq = 0;

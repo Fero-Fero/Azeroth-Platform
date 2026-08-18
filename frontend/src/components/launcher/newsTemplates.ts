@@ -1,7 +1,7 @@
 /*
  * WoW-blog-inspired starter layouts for news articles. Selecting one seeds a new article's headline
  * and body HTML, which the admin then edits in the TipTap editor. These are authoring conveniences
- * only (frontend constants) — the launcher just renders whatever HTML is ultimately saved. Each
+ * only (frontend constants) - the launcher just renders whatever HTML is ultimately saved. Each
  * template uses only the shared `.news-content` element set so it renders identically in the website
  * preview and the launcher's reading view.
  */

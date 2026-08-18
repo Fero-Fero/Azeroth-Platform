@@ -213,7 +213,7 @@ function StackDetailsPageContent() {
     error,
   } = useStackDetail(stackId!, {
     refetchInterval: (query) => {
-      // Avoid overlapping VPC probes — each refresh SSHs to the remote engine and can take 30s+.
+      // Avoid overlapping VPC probes - each refresh SSHs to the remote engine and can take 30s+.
       if (query.state.fetchStatus === 'fetching') {
         return false
       }
@@ -344,7 +344,7 @@ function StackDetailsPageContent() {
       queryClient.invalidateQueries({ queryKey: stackKeys.detail(stackId!) })
       queryClient.invalidateQueries({ queryKey: stackKeys.lists() })
 
-      // Actions that bring the database up make account/character data available again — reload it
+      // Actions that bring the database up make account/character data available again - reload it
       // so anyone viewing the Accounts or Characters tab sees fresh data once the DB is ready.
       if (
         stackJob.action === 'Start' ||
@@ -500,7 +500,7 @@ function StackDetailsPageContent() {
     select: (res) => res.data,
   })
 
-  // Volume probes over SSH are slow on external stacks — only fetch when a tab needs them.
+  // Volume probes over SSH are slow on external stacks - only fetch when a tab needs them.
   const needsArmoryUploadStatus =
     activeTab === 'overview' ||
     activeTab === 'armory' ||

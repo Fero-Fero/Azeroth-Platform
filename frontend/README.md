@@ -202,7 +202,7 @@ Stack Overview setup rows are composed in `src/setup/`. Server-type wizard copy,
 1. **New module with setup steps:** create `src/setup/steps/modules/mod-foo/` (one file per step + optional hooks). Export `fooModuleSteps()` and register it in `src/setup/steps/modules/index.ts`. Default server types pick it up via `...moduleSteps`.
 2. **Custom setup called from a module** (e.g. Server Wide Progression): add `src/setup/custom-setups/<id>.ts` and call `buildSteps()` from that module’s `*ModuleSteps()`.
 3. **Generic stack operation** (start/stop/restart): add under `src/setup/steps/stack/`.
-4. **Server-type notices / addons / pipeline:** edit `src/server-types/definitions/<type>.ts`. Set `recommendedAddonIds` (addon catalog ids). For sequenced workflows, compose module steps in `buildSetupSteps` — do not import the same step factories a second time. Shared wizard UI lives in `notices/`; catalog matching lives in `registry/`.
+4. **Server-type notices / addons / pipeline:** edit `src/server-types/definitions/<type>.ts`. Set `recommendedAddonIds` (addon catalog ids). For sequenced workflows, compose module steps in `buildSetupSteps` - do not import the same step factories a second time. Shared wizard UI lives in `notices/`; catalog matching lives in `registry/`.
 5. **Global onboarding:** append to `src/setup/global-steps/index.ts` **after** SOAP → upload client → upload armory DBC. Client and armory are skippable; SOAP is not.
 6. **Sequenced workflow:** mark ordered steps with `sequenced: true` and optional `dependsOn`. `resolveVisibleSteps` shows one pipeline step at a time.
 

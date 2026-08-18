@@ -196,7 +196,7 @@ export default function AddonsManager({ stackId }: AddonsManagerProps) {
       <div>
         <h2 className="text-xl font-semibold text-slate-900">Addons</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Upload custom packs or install from the catalog — synced to players via the launcher.
+          Upload custom packs or install from the catalog - synced to players via the launcher.
         </p>
       </div>
 
@@ -345,7 +345,7 @@ function UploadHeroCard({
           </span>
         )}
         <p className="mt-4 text-xs text-slate-500">
-          Large packs (storyline / voice-over) can be several GB — uploads stream to disk and may take a while.
+          Large packs (storyline / voice-over) can be several GB - uploads stream to disk and may take a while.
         </p>
       </div>
       <input
@@ -514,7 +514,7 @@ function CatalogPanel({
       {suggestedCallout && (
         <div className="border-b border-violet-200 bg-linear-to-r from-violet-50 to-fuchsia-50 px-4 py-3 sm:px-5">
           <p className="text-sm text-violet-950">
-            <strong>{suggestedCallout.name}</strong> is recommended for this stack — select it below and install.
+            <strong>{suggestedCallout.name}</strong> is recommended for this stack - select it below and install.
           </p>
         </div>
       )}

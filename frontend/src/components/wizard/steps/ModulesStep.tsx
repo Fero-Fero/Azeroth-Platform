@@ -153,7 +153,7 @@ export function ModulesStep({ form }: ModulesStepProps) {
             <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>
-                Modules could not be loaded. You can continue — the module list will be available once the backend is running.
+                Modules could not be loaded. You can continue - the module list will be available once the backend is running.
               </span>
             </div>
           )}

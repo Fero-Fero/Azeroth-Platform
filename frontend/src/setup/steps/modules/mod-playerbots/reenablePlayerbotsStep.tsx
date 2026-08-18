@@ -79,9 +79,9 @@ function ReenableDetails(ctx: SetupStepContext) {
         </p>
       ) : (
         <p>
-          The stack is running with playerbots off. Prepare server-wide progression on the Patches tab —
+          The stack is running with playerbots off. Prepare server-wide progression on the Patches tab -
           click <strong>Prepare progression</strong>, then{' '}
-          <strong>Sync with mod-individual-progression</strong> — before re-enabling playerbots.
+          <strong>Sync with mod-individual-progression</strong> - before re-enabling playerbots.
         </p>
       )}
       {playerbots.toggleError && (

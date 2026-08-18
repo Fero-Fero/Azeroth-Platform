@@ -50,11 +50,11 @@ public sealed class AzerothPlatformWebApplicationFactory : WebApplicationFactory
 
             // Register the DbContext using the long-lived in-memory connection.
             // Because we reuse the same SqliteConnection, the database is never
-            // destroyed between requests — all requests see the migrated schema.
+            // destroyed between requests - all requests see the migrated schema.
             services.AddDbContext<AzerothCoreDbContext>(options =>
                 options.UseSqlite(_keepAliveConnection));
 
-            // ---- Replace IDockerService — Docker is not available in CI ----
+            // ---- Replace IDockerService - Docker is not available in CI ----
             RemoveService<IDockerService>(services);
 
             var mockDocker = new Mock<IDockerService>();
@@ -76,7 +76,7 @@ public sealed class AzerothPlatformWebApplicationFactory : WebApplicationFactory
                 });
             services.AddScoped<IDockerService>(_ => mockDocker.Object);
 
-            // ---- Replace IGitService — always reports Git as present ----
+            // ---- Replace IGitService - always reports Git as present ----
             RemoveService<IGitService>(services);
 
             var mockGit = new Mock<IGitService>();

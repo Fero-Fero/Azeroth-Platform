@@ -2,7 +2,7 @@ namespace AzerothPlatform.Core.Contracts;
 
 /// <summary>
 /// MySQL root credentials for a managed stack. Returned only from the dedicated, audited reveal
-/// endpoint — never from the standard stack list/detail payloads.
+/// endpoint - never from the standard stack list/detail payloads.
 /// </summary>
 public class DatabaseCredentialsDto
 {

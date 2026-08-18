@@ -283,7 +283,7 @@ public sealed class StackDockerService : IStackDockerService
             }
         }
 
-        // Remote engines: `system df -v` and per-image inspects are very slow over SSH — skip or defer them.
+        // Remote engines: `system df -v` and per-image inspects are very slow over SSH - skip or defer them.
         var volumeUsage = isRemoteEngine
             ? new Dictionary<string, (long? SizeBytes, int Links)>(StringComparer.OrdinalIgnoreCase)
             : await GetVolumeUsageAsync(contextArg, cancellationToken);
@@ -313,7 +313,7 @@ public sealed class StackDockerService : IStackDockerService
         List<StackDockerVolumeDto> allManagedVolumes;
         if (isRemoteEngine)
         {
-            // The remote tab is scoped to this stack's engine — don't scan every managed stack id or the
+            // The remote tab is scoped to this stack's engine - don't scan every managed stack id or the
             // whole remote daemon (that was dozens of SSH round trips and timed out the UI).
             allPlatformImages = images;
             unusedImages = [];
@@ -865,7 +865,7 @@ public sealed class StackDockerService : IStackDockerService
                 IsSafeToDelete = isSafe,
                 Reason = isSafe
                     ? "Volume belongs to a stack that no longer exists and is not linked to any container."
-                    : "Volume belongs to a deleted stack but is still linked to a container — stop/remove the container first.",
+                    : "Volume belongs to a deleted stack but is still linked to a container - stop/remove the container first.",
             });
         }
 
@@ -935,7 +935,7 @@ public sealed class StackDockerService : IStackDockerService
                 RelativePath = relativePath,
                 SizeBytes = file.SizeBytes,
                 IsSafeToDelete = true,
-                Reason = "Present in the Docker overlay volume but not in the manager overlay mirror — not served to clients.",
+                Reason = "Present in the Docker overlay volume but not in the manager overlay mirror - not served to clients.",
             });
         }
 
@@ -961,7 +961,7 @@ public sealed class StackDockerService : IStackDockerService
             notes.Add(new DockerVolumeAuditDriftNoteDto
             {
                 Category = "Overlay mirror ahead of volume",
-                Detail = $"{mirrorOnly.Count} file(s) ({FormatBytesShort(bytes)}) exist in {overlayMirrorDir} but not in {overlayVolume}. Start the stack or re-seed the overlay to sync — do not delete these from the mirror.",
+                Detail = $"{mirrorOnly.Count} file(s) ({FormatBytesShort(bytes)}) exist in {overlayMirrorDir} but not in {overlayVolume}. Start the stack or re-seed the overlay to sync - do not delete these from the mirror.",
             });
         }
 
@@ -1070,7 +1070,7 @@ public sealed class StackDockerService : IStackDockerService
     {
         "client" => "Leftover manager client files. Client data lives in per-stack Docker volumes.",
         "armory-assets" => "Armory styling/config used for image rebuilds.",
-        "stacks" => "AzerothCore source checkouts for compiling (NOT Docker stack data). Required — do not delete.",
+        "stacks" => "AzerothCore source checkouts for compiling (NOT Docker stack data). Required - do not delete.",
         "azeroth-platform.db" => "Platform SQLite database.",
         "launcher-dist" => "Built desktop launcher binaries staged for stacks.",
         "armory-build" => "Armory image build workspace (temporary).",
@@ -1106,7 +1106,7 @@ public sealed class StackDockerService : IStackDockerService
         else if (isOrphanStack)
         {
             detail = linkCount > 0
-                ? "Volume from a deleted stack still linked to a container — remove the container first."
+                ? "Volume from a deleted stack still linked to a container - remove the container first."
                 : "Orphan volume from a deleted stack.";
             isDeletable = linkCount == 0;
             isProtected = linkCount > 0;
@@ -1616,12 +1616,12 @@ public sealed class StackDockerService : IStackDockerService
 
         if (relativePath.StartsWith("stacks/", StringComparison.OrdinalIgnoreCase))
         {
-            return "AzerothCore build checkout — protected.";
+            return "AzerothCore build checkout - protected.";
         }
 
         if (relativePath.EndsWith(".key", StringComparison.OrdinalIgnoreCase))
         {
-            return "Platform signing/encryption key — protected.";
+            return "Platform signing/encryption key - protected.";
         }
 
         return null;
@@ -2746,7 +2746,7 @@ public sealed class StackDockerService : IStackDockerService
         CancellationToken cancellationToken)
     {
         var usage = new DockerDiskUsageDto();
-        // Host disk via a throwaway container — skip `docker system df` on remote engines (another slow SSH call).
+        // Host disk via a throwaway container - skip `docker system df` on remote engines (another slow SSH call).
         var (dfExit, dfOutput, _) = await RunDockerAsync(
             $"{contextArg}run --rm alpine:3.20 df -B1 --output=size,used,avail,pcent /",
             cancellationToken);

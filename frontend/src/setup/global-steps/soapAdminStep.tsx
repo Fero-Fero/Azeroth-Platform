@@ -127,7 +127,7 @@ export function soapAdminStep(): SetupStep {
     showWhenComplete: (ctx) => ctx.status.progress.getSessionFlag(SOAP_CREDENTIALS_FLAG) === '1',
     summary: (ctx) =>
       ctx.status.progress.getSessionFlag(SOAP_PASSWORD_FLAG)
-        ? 'Save the credentials below — the password will not be shown again here.'
+        ? 'Save the credentials below - the password will not be shown again here.'
         : 'The manager needs a SOAP admin account to send commands to your server.',
     Component: (ctx) => <SoapDetails {...ctx} />,
     Action: (ctx) => <SoapAction {...ctx} />,

@@ -92,7 +92,7 @@ export default function NavbarEditor({
       </div>
 
       <div className="rounded-md border border-dashed border-gray-300 bg-white px-3 py-2">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">Live preview — drag to reorder</div>
+        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">Live preview - drag to reorder</div>
         <DraggableNavbarStrip
           links={config.links}
           siteName={siteName}

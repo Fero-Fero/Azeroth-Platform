@@ -5,7 +5,7 @@ node_modules/
 build/
 
 # Model-viewer dataset now lives under static/data. Keep the small, server-side parts (DBC CSVs,
-# progression, backgrounds) baked into the image, but drop the multi-GB heavy assets — those are
+# progression, backgrounds) baked into the image, but drop the multi-GB heavy assets - those are
 # served by the per-stack armory-assets sidecar, not the image.
 static/data/mo3/
 static/data/meta/

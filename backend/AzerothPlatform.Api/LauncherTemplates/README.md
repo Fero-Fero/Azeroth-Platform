@@ -11,9 +11,9 @@ the website preview and the launcher.
 
 Put one of each (any listed extension) into `classic/`, `tbc/`, and `wotlk/`:
 
-- `background.<png|jpg|jpeg|webp|gif>` — the launcher background. Animated **GIF** or animated
+- `background.<png|jpg|jpeg|webp|gif>` - the launcher background. Animated **GIF** or animated
   **WebP** will animate in the launcher.
-- `logo.<png|jpg|jpeg|webp>` — the logo shown in the launcher's top-left header.
+- `logo.<png|jpg|jpeg|webp>` - the logo shown in the launcher's top-left header.
 
 If a file is missing, the launcher falls back to any background/logo uploaded on the website, then to
 no image.

@@ -21,7 +21,7 @@ public sealed class HashService
     /// cache under <paramref name="relativeKey"/>. Returns null when the file does not exist. When
     /// <paramref name="forceRecompute"/> is true the cached hash is ignored and the file is re-hashed
     /// from disk: this catches on-disk corruption where the size and mtime are unchanged (so the cache
-    /// would otherwise return a stale "good" hash) — used by the full "Verify files" pass.
+    /// would otherwise return a stale "good" hash) - used by the full "Verify files" pass.
     /// </summary>
     public async Task<string?> GetHashAsync(
         string relativeKey, string absolutePath, bool forceRecompute, CancellationToken cancellationToken)

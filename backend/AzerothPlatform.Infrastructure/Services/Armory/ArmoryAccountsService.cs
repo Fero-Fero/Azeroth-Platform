@@ -105,7 +105,7 @@ public sealed class ArmoryAccountsService : IArmoryAccountsService
                 ? ArmoryEmailConfigDefaults.DefaultVerificationSubject
                 : email.VerificationSubject,
             realmName,
-            "(test — no action required)");
+            "(test - no action required)");
         var body = RenderTemplate(
             string.IsNullOrWhiteSpace(email.VerificationBodyHtml)
                 ? ArmoryEmailConfigDefaults.DefaultVerificationBodyHtml

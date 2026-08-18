@@ -53,7 +53,7 @@ export function BootstrapScriptStickyPanel({
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-amber-950">Bootstrap script</p>
           <p className="mt-0.5 text-[11px] leading-snug text-amber-900">
-            Prefer <span className="font-medium">Run script</span> — browser paste can skip lines. SSH user:{' '}
+            Prefer <span className="font-medium">Run script</span> - browser paste can skip lines. SSH user:{' '}
             <span className="font-mono">{user}</span>
           </p>
         </div>

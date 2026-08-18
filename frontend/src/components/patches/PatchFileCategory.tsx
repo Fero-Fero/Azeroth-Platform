@@ -109,7 +109,7 @@ export default function PatchFileCategory({
         <span>
           {uploading
             ? 'Uploading, please wait...'
-            : `Drop files or click to upload${accept ? ` (${accept})` : ''} — up to 8 GB`}
+            : `Drop files or click to upload${accept ? ` (${accept})` : ''} - up to 8 GB`}
         </span>
         <input
           ref={inputRef}

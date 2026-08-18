@@ -5,7 +5,7 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// <summary>
 /// Central palette + CSS generator for stack armory themes. The generated CSS redefines
 /// the <c>--armory-*</c> CSS custom properties consumed by the bundled <c>theme.css</c>
-/// so the entire armory re-colours via variable cascade — no per-selector overrides needed.
+/// so the entire armory re-colours via variable cascade - no per-selector overrides needed.
 /// </summary>
 internal static class ArmoryStylingTheme
 {

@@ -216,7 +216,7 @@ public sealed class DockerEngineOverviewDto
     public DockerReclaimableBreakdownDto? ReclaimableBreakdown { get; set; }
     /// <summary>
     /// Space that &quot;Reclaim disk space&quot; can actually free (build cache, dangling layers, unused images,
-    /// orphaned checkouts). Excludes Docker volumes — delete those separately on this page.
+    /// orphaned checkouts). Excludes Docker volumes - delete those separately on this page.
     /// </summary>
     public long ReclaimableBytes { get; set; }
     public DockerManagerVolumeDto? ManagerVolume { get; set; }

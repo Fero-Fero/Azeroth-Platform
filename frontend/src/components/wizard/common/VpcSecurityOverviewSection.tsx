@@ -18,7 +18,7 @@ export function VpcSecurityOverviewSection({ defaultExpanded = false }: { defaul
           <span>
             <span className="block text-sm font-semibold text-indigo-950">VPC &amp; security roles</span>
             <span className="mt-0.5 block text-xs font-normal text-indigo-900/90">
-              Which ports are public, manager-only, or blocked — before you connect.
+              Which ports are public, manager-only, or blocked - before you connect.
             </span>
           </span>
         </span>

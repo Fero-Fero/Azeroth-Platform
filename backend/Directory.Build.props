@@ -13,8 +13,8 @@
         * SQLite is used ONLY by EF Core for the manager's own metadata database, with fully parameterized,
           EF-generated queries. There are no FromSqlRaw/ExecuteSqlRaw call sites and no user-supplied raw
           SQL reaches SQLite.
-        * The attacker-facing database (AzerothCore accounts/characters) is MySQL — a completely separate
-          engine — accessed via parameterized Dapper/EF queries.
+        * The attacker-facing database (AzerothCore accounts/characters) is MySQL - a completely separate
+          engine - accessed via parameterized Dapper/EF queries.
       Re-evaluate and remove this suppression once EF Core ships a Sqlite provider that depends on a
       non-vulnerable native SQLite (or a net10.0-compatible SourceGear.sqlite3 becomes available).
     -->

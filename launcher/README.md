@@ -42,7 +42,7 @@ once; each profile only overlays its custom MPQs and addons:
   also keeps a canonical copy under `Data/{stackId}/` (the stash). If you replace `Data/patch-L.MPQ`
   manually but an older copy remains in `Data/{stackId}/patch-L.MPQ`, MPQ tools and the client can
   appear to show the wrong (empty) archive until you run **Update** or delete the stash copy. Renaming
-  the live file sidesteps the name clash — that is a symptom of duplicate stash/live copies.
+  the live file sidesteps the name clash - that is a symptom of duplicate stash/live copies.
 - Addons are cached per profile under `_acl/addons/{profile}/` and toggled without re-downloading.
 
 The launcher also self-updates: it compares its baked build version against
@@ -112,7 +112,7 @@ dotnet publish AzerothPlatform.Launcher/AzerothPlatform.Launcher.csproj \
 
 Passing `-p:PublishSingleFile=true` automatically makes the build **self-contained** (bundles the
 .NET runtime), extracts native libraries from the single file, compresses it, and strips loose
-symbol files — the result is one standalone `AzerothPlatformLauncher.exe` (~47 MB) that a friend can run
+symbol files - the result is one standalone `AzerothPlatformLauncher.exe` (~47 MB) that a friend can run
 without installing .NET. This cross-compiles fine from macOS/Linux.
 
 Other runtime identifiers: `linux-x64`, `osx-x64`, `osx-arm64` (the client itself would run via Wine).
@@ -120,7 +120,7 @@ Other runtime identifiers: `linux-x64`, `osx-x64`, `osx-arm64` (the client itsel
 ## Distributing to friends
 
 The goal is: a friend downloads the launcher, and with one click it installs the client and
-lets them play — no manual realmlist edits, no client hunting.
+lets them play - no manual realmlist edits, no client hunting.
 
 1. **Pre-set the download URL.** Copy [`AzerothPlatform.Launcher/launcher.settings.example.json`](AzerothPlatform.Launcher/launcher.settings.example.json)
    to `launcher.settings.json` and set your public server URL and branding:

@@ -19,15 +19,11 @@ public class MigrationsController : ControllerBase
 
     public MigrationsController(
         IMigrationService migrations,
-        IMigrationApplyRunner applyRunner,
-        IServerWideProgressionService serverWideProgression)
+        IMigrationApplyRunner applyRunner)
     {
         _migrations = migrations;
         _applyRunner = applyRunner;
-        _serverWideProgression = serverWideProgression;
     }
-
-    private readonly IServerWideProgressionService _serverWideProgression;
 
     /// <summary>Lists all patches with status and per-category file counts.</summary>
     [HttpGet]
@@ -226,14 +222,6 @@ public class MigrationsController : ControllerBase
             return await _migrations.ImportPatchCollectionAsync(stackId, stream, mode, cancellationToken);
         });
 
-    /// <summary>
-    /// Verifies patch templates and config overrides. When Server Wide Progression is bootstrapped and
-    /// Azeroth-Platform-Progression is synced, validates folder structure against the repository as well.
-    /// </summary>
-    [HttpPost("validate-patches")]
-    public Task<IActionResult> ValidatePatches(string stackId, CancellationToken cancellationToken)
-        => Execute(() => _serverWideProgression.ValidatePatchesAsync(stackId, cancellationToken));
-
     /// <summary>Captures the server_dbc baseline from the running stack's data volume.</summary>
     [HttpPost("init-baseline")]
     public Task<IActionResult> InitializeBaseline(string stackId, CancellationToken cancellationToken)
@@ -253,7 +241,7 @@ public class MigrationsController : ControllerBase
         => StartRun(() => _applyRunner.StartApplyAsync(stackId, patchKey, cancellationToken));
 
     /// <summary>
-    /// Starts a background reapply of every already-applied patch — SQL, DBC, maps and MPQ content —
+    /// Starts a background reapply of every already-applied patch - SQL, DBC, maps and MPQ content -
     /// on top of the standard AzerothCore updates (cross-user locked). Returns 202 with the initial run
     /// status, or 409 if an apply is already in progress.
     /// </summary>

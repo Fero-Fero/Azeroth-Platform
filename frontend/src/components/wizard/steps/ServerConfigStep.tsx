@@ -5,6 +5,7 @@ import { FormField } from '@/components/wizard/common/FormField'
 import type { WizardForm } from '@/components/wizard/types'
 import { useRepositoryBranches, useServerTypes } from '@/hooks/useModules'
 import { mergeRequiredModuleIds } from '@/lib/server-type-modules'
+import { normalizeStackNameInput } from '@/lib/stack-name'
 import { cn } from '@/lib/utils'
 import { ServerType } from '@/types/stack.types'
 
@@ -67,7 +68,7 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
         label="Stack Name"
         htmlFor="stackName"
         error={errors.stackName?.message}
-        hint="Lowercase letters, numbers, and hyphens. E.g. my-wotlk-server"
+        hint="Letters and numbers are kept. Words are lowercased and joined with a hyphen. E.g. My Test Server → my-test-server"
         required
       >
         <input
@@ -80,7 +81,20 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
             'block w-full rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500',
             errors.stackName ? 'border-red-400' : 'border-gray-300'
           )}
-          {...register('stackName')}
+          {...register('stackName', {
+            onChange: (event) => {
+              const next = normalizeStackNameInput(event.target.value)
+              if (next !== event.target.value) {
+                setValue('stackName', next, { shouldValidate: true, shouldDirty: true })
+              }
+            },
+            onBlur: (event) => {
+              const next = normalizeStackNameInput(event.target.value, { trimEdges: true })
+              if (next !== event.target.value) {
+                setValue('stackName', next, { shouldValidate: true, shouldDirty: true })
+              }
+            },
+          })}
         />
       </FormField>
 

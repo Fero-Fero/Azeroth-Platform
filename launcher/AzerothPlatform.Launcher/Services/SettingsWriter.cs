@@ -22,7 +22,7 @@ public static class SettingsWriter
     /// <summary>
     /// Merges the server-provided Config.wtf over the player's existing one and writes the result.
     /// Every <c>SET key value</c> the server defines wins (so server-side edits propagate on the next
-    /// launch), while keys only the player has — resolution, sound, gamma, etc. — are preserved. When
+    /// launch), while keys only the player has - resolution, sound, gamma, etc. - are preserved. When
     /// <paramref name="realmListOverride"/> is set it takes final priority for the realmlist line, so
     /// the launcher's editable realmlist (host:port) always wins. Creates the file if it's missing.
     /// </summary>

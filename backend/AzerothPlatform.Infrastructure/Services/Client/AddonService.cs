@@ -78,7 +78,7 @@ public sealed class AddonService : IAddonService
         {
             Id = "dungeon-clear-addon",
             Name = "Dungeon Clear",
-            Description = "In-game panel for mod-dungeon-clear — start, pause, skip, and monitor autonomous tank-led dungeon clears without typing chat commands.",
+            Description = "In-game panel for mod-dungeon-clear - start, pause, skip, and monitor autonomous tank-led dungeon clears without typing chat commands.",
             Category = "UI",
             DownloadUrl = "https://github.com/jrad7/mod-dungeon-clear-addon/archive/refs/heads/master.zip",
             Website = "https://github.com/jrad7/mod-dungeon-clear-addon",
@@ -102,7 +102,7 @@ public sealed class AddonService : IAddonService
         {
             Id = "wotlk-storyline",
             Name = "Storyline (WotLK)",
-            Description = "Immersive quest dialogue UI — backport of the Storyline addon for WotLK 3.3.5a.",
+            Description = "Immersive quest dialogue UI - backport of the Storyline addon for WotLK 3.3.5a.",
             Category = "Quests",
             DownloadUrl = "https://github.com/Fero-Fero/WotLK-Storyline/archive/refs/heads/master.zip",
             Website = "https://github.com/Fero-Fero/WotLK-Storyline",
@@ -133,7 +133,7 @@ public sealed class AddonService : IAddonService
         new()
         {
             Id = "ai-voiceover-data-vanilla",
-            Name = "AI VoiceOver — Vanilla Sounds",
+            Name = "AI VoiceOver - Vanilla Sounds",
             Description = "Voice-over data pack for Vanilla quest content (~1.4 GB).",
             Category = "Quests",
             DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_Vanilla.zip",
@@ -144,7 +144,7 @@ public sealed class AddonService : IAddonService
         new()
         {
             Id = "ai-voiceover-data-tbc",
-            Name = "AI VoiceOver — TBC Sounds",
+            Name = "AI VoiceOver - TBC Sounds",
             Description = "Voice-over data pack for The Burning Crusade quest content (~700 MB).",
             Category = "Quests",
             DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_TBC.zip",
@@ -155,7 +155,7 @@ public sealed class AddonService : IAddonService
         new()
         {
             Id = "ai-voiceover-data-wotlk",
-            Name = "AI VoiceOver — WotLK Sounds",
+            Name = "AI VoiceOver - WotLK Sounds",
             Description = "Voice-over data pack for Wrath of the Lich King quest content (~750 MB).",
             Category = "Quests",
             DownloadUrl = "https://github.com/celguar/wow-voiceover/releases/download/1.5.0/AI_VoiceOverData_WoTLK.zip",
@@ -506,7 +506,7 @@ public sealed class AddonService : IAddonService
             var name = Path.GetFileName(dir);
 
             // Default client addons (the Blizzard_* UI modules and AIO) ship with every WoW client, so
-            // they're just noise in the management list — hide them so admins only see addons they
+            // they're just noise in the management list - hide them so admins only see addons they
             // actually added.
             if (IsDefaultAddon(name))
             {

@@ -9,7 +9,7 @@ public static class Standard
         Id = ServerType.Standard,
         Enabled = true,
         DisplayName = "Standard",
-        Description = "Vanilla AzerothCore — the classic WotLK experience. Playerbots can be added as a module.",
+        Description = "Vanilla AzerothCore - the classic WotLK experience. Playerbots can be added as a module.",
         Icon = "server",
         CoreRepositoryUrl = "https://github.com/azerothcore/azerothcore-wotlk.git",
         CoreBranch = "master",

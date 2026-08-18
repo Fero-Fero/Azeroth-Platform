@@ -1,11 +1,11 @@
 /* WoW Armory brown/gold theme. Layered on top of Bulma.
  *
  * Primary palette tokens match the ArmoryStylingDto fields so that the
- * generated azp-theme.css only needs to redefine :root variables —
+ * generated azp-theme.css only needs to redefine :root variables -
  * no per-selector !important overrides required.
  */
 :root {
-	/* Primary palette tokens (14 — matching ArmoryStylingDto fields) */
+	/* Primary palette tokens (14 - matching ArmoryStylingDto fields) */
 	--armory-primary: #8a5a24;
 	--armory-secondary: #3a2412;
 	--armory-accent: #d8a84f;
@@ -1452,7 +1452,7 @@ a.section-card:hover .armory-panel {
 	margin: 0;
 }
 
-/* Player map overlay panels — borderless (overrides stale inline styles in uploaded map.hbs) */
+/* Player map overlay panels - borderless (overrides stale inline styles in uploaded map.hbs) */
 #map-worlds,
 #map-status,
 #map-info {

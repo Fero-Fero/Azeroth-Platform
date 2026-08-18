@@ -308,7 +308,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
 
             // Broadcast the built exe + a build.json to every target stack's launcher-dist volume (like
             // news distribution) so each stack's own client container serves it at /launcher/latest +
-            // /launcher/download — no dependency on the manager for player downloads or self-update.
+            // /launcher/download - no dependency on the manager for player downloads or self-update.
             // Best-effort per stack: an offline stack is logged and skipped, never failing the whole build.
             if (targetStacks.Count > 0)
             {
@@ -389,8 +389,8 @@ public sealed class LauncherBuildService : ILauncherBuildService
         }
 
         return stack.DeploymentTarget == DeploymentTarget.External
-            ? "Launcher not found on stack volume — build the launcher, then Re-send to this stack."
-            : "Launcher not found — build the launcher, then Re-send to this stack.";
+            ? "Launcher not found on stack volume - build the launcher, then Re-send to this stack."
+            : "Launcher not found - build the launcher, then Re-send to this stack.";
     }
 
     private async Task<string> DescribeStackLauncherStatusAsync(
@@ -415,7 +415,7 @@ public sealed class LauncherBuildService : ILauncherBuildService
             var files = await _remoteEngine.ListVolumeFilesAsync(stack, volume, cancellationToken);
             if (files.Count > 0)
             {
-                return "Launcher volume has files but no valid build.json — use Re-send on the Launcher page.";
+                return "Launcher volume has files but no valid build.json - use Re-send on the Launcher page.";
             }
         }
         catch (Exception ex)

@@ -279,7 +279,7 @@ export function CloudConnectionLinkForm({
         <p className="text-xs text-gray-700">
           Connect Hetzner project with a <span className="font-medium">Read & Write</span> token from
           Console → Security → API tokens. Read-only tokens cannot manage Cloud Firewalls. Use a{' '}
-          <span className="font-medium">dedicated project token</span> — not the Hetzner account password.
+          <span className="font-medium">dedicated project token</span> - not the Hetzner account password.
           Launch and pick apply firewall <span className="font-mono">azeroth-platform-{'{id}'}</span>{' '}
           (never MySQL 3306 or SOAP 7878).
         </p>
@@ -296,14 +296,14 @@ export function CloudConnectionLinkForm({
       ) : provider === CloudProvider.Azure ? (
         <p className="text-xs text-gray-700">
           Prefer Sign in with Microsoft when an Entra app is configured. Use a dedicated service principal
-          for Advanced — not the tenant Global Admin. NSG write needs Network Contributor (or equivalent)
+          for Advanced - not the tenant Global Admin. NSG write needs Network Contributor (or equivalent)
           on the VM resource group. Create VM from the platform is coming soon; pick an existing Linux VM
           to Run Command bootstrap and apply NSG rules (never MySQL 3306 or SOAP 7878).
         </p>
       ) : (
         <p className="text-xs text-gray-700">
           Prefer Sign in with Google Cloud when an OAuth client is configured. Use a dedicated service
-          account JSON for Advanced — not your org owner key. Compute Engine must be enabled on the
+          account JSON for Advanced - not your org owner key. Compute Engine must be enabled on the
           customer project. Launch tags the VM <span className="font-mono">azeroth-platform</span> and
           applies VPC firewall rules.
         </p>

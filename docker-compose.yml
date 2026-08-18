@@ -18,7 +18,7 @@ services:
     depends_on:
       - docker-socket-proxy
     # Which host interface the manager API is published on. Defaults to 0.0.0.0 (all interfaces) so a
-    # "local setup" is reachable from other machines on the LAN out of the box — the desktop launcher
+    # "local setup" is reachable from other machines on the LAN out of the box - the desktop launcher
     # (profiles, launcher self-update, per-stack client config) connects here at http://<host-lan-ip>:8080.
     # For a public / internet-facing deployment set MANAGER_BIND=127.0.0.1 in .env and route external
     # traffic through the `caddy` reverse proxy instead (TLS + security headers), which reaches the
@@ -73,7 +73,7 @@ services:
       #     "local setup" stack's armory + client files are always reachable on the LAN out of the box.
       #     A single stack can still be narrowed from the UI (Overview → Armory & client web access), or
       #     set STACK_PUBLISH_BIND=127.0.0.1 to keep every local stack loopback-only.
-      #   - DataPlaneBindAddress: MySQL + SOAP (management only; never expose publicly) — stays on loopback.
+      #   - DataPlaneBindAddress: MySQL + SOAP (management only; never expose publicly) - stays on loopback.
       #     On a Linux host where this manager runs in a container, host.docker.internal resolves to the
       #     bridge gateway, so set this to that gateway IP (e.g. 172.17.0.1) instead of 127.0.0.1.
       - Docker__PublishBindAddress=${STACK_PUBLISH_BIND:-0.0.0.0}
@@ -96,10 +96,10 @@ services:
 
   # Allowlisted Docker API proxy (Tecnativa docker-socket-proxy). This is the ONLY container that mounts
   # the real Docker socket; the manager reaches the daemon through it over TCP on the internal network.
-  # Each flag below enables a group of API endpoints — only the ones the manager actually uses are turned
+  # Each flag below enables a group of API endpoints - only the ones the manager actually uses are turned
   # on; everything else (swarm, nodes, services, secrets, configs) stays denied by default. This shrinks
   # the exposed Docker API surface but is NOT a host-escape boundary: the manager legitimately needs
-  # CONTAINERS + POST + BUILD/EXEC, and the proxy filters only by API group, not request body — so anyone
+  # CONTAINERS + POST + BUILD/EXEC, and the proxy filters only by API group, not request body - so anyone
   # who can reach this proxy (i.e. a compromised manager) can still create a privileged / bind-mounted
   # container and pivot to host root. Treat manager RCE as host-root-equivalent; the proxy's value is
   # keeping the raw socket off the manager and denying the swarm/secrets/config groups entirely.
@@ -108,7 +108,7 @@ services:
     container_name: azeroth-platform-docker-proxy
     restart: unless-stopped
     environment:
-      # Allow write (POST) operations — the manager creates/starts/removes containers, volumes, networks.
+      # Allow write (POST) operations - the manager creates/starts/removes containers, volumes, networks.
       - POST=1
       # API groups the manager uses (containers/images/networks/volumes, build, exec, and read-only info).
       - CONTAINERS=1
@@ -123,7 +123,7 @@ services:
       - VERSION=1
       - PING=1
       - AUTH=1
-      # system/df — disk usage breakdown (images, build cache, volume sizes) for the Docker tab.
+      # system/df - disk usage breakdown (images, build cache, volume sizes) for the Docker tab.
       - SYSTEM=1
       # Explicitly deny the dangerous/unused groups (these are the proxy defaults, pinned for clarity).
       - SWARM=0

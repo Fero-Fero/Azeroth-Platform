@@ -4,7 +4,7 @@ namespace AzerothPlatform.Infrastructure.Configuration;
 
 /// <summary>
 /// Platform-registered OAuth apps for cloud provider sign-in. Leave client ids blank on air-gapped
-/// installs — operators then use Advanced credential paste only.
+/// installs - operators then use Advanced credential paste only.
 /// </summary>
 public sealed class CloudOAuthOptions
 {

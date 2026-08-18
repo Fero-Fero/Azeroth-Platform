@@ -30,7 +30,7 @@ function EventBadge({ eventType }: { eventType: string }) {
 
 function formatLogTime(entry: VpcSshLogEntryDto) {
   if (!entry.timestamp) {
-    return '—'
+    return '-'
   }
 
   const date = new Date(entry.timestamp)
@@ -124,8 +124,8 @@ export default function ExternalVpcLogsPanel({ stack }: { stack: StackDetailsDto
                     <td className="px-3 py-2">
                       <EventBadge eventType={entry.eventType} />
                     </td>
-                    <td className="px-3 py-2 font-mono text-gray-800">{entry.username ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-gray-800">{entry.sourceIp ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-gray-800">{entry.username ?? '-'}</td>
+                    <td className="px-3 py-2 font-mono text-gray-800">{entry.sourceIp ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>

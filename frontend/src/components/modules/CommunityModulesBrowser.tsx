@@ -104,7 +104,7 @@ export default function CommunityModulesBrowser({
                 azerothcore.org/catalogue
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
               </a>
-              . These are community-maintained — they may need extra setup or fail to compile.
+              . These are community-maintained - they may need extra setup or fail to compile.
             </p>
           </div>
           {data?.total !== undefined && (

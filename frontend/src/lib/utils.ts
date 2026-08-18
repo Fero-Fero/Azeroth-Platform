@@ -60,7 +60,7 @@ export function isStaleVpcProbeCache(message: string | null | undefined): boolea
   return !!message?.toLowerCase().includes('showing the last successful probe')
 }
 
-/** True when a VPC Docker/SSH probe timed out (often load or limited CPU/RAM — not always a dead host). */
+/** True when a VPC Docker/SSH probe timed out (often load or limited CPU/RAM - not always a dead host). */
 export function isVpcProbeSlow(message: string | null | undefined): boolean {
   if (!message) return false
   const lower = message.toLowerCase()
@@ -107,7 +107,7 @@ export function getVpcListHostAlert(stack: Pick<
     return {
       kind: 'offline',
       message:
-        'Remote VPC host is unreachable — the cloud instance may be stopped or powered off. Start the instance in your cloud console, then refresh.',
+        'Remote VPC host is unreachable - the cloud instance may be stopped or powered off. Start the instance in your cloud console, then refresh.',
     }
   }
 

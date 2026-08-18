@@ -1353,7 +1353,7 @@ public sealed class StackService : IStackService
         ServiceSnapshot snapshot,
         Action<string, string, string?> skipStep)
     {
-        const string reason = "Stack was stopped — service was not running.";
+        const string reason = "Stack was stopped - service was not running.";
         skipStep("recreate-auth", "Recreate auth server", reason);
         skipStep("recreate-world", "Recreate world server", reason);
         if (stack.ArmoryEnabled)
@@ -1494,7 +1494,7 @@ public sealed class StackService : IStackService
         if (isExternal)
         {
             // VPC / external stacks: detach from the manager only. Containers, volumes, and images on
-            // the remote host are left untouched — operators manage those on the VPS directly.
+            // the remote host are left untouched - operators manage those on the VPS directly.
             _logger.LogInformation(
                 "Removing external stack {StackId} from the manager (remote Docker resources are not stopped).",
                 stackId);
@@ -2283,7 +2283,7 @@ public sealed class StackService : IStackService
 
     /// <summary>
     /// Brings a stack up. Init containers (db-import, client-data) run only after MySQL accepts
-    /// connections — a healthcheck can pass during MySQL's first-boot temp server. Missing
+    /// connections - a healthcheck can pass during MySQL's first-boot temp server. Missing
     /// <c>acore_*</c> databases are created by AzerothCore AutoSetup (db-import, then auth/world),
     /// with the interactive "create it?" prompt auto-accepted via <c>AC_DISABLE_INTERACTIVE</c>.
     /// External stacks also need this explicit sequence because remote compose does not reliably chain
@@ -2362,7 +2362,7 @@ public sealed class StackService : IStackService
         else
         {
             _logger.LogInformation(
-                "Skipping init containers for stack {StackId} — db-import and client-data-init already completed.",
+                "Skipping init containers for stack {StackId} - db-import and client-data-init already completed.",
                 stackId);
         }
 
@@ -2377,7 +2377,7 @@ public sealed class StackService : IStackService
             await EnsureRuntimeConfigurationAsync(stack, repoPath, cancellationToken, includeArmory: true, includeClient: clientReady);
         }
 
-        // Auth validates that realmlist.address resolves from inside its container — set the row before
+        // Auth validates that realmlist.address resolves from inside its container - set the row before
         // auth/world start, and store a literal IP (not an EC2 hostname Docker DNS cannot resolve).
         ReportLifecycleProgress(stackId, "Updating realm address in MySQL…");
         await UpdateRealmlistAddressAsync(stack, throwOnFailure: true, cancellationToken);
@@ -2403,7 +2403,7 @@ public sealed class StackService : IStackService
             stackId,
             $"Starting {services.Count} service container(s)…");
         // `--no-deps` is critical: the base compose requires ac-db-import to have completed, and after
-        // `compose down` that one-shot container is gone — compose would otherwise re-run db-import while
+        // `compose down` that one-shot container is gone - compose would otherwise re-run db-import while
         // auth/world start, hammering MySQL and causing "Lost connection to MySQL server" errors.
         await RunDockerComposeAsync(
             stackId,
@@ -2455,7 +2455,7 @@ public sealed class StackService : IStackService
 
     /// <summary>
     /// True when db-import finished. After <c>compose down</c> the one-shot container is removed but the
-    /// MySQL volume retains the imported schema — fall back to checking that before re-running import.
+    /// MySQL volume retains the imported schema - fall back to checking that before re-running import.
     /// </summary>
     private async Task<bool> IsDbImportCompleteAsync(
         ManagedStackEntity stack,
@@ -3200,7 +3200,7 @@ public sealed class StackService : IStackService
                  && job is not { IsRunning: true })
         {
             // A prior lifecycle job failed (often while the VPC was unreachable). Once containers are
-            // actually down again — e.g. after a reboot — present Stopped so operators can restart.
+            // actually down again - e.g. after a reboot - present Stopped so operators can restart.
             runtimeStatus = StackStatus.Stopped;
         }
         else if (!probeRuntime
@@ -4366,7 +4366,7 @@ public sealed class StackService : IStackService
             await _remoteEngine.SeedVolumeAsync(stack, DockerComposeOverrideGenerator.LuaVolumeName(stack.Id), luaDir, cancellationToken);
         }
 
-        // Client volumes: the shared base (seeded once per host — skip if already present since it's
+        // Client volumes: the shared base (seeded once per host - skip if already present since it's
         // ~17 GB), plus this stack's overlay + cache (created + seeded even when empty so the
         // external:true declarations resolve).
         if (seedClientVolumes)
@@ -4614,7 +4614,7 @@ public sealed class StackService : IStackService
             return (_armoryOptions.AssetProxyUrl, true);
         }
 
-        // No manager mirror — still wire the sidecar; uploads populate the volume directly.
+        // No manager mirror - still wire the sidecar; uploads populate the volume directly.
         return (_armoryOptions.AssetProxyUrl, true);
     }
 
@@ -5475,7 +5475,7 @@ public sealed class StackService : IStackService
             staleTracked.AdminAccountInitializedAt = null;
             await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogWarning(
-                "Cleared stale SOAP admin flag for stack {StackId} — auth account row is missing.",
+                "Cleared stale SOAP admin flag for stack {StackId} - auth account row is missing.",
                 stack.Id);
         }
 
@@ -5541,7 +5541,7 @@ public sealed class StackService : IStackService
             Directory.CreateDirectory(stackPath);
             var filePath = Path.Combine(stackPath, "soap-credentials.txt");
             var content = $"""
-                # Azeroth Platform — SOAP Admin Credentials
+                # Azeroth Platform - SOAP Admin Credentials
                 # Stack: {stackName} ({stackId})
                 # Created: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
                 #
@@ -5804,7 +5804,7 @@ public sealed class StackService : IStackService
 
     /// <summary>
     /// Best-effort ufw sync when external web ports change or the armory comes online. Failures are logged
-    /// only — starting the armory must not fail because SSH/ufw hiccuped.
+    /// only - starting the armory must not fail because SSH/ufw hiccuped.
     /// </summary>
     private async Task TrySyncExternalWebFirewallAsync(ManagedStackEntity stack, CancellationToken cancellationToken)
     {
@@ -5900,7 +5900,7 @@ public sealed class StackService : IStackService
                 c.Status is "ok" or "unknown" or "not-applicable");
         status.Message = status.OverallHealthy
             ? "Host firewall and Docker bind checks passed. Cloud security group rules must still be verified manually."
-            : "One or more security checks failed — review the items below.";
+            : "One or more security checks failed - review the items below.";
 
         return status;
     }
@@ -5952,7 +5952,7 @@ public sealed class StackService : IStackService
                 if (endpoint is null)
                 {
                     check.Status = "warning";
-                    check.Message = $"{container} is not publishing TCP {internalPort} — stack may be stopped.";
+                    check.Message = $"{container} is not publishing TCP {internalPort} - stack may be stopped.";
                 }
                 else if (IsLoopbackBind(endpoint.Value.Host))
                 {
@@ -5962,12 +5962,12 @@ public sealed class StackService : IStackService
                 else if (string.Equals(endpoint.Value.Host, "0.0.0.0", StringComparison.Ordinal))
                 {
                     check.Status = "error";
-                    check.Message = $"Published on 0.0.0.0:{endpoint.Value.Port} — should bind to 127.0.0.1 on external stacks.";
+                    check.Message = $"Published on 0.0.0.0:{endpoint.Value.Port} - should bind to 127.0.0.1 on external stacks.";
                 }
                 else
                 {
                     check.Status = "warning";
-                    check.Message = $"Published on {endpoint.Value.Host}:{endpoint.Value.Port} — verify this is not publicly reachable.";
+                    check.Message = $"Published on {endpoint.Value.Host}:{endpoint.Value.Port} - verify this is not publicly reachable.";
                 }
             }
             catch (Exception ex)

@@ -38,12 +38,12 @@ function AhBotDetails(ctx: SetupStepContext) {
         database.
       </p>
       {createAhBotMutation.isError && (
-        <p className="text-red-700">Failed to create characters — make sure the database container is running.</p>
+        <p className="text-red-700">Failed to create characters - make sure the database container is running.</p>
       )}
       {done && (
         <p className="inline-flex items-center gap-1.5 font-medium text-green-700">
           <CheckCircle2 className="h-4 w-4" />
-          Done — restart stack
+          Done - restart stack
         </p>
       )}
     </div>
@@ -72,7 +72,7 @@ function AhBotAction(ctx: SetupStepContext) {
     return (
       <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700">
         <CheckCircle2 className="h-4 w-4" />
-        Done — restart stack
+        Done - restart stack
       </span>
     )
   }
@@ -88,7 +88,7 @@ export function ahBotStep(): SetupStep {
     id: STEP_IDS.ahBot,
     moduleId: MODULE_IDS.ahBot,
     level: 'warning',
-    title: 'Auction House Bot — setup required',
+    title: 'Auction House Bot - setup required',
     applies: (ctx) => hasModule(ctx.stack, MODULE_IDS.ahBot) && !ahBotGuids(ctx),
     isComplete: (ctx) => !!ahBotGuids(ctx),
     summary: () => 'Create dedicated AHBOT characters in the database, then restart the stack.',

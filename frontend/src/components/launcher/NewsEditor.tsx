@@ -370,7 +370,7 @@ export default function NewsEditor({
             />
           ) : (
             <span className="mt-0.5 flex h-9 w-12 shrink-0 items-center justify-center rounded bg-slate-100 text-[9px] text-slate-400 ring-1 ring-slate-200">
-              —
+              -
             </span>
           ))}
         <span className="min-w-0 flex-1">
@@ -490,7 +490,7 @@ export default function NewsEditor({
         <StackTabSideCard
           className="min-w-0"
           title="Article stats"
-          description="Autosave keeps drafts safe — publish when ready."
+          description="Autosave keeps drafts safe - publish when ready."
           icon={<Newspaper className="h-5 w-5" />}
         >
           <div className="grid grid-cols-2 gap-3 text-sm">

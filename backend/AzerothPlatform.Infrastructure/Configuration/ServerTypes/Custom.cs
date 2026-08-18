@@ -9,7 +9,7 @@ public static class Custom
         Id = ServerType.Custom,
         Enabled = true,
         DisplayName = "Custom Fork",
-        Description = "Build from your own AzerothCore fork — paste a GitHub repository URL and branch.",
+        Description = "Build from your own AzerothCore fork - paste a GitHub repository URL and branch.",
         Icon = "git-fork",
         CoreRepositoryUrl = string.Empty,
         CoreBranch = "master",

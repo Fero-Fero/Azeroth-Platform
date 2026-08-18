@@ -112,7 +112,7 @@ public sealed class RegistryReconciler
                 }
 
                 // A stack that never received a manager push serves a fallback doc with a blank PortalUrl
-                // for itself — we reached it at `url`, so fill it in.
+                // for itself - we reached it at `url`, so fill it in.
                 if (string.IsNullOrWhiteSpace(entry.PortalUrl)
                     && string.Equals(entry.StackId, doc.SelfStackId, StringComparison.Ordinal))
                 {

@@ -45,7 +45,7 @@ export default function ForceVerifyButton({ stackId }: { stackId: string }) {
         </button>
         {done && (
           <span className="inline-flex items-center gap-1 text-sm text-green-600">
-            <CheckCircle2 className="h-4 w-4" /> Queued — clients re-validate on next check
+            <CheckCircle2 className="h-4 w-4" /> Queued - clients re-validate on next check
           </span>
         )}
       </div>

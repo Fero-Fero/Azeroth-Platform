@@ -121,7 +121,7 @@ export function HetznerConnectWizard({
 
       {completeMutation.isError ? (
         <p className="text-xs text-red-700">
-          {extractErrorMessage(completeMutation.error, 'Connection failed — check token.')}
+          {extractErrorMessage(completeMutation.error, 'Connection failed - check token.')}
         </p>
       ) : null}
 

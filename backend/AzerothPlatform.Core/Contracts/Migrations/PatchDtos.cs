@@ -345,7 +345,7 @@ public sealed class MpqManifestDto
 
     /// <summary>
     /// Human-readable descriptions keyed by archive file name (for example <c>patch-k.mpq</c>).
-    /// Required for every shipped archive — pre-built uploads and names listed in <see cref="Add"/>.
+    /// Required for every shipped archive - pre-built uploads and names listed in <see cref="Add"/>.
     /// </summary>
     public Dictionary<string, string> Description { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

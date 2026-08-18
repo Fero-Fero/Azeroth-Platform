@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend — Build & Smoke Tests
+    name: Backend - Build & Smoke Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,7 +25,7 @@ jobs:
         run: dotnet test backend/AzerothPlatform.sln --no-build --configuration Release --verbosity normal
 
   frontend:
-    name: Frontend — Build & Lint
+    name: Frontend - Build & Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read

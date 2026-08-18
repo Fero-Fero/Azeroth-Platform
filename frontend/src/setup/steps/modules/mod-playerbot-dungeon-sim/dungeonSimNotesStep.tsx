@@ -27,7 +27,7 @@ export function dungeonSimNotesStep(): SetupStep {
     id: STEP_IDS.dungeonSim,
     moduleId: MODULE_IDS.dungeonSim,
     level: 'warning',
-    title: 'Playerbot Dungeon Sim — setup notes',
+    title: 'Playerbot Dungeon Sim - setup notes',
     applies: (ctx) =>
       hasModule(ctx.stack, MODULE_IDS.dungeonSim) && !ctx.status.progress.isDismissed(STEP_IDS.dungeonSim),
     isComplete: (ctx) => ctx.status.progress.isDismissed(STEP_IDS.dungeonSim),

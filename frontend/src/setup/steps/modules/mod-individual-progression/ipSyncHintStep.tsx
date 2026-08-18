@@ -43,7 +43,7 @@ export function ipSyncHintStep(): SetupStep {
     id: STEP_IDS.ipSyncHint,
     moduleId: MODULE_IDS.individualProgression,
     level: 'warning',
-    title: 'Individual Progression — patches',
+    title: 'Individual Progression - patches',
     applies: (ctx) =>
       hasIndividualProgressionModule(ctx.stack) &&
       !ctx.status.progress.isSkipped(STEP_IDS.prepareProgression) &&

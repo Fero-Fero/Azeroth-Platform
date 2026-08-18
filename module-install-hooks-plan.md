@@ -1,9 +1,9 @@
-# Plan — Module install hooks (DBC / MPQ / extra data)
+# Plan - Module install hooks (DBC / MPQ / extra data)
 
-**Status:** Plan (later — do not start until the server-type definitions work is underway or done)  
-**Scope:** Backend — optional install hook keyed by **module id**. If a hook exists, run its extract/filter/merge pipeline. If not, continue with the normal C++ / conf install.  
+**Status:** Plan (later - do not start until the server-type definitions work is underway or done)  
+**Scope:** Backend - optional install hook keyed by **module id**. If a hook exists, run its extract/filter/merge pipeline. If not, continue with the normal C++ / conf install.  
 **Not this plan:** Server Wide Progression / Individual Progression sync (custom **server-type** setup; depends on `mod-individual-progression` but is not a module install). See `server-type-module-definitions-plan.md`.  
-**Not this plan:** CSV / `server_dbc` baseline capture — later, you have ideas.  
+**Not this plan:** CSV / `server_dbc` baseline capture - later, you have ideas.  
 **Related note:** `plans/module-dbc-mpq-aggregation.md` (layout + aggregation order; this plan is the hook mechanism).
 
 ---
@@ -92,10 +92,10 @@ Start with a module that actually ships `dbc/` / `mpq/` in-repo (or a test fixtu
 
 Likely touch points (from the aggregation note):
 
-- `ModulePackageStorage` — keep `dbc/` and `mpq/` when extracting (do not strip as non-source)
-- Stack module select / `BuildService` — after copy, call the hook runner
-- Migration apply — extra input: module data roots, then patches
-- Disable/remove module — drop that module’s contribution and re-apply remaining modules + patches
+- `ModulePackageStorage` - keep `dbc/` and `mpq/` when extracting (do not strip as non-source)
+- Stack module select / `BuildService` - after copy, call the hook runner
+- Migration apply - extra input: module data roots, then patches
+- Disable/remove module - drop that module’s contribution and re-apply remaining modules + patches
 
 ---
 
@@ -107,20 +107,20 @@ If we later list “this module has an install hook” in the catalog, a hook wi
 
 ## Phases (when we pick this up)
 
-### Phase A — Hook runner only
+### Phase A - Hook runner only
 
 - [ ] `IModuleInstallHook` + runner
 - [ ] Call site after successful catalog install / stack module select
 - [ ] One no-op or test hook to prove match / no-match
 - [ ] Duplicate `ModuleId` → startup error
 
-### Phase B — Generic `dbc/` + `mpq/` aggregation
+### Phase B - Generic `dbc/` + `mpq/` aggregation
 
 - [ ] Preserve folders in package extract
 - [ ] Fold into existing migration apply order
 - [ ] UI hint on Modules tab that a package may include client/server data
 
-### Phase C — First real named hook
+### Phase C - First real named hook
 
 - [ ] Only when a module’s layout does not fit the generic folders
 - [ ] Instructions live in that hook class (or a small sidecar next to it)

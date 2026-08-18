@@ -15,7 +15,7 @@ export default function StackConnectionBanner({
       <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
         <Cloud className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
-          <strong>VPC connection required.</strong> SSH credentials are missing or expired — reconnect from
+          <strong>VPC connection required.</strong> SSH credentials are missing or expired - reconnect from
           the VPC overview tab once the page finishes loading.
         </div>
       </div>

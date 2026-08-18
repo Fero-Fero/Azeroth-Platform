@@ -73,7 +73,7 @@ export default function CollapsiblePatchSection({
             </span>
           )}
           {collapsed && error && (
-            <span className="truncate text-xs font-normal text-red-600">— {error}</span>
+            <span className="truncate text-xs font-normal text-red-600">- {error}</span>
           )}
         </button>
         {headerActions && (

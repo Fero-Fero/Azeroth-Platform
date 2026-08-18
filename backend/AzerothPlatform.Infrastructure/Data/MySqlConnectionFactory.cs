@@ -80,7 +80,7 @@ public class MySqlConnectionFactory : IMySqlConnectionFactory
             }
 
             // External stacks: reach MySQL over an SSH tunnel to loopback on the remote host. Data-plane
-            // ports must publish on 127.0.0.1 there — tunneling to a VPC/public bind IP breaks the stream.
+            // ports must publish on 127.0.0.1 there - tunneling to a VPC/public bind IP breaks the stream.
             var endpoint = await _remoteEngine.GetManagementTunnelEndpointAsync(
                 stack,
                 remotePort,

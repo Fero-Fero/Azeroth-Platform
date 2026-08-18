@@ -35,8 +35,8 @@ export function RecommendedAddonsNotice({ ids }: { ids: string[] }) {
         const href = addon.website || addon.downloadUrl
         return (
           <p key={id} className="text-violet-800">
-            Install <strong>{addon.name}</strong> from the <strong>Addons</strong> tab after creation
-            — {addon.description}{' '}
+            It is recommended to install <strong>{addon.name}</strong> from the <strong>Addons</strong> tab after creation
+            - {addon.description}{' '}
             {href && (
               <a
                 href={href}

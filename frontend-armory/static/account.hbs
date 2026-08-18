@@ -90,7 +90,7 @@
 							{{#if guildUrl}}
 							<a href="{{guildUrl}}">{{guildName}}</a>
 							{{else}}
-							<span class="account-muted">—</span>
+							<span class="account-muted">-</span>
 							{{/if}}
 						</td>
 						<td>{{#if online}}<span class="account-online" title="Online">Online</span>{{else}}<span class="account-offline" title="Offline">Offline</span>{{/if}}</td>
@@ -135,7 +135,7 @@
 			<label class="account-guild-picker-label" for="guild-select">Your guilds</label>
 			<select class="account-guild-select" id="guild-select" name="guild" onchange="this.form.submit()">
 				{{#each guilds}}
-				<option value="{{key}}"{{#if (eq key ../selectedGuild.key)}} selected{{/if}}>{{realm}} — {{name}}</option>
+				<option value="{{key}}"{{#if (eq key ../selectedGuild.key)}} selected{{/if}}>{{realm}} - {{name}}</option>
 				{{/each}}
 			</select>
 		</form>
@@ -256,7 +256,7 @@
 		</div>
 
 		{{#if bankView.activeTab.text}}
-		<p class="account-bank-tab-text" id="account-bank-tab-text"><strong>{{bankView.activeTab.name}}</strong> — {{bankView.activeTab.text}}</p>
+		<p class="account-bank-tab-text" id="account-bank-tab-text"><strong>{{bankView.activeTab.name}}</strong> - {{bankView.activeTab.text}}</p>
 		{{else}}
 		<p class="account-bank-tab-text" id="account-bank-tab-text"><strong>{{bankView.activeTab.name}}</strong></p>
 		{{/if}}
@@ -355,7 +355,7 @@
 				const $text = $("#account-bank-tab-text");
 				if ($text.length) {
 					const name = escapeHtml(data.name);
-					const body = data.text ? ` — ${escapeHtml(data.text)}` : "";
+					const body = data.text ? ` - ${escapeHtml(data.text)}` : "";
 					$text.html(`<strong>${name}</strong>${body}`);
 				}
 				if (data.money) {

@@ -5,7 +5,7 @@ namespace AzerothPlatform.Launcher.Services;
 /// <summary>
 /// Manages per-profile overlay content over one shared WoW install: downloads each profile's custom
 /// MPQs into a stash (<c>Data/{profile}/</c>) and addons into a cache (<c>_acl/addons/{profile}/</c>),
-/// then swaps them in/out of the live install on profile switch — without ever re-downloading and
+/// then swaps them in/out of the live install on profile switch - without ever re-downloading and
 /// without touching the shared standard MPQs.
 /// </summary>
 public sealed class ProfileContentService
@@ -108,7 +108,7 @@ public sealed class ProfileContentService
     }
 
     /// <summary>
-    /// Counts overlay manifest files that must be (re)downloaded into this profile's stash — missing,
+    /// Counts overlay manifest files that must be (re)downloaded into this profile's stash - missing,
     /// wrong size, or (when <paramref name="forceRecompute"/> is set) hash mismatch on disk.
     /// </summary>
     public async Task<int> CountOverlayDownloadsNeededAsync(

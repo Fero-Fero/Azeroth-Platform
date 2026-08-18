@@ -192,7 +192,7 @@ export default function ServerConfigTab({ stackId }: { stackId: string }) {
     setNotice(null)
     try {
       await applyConfig.mutateAsync()
-      setNotice('Servers restarting — changes are being applied.')
+      setNotice('Servers restarting - changes are being applied.')
     } catch (err) {
       setNotice(errorMessage(err))
     }

@@ -53,7 +53,7 @@ public static class VpcSecurityCatalog
                 {
                     Id = RoleManagement,
                     Name = "Management / Data plane",
-                    Description = "MySQL and worldserver SOAP for manager automation — never expose to the internet.",
+                    Description = "MySQL and worldserver SOAP for manager automation - never expose to the internet.",
                     Exposure = "manager-only",
                     HostFirewall = false,
                     CloudSecurityGroup = false,
@@ -107,21 +107,21 @@ public static class VpcSecurityCatalog
             RoleId = RoleAdmin,
             Port = sshPort,
             Source = "your-ip/32",
-            Description = "SSH — restrict to your IP only"
+            Description = "SSH - restrict to your IP only"
         });
         profile.CloudSecurityGroupRules.Add(new VpcSecurityRuleDto
         {
             RoleId = RolePlayer,
             Port = authPort,
             Source = "0.0.0.0/0",
-            Description = "Authserver — players"
+            Description = "Authserver - players"
         });
         profile.CloudSecurityGroupRules.Add(new VpcSecurityRuleDto
         {
             RoleId = RolePlayer,
             Port = worldPort,
             Source = "0.0.0.0/0",
-            Description = "Worldserver — players"
+            Description = "Worldserver - players"
         });
 
         if (armoryPort is > 0)
@@ -165,7 +165,7 @@ public static class VpcSecurityCatalog
             RoleId = RoleManagement,
             Port = databasePort,
             Action = "deny",
-            Description = "MySQL — manager/VPC only (Docker bind)"
+            Description = "MySQL - manager/VPC only (Docker bind)"
         });
         profile.DeniedPorts.Add(new VpcSecurityRuleDto
         {

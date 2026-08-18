@@ -366,7 +366,7 @@ public sealed class ArmoryImageService : IArmoryImageService
 
         // This is the single point where uploaded static assets are actually baked into the image, so
         // clear the "static rebuild pending" marker here. That way every rebuild path (the dedicated
-        // "Rebuild armory image" button, the armory "Rebuild & Restart" service action, and a DBC sync —
+        // "Rebuild armory image" button, the armory "Rebuild & Restart" service action, and a DBC sync -
         // all of which rebuild the image) reconciles the prompt, not just one of them.
         ClearStaticRebuildMarker(stackId);
 

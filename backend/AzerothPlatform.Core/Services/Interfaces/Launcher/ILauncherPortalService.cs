@@ -61,7 +61,7 @@ public interface ILauncherPortalService
     /// Broadcasts the published global news feed to every launcher-visible stack: each published global
     /// article (with its cover image) is copied into the stack's own news store under a reserved
     /// <c>global-</c> id so re-broadcasting refreshes rather than duplicates. The stack handles placement
-    /// on upload — broadcast articles are automatically assigned the highest sort orders so they land as
+    /// on upload - broadcast articles are automatically assigned the highest sort orders so they land as
     /// the stack's latest news, with no manual reordering needed. Best-effort per stack.
     /// </summary>
     Task<GlobalNewsBroadcastResult> BroadcastGlobalNewsAsync(CancellationToken cancellationToken = default);

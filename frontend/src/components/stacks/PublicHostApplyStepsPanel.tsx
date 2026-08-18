@@ -18,7 +18,7 @@ export function PublicHostApplyStepsPanel({ job }: { job: StackJobStatus }) {
       </p>
       {running ? (
         <p className="mt-1 text-xs text-blue-800">
-          This runs in the background — you can refresh or switch tabs without cancelling it.
+          This runs in the background - you can refresh or switch tabs without cancelling it.
         </p>
       ) : null}
       <ul className="mt-2 space-y-1">
@@ -27,7 +27,7 @@ export function PublicHostApplyStepsPanel({ job }: { job: StackJobStatus }) {
             <StepIcon status={step.status} />
             <span>
               {step.label}
-              {step.detail ? <span className="text-gray-500"> — {step.detail}</span> : null}
+              {step.detail ? <span className="text-gray-500"> - {step.detail}</span> : null}
             </span>
           </li>
         ))}

@@ -21,7 +21,7 @@ function DisableDetails(ctx: SetupStepContext) {
       </p>
       {!playerbots.path && (
         <p>
-          Complete the initial stack build first —{' '}
+          Complete the initial stack build first -{' '}
           <code className="rounded bg-amber-100 px-1 text-xs">playerbots.conf</code> becomes available after
           module configs are seeded.
         </p>

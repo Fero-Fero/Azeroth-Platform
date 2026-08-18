@@ -55,7 +55,7 @@ internal static class AddonApi
     /// Maximum accepted addon upload size. Some addons (e.g. full storyline/voice-over packs) ship
     /// several gigabytes of data, so this is set well above typical sizes. Applied to BOTH the request
     /// body limit (<see cref="RequestSizeLimitAttribute"/>) and the multipart section limit
-    /// (<see cref="RequestFormLimitsAttribute"/>) — without the latter, form binding rejects anything
+    /// (<see cref="RequestFormLimitsAttribute"/>) - without the latter, form binding rejects anything
     /// over the ~128 MB default long before the service runs.
     /// </summary>
     public const long MaxUploadBytes = 16L * 1024 * 1024 * 1024;

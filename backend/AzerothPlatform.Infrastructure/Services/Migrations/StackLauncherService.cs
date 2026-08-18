@@ -95,7 +95,7 @@ public sealed class StackLauncherService : IStackLauncherService
 
     /// <summary>
     /// True when <paramref name="host"/> is loopback or an RFC1918 / link-local private address (or a
-    /// ".local" name) — i.e. not reachable from the public internet, so a plain-http client URL is safe.
+    /// ".local" name) - i.e. not reachable from the public internet, so a plain-http client URL is safe.
     /// </summary>
     private static bool IsPrivateOrLoopbackHost(string host)
     {

@@ -95,7 +95,7 @@ internal static class SshProbe
     }
 
     /// <summary>
-    /// ssh_config path token. Quote only when the path contains whitespace — Win32 OpenSSH often
+    /// ssh_config path token. Quote only when the path contains whitespace - Win32 OpenSSH often
     /// treats quotes as part of the filename and then offers no identity.
     /// </summary>
     public static string FormatConfigPath(string path)

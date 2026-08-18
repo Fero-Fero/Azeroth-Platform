@@ -1,6 +1,6 @@
 import type { StackJobStatus } from '@/types/stack.types'
 
-/** Prefer phase over isRunning — the backend computes both, but phase is authoritative. */
+/** Prefer phase over isRunning - the backend computes both, but phase is authoritative. */
 export function isStackJobRunning(status: StackJobStatus | null | undefined): boolean {
   if (!status) return false
   if (status.phase === 'Completed' || status.phase === 'Failed') return false
@@ -30,7 +30,7 @@ export function mergeStackJobStatus(
 
   if (prev.jobId === next.jobId) return next
 
-  // A different job id means a new operation was enqueued — always take the server snapshot.
+  // A different job id means a new operation was enqueued - always take the server snapshot.
   if (next.isRunning) return next
 
   // Ignore a stale completed job when we are already tracking a newer running job locally.

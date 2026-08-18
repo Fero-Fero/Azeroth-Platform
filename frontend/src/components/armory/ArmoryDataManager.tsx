@@ -234,7 +234,7 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
           {', '}
           <span className="font-mono">armory.textures.zip</span>) and its static web bundle (
           <span className="font-mono">armory.static.zip</span>). Data and textures uploads merge on the
-          stack&rsquo;s <span className="font-mono">armory-assets</span> volume — uploading one does not
+          stack&rsquo;s <span className="font-mono">armory-assets</span> volume - uploading one does not
           remove folders from the other. The data bundle can include the full model-viewer dataset and/or
           just the <span className="font-mono">progression/</span> folder (dungeon/raid/world boss card
           artwork for Tracking pages). Data assets are served live by the stack&rsquo;s armory sidecar;
@@ -427,7 +427,7 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-gray-500">
-                <XCircle className="h-4 w-4 text-gray-400" /> No server DBCs yet — start the stack and wait for client-data-init
+                <XCircle className="h-4 w-4 text-gray-400" /> No server DBCs yet - start the stack and wait for client-data-init
               </span>
             )}
             {dbcCsvPresent ? (
@@ -437,7 +437,7 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
               </span>
             ) : serverDbcsReady ? (
               <span className="block text-gray-500">
-                DBC CSVs not synced yet — use Sync below to convert server DBCs for the armory
+                DBC CSVs not synced yet - use Sync below to convert server DBCs for the armory
               </span>
             ) : null}
           </div>
@@ -478,7 +478,7 @@ export default function ArmoryDataManager({ stackId }: { stackId: string }) {
             </div>
             {job.isRunning && (
               <p className="mb-1 text-xs opacity-80">
-                Running in the background — this cannot be cancelled. You can safely leave or refresh
+                Running in the background - this cannot be cancelled. You can safely leave or refresh
                 this page; the job continues on the server.
               </p>
             )}

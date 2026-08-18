@@ -21,14 +21,14 @@ public static class ServerWideProgressionPatchCatalog
     private static readonly IReadOnlyList<ProgressionPatchDefinition> BuiltIn =
     [
         new(0, "START", "classic", "1.0", "Start", "Classic-era server progression baseline.", false),
-        new(1, "MOLTEN_CORE", "classic", "1.1", "Molten Core", "Molten Core tier — Blackwing Lair becomes available.", true),
+        new(1, "MOLTEN_CORE", "classic", "1.1", "Molten Core", "Molten Core tier - Blackwing Lair becomes available.", true),
         new(2, "ONYXIA", "classic", "1.2", "Onyxia", "Onyxia tier progression.", true),
-        new(3, "BLACKWING_LAIR", "classic", "1.3", "Blackwing Lair", "Blackwing Lair tier — ZG, AQ war effort, AQ quest line.", true),
+        new(3, "BLACKWING_LAIR", "classic", "1.3", "Blackwing Lair", "Blackwing Lair tier - ZG, AQ war effort, AQ quest line.", true),
         new(4, "PRE_AQ", "classic", "1.4", "Pre-AQ", "Pre-AQ gates progression.", true),
         new(5, "AQ_WAR", "classic", "1.5", "AQ War", "AQ war effort and outdoor war.", true),
         new(6, "AQ", "classic", "1.6", "AQ", "AQ raids and Scourge invasion lead-in.", true),
         new(7, "NAXX40", "classic", "1.7", "Naxxramas (40)", "Classic Naxxramas and Into the Breach.", true),
-        new(8, "PRE_TBC", "tbc", "2.0", "Pre-TBC", "The Burning Crusade opens — Karazhan, Gruul, Magtheridon.", true),
+        new(8, "PRE_TBC", "tbc", "2.0", "Pre-TBC", "The Burning Crusade opens - Karazhan, Gruul, Magtheridon.", true),
         new(9, "TBC_TIER_1", "tbc", "2.1", "TBC Tier 1", "Serpentshrine Cavern and Tempest Keep.", true),
         new(10, "TBC_TIER_2", "tbc", "2.2", "TBC Tier 2", "Hyjal Summit and Black Temple.", true),
         new(12, "TBC_TIER_4", "tbc", "2.3", "TBC Tier 4", "Sunwell Plateau.", true),

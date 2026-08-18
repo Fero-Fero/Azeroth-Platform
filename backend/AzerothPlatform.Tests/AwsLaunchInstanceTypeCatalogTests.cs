@@ -35,6 +35,6 @@ public sealed class AwsLaunchInstanceTypeCatalogTests
     {
         var type = new AwsLaunchInstanceTypeCatalog.LaunchType("t3.micro", "x86_64", 2, 1024);
 
-        Assert.Equal("t3.micro — Free Tier · 2 vCPU · 1 GiB", AwsLaunchInstanceTypeCatalog.FormatLabel(type));
+        Assert.Equal("t3.micro - Free Tier · 2 vCPU · 1 GiB", AwsLaunchInstanceTypeCatalog.FormatLabel(type));
     }
 }

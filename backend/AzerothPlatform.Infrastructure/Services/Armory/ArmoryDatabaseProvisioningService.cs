@@ -14,7 +14,7 @@ namespace AzerothPlatform.Infrastructure.Services;
 /// Creates the <c>acore_armory</c> MySQL user with read-only access to game databases and minimal
 /// write access: INSERT on <c>acore_auth.account</c> only (registration). Armory-owned extension
 /// tables are created by root and receive scoped DML grants. The core <c>account</c> table never
-/// receives UPDATE or DELETE grants — profile edits use <c>armory_account_profile</c> and are gated
+/// receives UPDATE or DELETE grants - profile edits use <c>armory_account_profile</c> and are gated
 /// in the armory app by a valid JWT session.
 /// </summary>
 public sealed class ArmoryDatabaseProvisioningService : IArmoryDatabaseProvisioningService

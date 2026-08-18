@@ -132,7 +132,7 @@ export default function ClientTab({ stackId }: { stackId: string }) {
       <section className="rounded-lg border bg-white p-6 shadow-sm">
         <h3 className="mb-1 text-lg font-semibold text-gray-900">Base client</h3>
         <p className="mb-4 text-sm text-gray-500">
-          Upload an archive of a clean 3.3.5a client (zip, rar, 7z or tar — it may be wrapped in a
+          Upload an archive of a clean 3.3.5a client (zip, rar, 7z or tar - it may be wrapped in a
           single top-level folder). This replaces any previous base and is validated for{' '}
           <span className="font-mono">Wow.exe</span> and <span className="font-mono">Data/*.MPQ</span>.
           Uploads can be large (~17 GB).

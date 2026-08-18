@@ -104,7 +104,7 @@ public sealed partial class MigrationService : IMigrationService
         var stack = await GetStackAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         // Default placeholder patches are seeded once in EnsureScaffold at stack build. Do not recreate
-        // them here — IP bootstrap removes them, and operators delete unapplied patches from the browser.
+        // them here - IP bootstrap removes them, and operators delete unapplied patches from the browser.
         Directory.CreateDirectory(MigrationLayout.MigrationsRoot(stackRoot));
 
         var patches = EnumeratePatches(stackRoot);
@@ -1171,7 +1171,7 @@ public sealed partial class MigrationService : IMigrationService
         }
         else
         {
-            // Nothing applied yet — still require the first segment to be a known patch folder.
+            // Nothing applied yet - still require the first segment to be a known patch folder.
             var patchKey = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries)[0];
             RequirePatch(stackRoot, patchKey);
         }
@@ -1667,7 +1667,7 @@ public sealed partial class MigrationService : IMigrationService
         return EnumerateMpqFiles(overlayDataDir)
             .Select(path => new FileInfo(path))
             // patch-D.MPQ is generated from applied DBCs (reserved), so it never appears in a patch's
-            // mpq folder — include it on presence. Everything else must be backed by an applied patch.
+            // mpq folder - include it on presence. Everything else must be backed by an applied patch.
             .Where(info => info.Name.Equals(patchDName, StringComparison.OrdinalIgnoreCase)
                 || appliedMpqNames.Contains(info.Name))
             .Select(info => new PublishedMpqDto

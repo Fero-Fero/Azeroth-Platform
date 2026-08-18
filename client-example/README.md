@@ -40,11 +40,11 @@ Each `*.tmpl` file becomes a settings file the launcher writes into the client:
 
 The 3.3.5a client reads its realm address from `WTF/Config.wtf`'s
 `SET realmList "host:port"` line (the `Data/<locale>/realmlist.wtf` files are ignored),
-so the realmlist — including the auth-server port — lives in `Config.wtf`.
+so the realmlist - including the auth-server port - lives in `Config.wtf`.
 
 `WTF/Config.wtf` is **merged**, not clobbered: every `SET key value` this template defines
 wins (so editing the template here propagates to all clients on their next launch), while
-keys only the player has — resolution, sound, gamma, ... — are preserved. The launcher's
+keys only the player has - resolution, sound, gamma, ... - are preserved. The launcher's
 editable realmlist takes final priority for the realmlist line. This is the source of
 truth for the server's `Config.wtf` values; the `game/WTF/` folder is **never** distributed
 (it holds per-player runtime state).

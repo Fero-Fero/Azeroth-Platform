@@ -23,7 +23,7 @@ export type ServerTypeDefinition = {
   id: string
   wizardModulesNotice?: (ctx: WizardNoticeContext) => ReactNode
   wizardReviewNotes?: (ctx: WizardNoticeContext) => ReactNode
-  /** Addon catalog ids — rendered by RecommendedAddonsNotice. */
+  /** Addon catalog ids - rendered by RecommendedAddonsNotice. */
   recommendedAddonIds: string[]
   customSetups?: CustomSetup[]
   buildSetupSteps: SetupWorkflowBuilder

@@ -99,8 +99,8 @@ public sealed class ArmoryJobService : IArmoryJobService
             if (ok)
             {
                 // The "static rebuild pending" flag is cleared where the assets are actually baked
-                // (ArmoryImageService.BuildImageAsync), so every image-rebuild path — Rebuild here, the
-                // armory "Rebuild & Restart" service action, and a DBC sync — reconciles the UI prompt.
+                // (ArmoryImageService.BuildImageAsync), so every image-rebuild path - Rebuild here, the
+                // armory "Rebuild & Restart" service action, and a DBC sync - reconciles the UI prompt.
                 Complete(stackId, success: true, message: CompletedMessage(action), error: null);
             }
             else

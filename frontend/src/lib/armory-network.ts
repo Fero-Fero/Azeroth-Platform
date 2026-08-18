@@ -16,7 +16,7 @@ function normalizeHost(value?: string | null): string {
 
 /**
  * Hostname the operator's browser should use to open the armory, based on the stack's publish bind
- * address — not the game realmlist host (those diverge when armory is loopback-only).
+ * address - not the game realmlist host (those diverge when armory is loopback-only).
  */
 export function resolveArmoryBrowseHost(
   effectiveBindAddress: string,

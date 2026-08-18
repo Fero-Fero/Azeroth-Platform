@@ -182,7 +182,7 @@ export const NAVBAR_LINK_KINDS: Record<
   ArmoryNavbarLinkKind,
   { label: string; description: string; singleton?: boolean }
 > = {
-  Home: { label: 'Home', description: 'Site home — label defaults to your stack name', singleton: true },
+  Home: { label: 'Home', description: 'Site home - label defaults to your stack name', singleton: true },
   TopLogs: { label: 'Top Logs', description: 'Leaderboard (shown when logs tracker is installed)', singleton: true },
   Map: { label: 'Map', description: 'World map page', singleton: true },
   Connect: { label: 'Connect', description: 'Launcher download / connect page', singleton: true },

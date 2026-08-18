@@ -108,7 +108,7 @@ function VpcSecurityStatusCard({
                   {check.port != null && (
                     <span className="ml-1 font-mono text-gray-600">:{check.port}</span>
                   )}
-                  {check.message ? ` — ${check.message}` : ''}
+                  {check.message ? ` - ${check.message}` : ''}
                 </span>
               </li>
             ))}
@@ -327,7 +327,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
             </p>
             <p className="mt-2 text-xs text-gray-500">
               <strong>Sync VPC firewall ({hostFirewallLabel})</strong> is optional. It SSHs into your remote
-              Linux server and configures <em>that machine&apos;s</em> host firewall — it does{' '}
+              Linux server and configures <em>that machine&apos;s</em> host firewall - it does{' '}
               <strong>not</strong> change rules on the PC running this manager. If you only use your cloud
               provider&apos;s security group, open the <strong>Cloud SG guide</strong> and skip sync.
             </p>
@@ -648,7 +648,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                     )}
                     <span>
                       {step.name}
-                      {step.message ? ` — ${step.message}` : ''}
+                      {step.message ? ` - ${step.message}` : ''}
                     </span>
                   </li>
                 ))}
@@ -741,7 +741,7 @@ export default function ExternalVpcSecurityPanel({ stack }: { stack: StackDetail
                   {hardenSteps.map((step) => (
                     <li key={step.name}>
                       {step.name}
-                      {step.message ? ` — ${step.message}` : ''}
+                      {step.message ? ` - ${step.message}` : ''}
                     </li>
                   ))}
                 </ul>

@@ -285,7 +285,7 @@ export default function LauncherPage() {
         </div>
       </section>
 
-      {/* App icon — the one setting baked into the single compiled exe (can't vary per stack). */}
+      {/* App icon - the one setting baked into the single compiled exe (can't vary per stack). */}
       <section className="rounded-lg border bg-white p-6 shadow-sm">
         <h2 className="mb-1 text-lg font-semibold text-gray-900">App icon</h2>
         <p className="mb-4 text-sm text-gray-500">
@@ -306,7 +306,7 @@ export default function LauncherPage() {
         </div>
       </section>
 
-      {/* Theme — a single global style (accent + default wallpaper/logo) applied to every server in
+      {/* Theme - a single global style (accent + default wallpaper/logo) applied to every server in
           the launcher. Each stack can override just its own wallpaper/logo on its Launcher tab. */}
       <section className="rounded-lg border bg-white p-6 shadow-sm">
         <h2 className="mb-1 text-lg font-semibold text-gray-900">Theme</h2>
@@ -367,7 +367,7 @@ export default function LauncherPage() {
         <h2 className="mb-1 text-lg font-semibold text-gray-900">Build &amp; distribute</h2>
         <p className="mb-4 text-sm text-gray-500">
           The launcher is compiled once here (on the manager) with your global defaults baked in, then
-          pushed to <strong>every</strong> launcher-visible stack&rsquo;s own client container — just like
+          pushed to <strong>every</strong> launcher-visible stack&rsquo;s own client container - just like
           global news. Each stack then serves the download and self-update itself, and its own
           branding/realmlist/style overrides are applied on top at runtime.
         </p>
@@ -444,7 +444,7 @@ export default function LauncherPage() {
         )}
       </section>
 
-      {/* Propagation check — verify the built launcher actually reached every stack, and re-send to any
+      {/* Propagation check - verify the built launcher actually reached every stack, and re-send to any
           stack that is stale or was offline during the build. */}
       <section className="rounded-lg border bg-white p-6 shadow-sm">
         <h2 className="mb-1 text-lg font-semibold text-gray-900">Propagation</h2>

@@ -60,7 +60,7 @@ public sealed class ManifestSigningKeyProvider : IManifestSigningKeyProvider
         {
             // Fail closed. Previously this fell back to "signing disabled", which silently downgraded the
             // whole client-distribution channel to unauthenticated (launchers skip verification when the
-            // server advertises no public key) — a MITM could then tamper with client files undetected.
+            // server advertises no public key) - a MITM could then tamper with client files undetected.
             // A signing key is security-critical, so refuse to start rather than serve unsigned manifests.
             logger.LogError(ex, "Could not load or create the manifest signing key. Refusing to start with signing disabled.");
             throw new InvalidOperationException(

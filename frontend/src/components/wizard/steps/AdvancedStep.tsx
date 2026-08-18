@@ -132,7 +132,7 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
           deploymentTarget === DeploymentTarget.External
             ? 'Address clients use to reach this realm. Defaults to the remote host for external stacks.'
             : suggestedHost
-              ? `Address clients use to reach this realm. Your detected LAN IP is ${suggestedHost} — use it so other machines on your network can connect (not 127.0.0.1).`
+              ? `Address clients use to reach this realm. Your detected LAN IP is ${suggestedHost} - use it so other machines on your network can connect (not 127.0.0.1).`
               : 'Address clients use to reach this realm (your machine\u2019s LAN IP, not 127.0.0.1).'
         }
       >

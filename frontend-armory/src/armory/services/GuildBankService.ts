@@ -80,7 +80,7 @@ export class GuildBankService {
 
 		if (!GuildBankService.areItemAssetsAvailable(this.armory, this.items)) {
 			return this.disabledView(
-				"Guild bank requires armory item data — upload armory data on the platform.",
+				"Guild bank requires armory item data - upload armory data on the platform.",
 			);
 		}
 

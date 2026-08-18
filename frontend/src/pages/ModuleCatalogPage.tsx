@@ -273,7 +273,7 @@ export default function ModuleCatalogPage() {
                   label={isEditing ? 'Replace package (.zip)' : 'Package (.zip)'}
                   hint={
                     isEditing
-                      ? 'Optional — choose a new .zip to replace the stored files.'
+                      ? 'Optional - choose a new .zip to replace the stored files.'
                       : 'Upload the module source as a .zip. A single wrapping folder (e.g. from “Download ZIP”) is unwrapped automatically.'
                   }
                 >

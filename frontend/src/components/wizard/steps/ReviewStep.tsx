@@ -124,9 +124,9 @@ export function ReviewStep({
         />
         {values.deployment?.target === DeploymentTarget.External && (
           <>
-            <ReviewRow label="Remote Host" value={values.deployment.externalHost || '—'} />
+            <ReviewRow label="Remote Host" value={values.deployment.externalHost || '-'} />
             <ReviewRow label="SSH Port" value={values.deployment.externalSshPort ?? 22} />
-            <ReviewRow label="SSH User" value={values.deployment.externalSshUser || '—'} />
+            <ReviewRow label="SSH User" value={values.deployment.externalSshUser || '-'} />
             <ReviewRow label="Connection Verified" value={values.deployment.connectionVerified ? 'Yes' : 'No'} />
             <ReviewRow
               label="First Time Setup"
@@ -141,7 +141,7 @@ export function ReviewStep({
       </Section>
 
       <Section title="Server">
-        <ReviewRow label="Stack Name" value={values.stackName || '—'} />
+        <ReviewRow label="Stack Name" value={values.stackName || '-'} />
         <ReviewRow
           label="Server Type"
           value={
@@ -155,7 +155,7 @@ export function ReviewStep({
             label="Custom Fork"
             value={
               <span className="break-all font-mono text-xs">
-                {values.customFork?.repositoryUrl || '—'}
+                {values.customFork?.repositoryUrl || '-'}
                 {values.customFork?.branch ? ` @ ${values.customFork.branch}` : ''}
               </span>
             }
@@ -195,17 +195,17 @@ export function ReviewStep({
         <Section title="Email Confirmation">
           {armoryAccounts.emailConfigured ? (
             <>
-              <ReviewRow label="SMTP Host" value={email?.smtpHost || '—'} />
-              <ReviewRow label="SMTP Port" value={email?.smtpPort ?? '—'} />
-              <ReviewRow label="Security" value={email?.smtpSecurity || '—'} />
-              <ReviewRow label="From Address" value={email?.fromAddress || '—'} />
-              <ReviewRow label="From Name" value={email?.fromName || values.advanced.realmName || '—'} />
+              <ReviewRow label="SMTP Host" value={email?.smtpHost || '-'} />
+              <ReviewRow label="SMTP Port" value={email?.smtpPort ?? '-'} />
+              <ReviewRow label="Security" value={email?.smtpSecurity || '-'} />
+              <ReviewRow label="From Address" value={email?.fromAddress || '-'} />
+              <ReviewRow label="From Name" value={email?.fromName || values.advanced.realmName || '-'} />
             </>
           ) : (
             <div className="flex items-start gap-2 border-b border-gray-100 py-3 text-sm text-amber-800">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <p>
-                Email confirmation is enabled but not configured — armory registration is disabled until
+                Email confirmation is enabled but not configured - armory registration is disabled until
                 email is set up.
               </p>
             </div>

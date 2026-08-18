@@ -46,7 +46,7 @@ public class HealthController : ControllerBase
         var overallStatus = databaseHealthy && dockerHealthy && gitHealthy ? "healthy" : "degraded";
 
         // Anonymous callers (this endpoint is public for load balancers/uptime checks) get only the
-        // overall status — the per-dependency breakdown is internal detail useful to an attacker for
+        // overall status - the per-dependency breakdown is internal detail useful to an attacker for
         // fingerprinting, so it is limited to authenticated admins.
         if (User.Identity?.IsAuthenticated != true)
         {

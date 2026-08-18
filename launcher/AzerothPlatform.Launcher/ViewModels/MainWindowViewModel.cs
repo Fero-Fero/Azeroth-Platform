@@ -25,7 +25,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     // The launcher is stack-hosted: it talks only to each stack's own container (/portal + /manifest +
     // /files + /login + /launcher) and reconciles the replicated registry across all known stacks. The
-    // manager is never in the player path — it only builds+pushes the registry to the stacks.
+    // manager is never in the player path - it only builds+pushes the registry to the stacks.
 
     // The baked manifest signing pubkey used to verify client manifests that arrive over the stack's
     // plain-HTTP channel (trust no longer depends on a manager TLS channel).
@@ -421,7 +421,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Stack-portal reconciliation: query <c>/portal</c> from every known stack, merge the replicated
-    /// registry (newest revision per stack), health-ping, and populate the profile list — all without
+    /// registry (newest revision per stack), health-ping, and populate the profile list - all without
     /// the manager. Self-heals the known-servers list and picks the newest launcher for self-update.
     /// </summary>
     private async Task LoadProfilesAsync()
@@ -857,7 +857,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Loads the selected profile's branding. The wallpaper/logo are hosted by the stack's own client
-    /// container (advertised as absolute URLs during reconciliation) and fetched directly — the manager
+    /// container (advertised as absolute URLs during reconciliation) and fetched directly - the manager
     /// is not in the player path. Missing/unreachable assets simply leave the launcher unbranded.
     /// </summary>
     // Monotonic token for branding/news loads. Fetches post their results asynchronously, so a slow or
@@ -1445,7 +1445,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
     /// <summary>
     /// Re-fetches the selected server's <c>/portal</c> and refreshes this profile's branding + news URLs,
     /// then reloads the wallpaper/logo and news feed. This lets a manual "Check for updates" pick up news
-    /// (or branding) published after the launcher started — including a feed that didn't yet exist at
+    /// (or branding) published after the launcher started - including a feed that didn't yet exist at
     /// launch (when <c>NewsUrl</c> would have been blank). Best-effort: current values are kept on failure.
     /// </summary>
     private async Task RefreshSelectedProfileFeedsAsync()
@@ -1481,7 +1481,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
 
     /// <summary>
     /// Clears the local hash cache and runs a full verify. Because the cache (which trusts a file's size
-    /// + mtime) is discarded, every file is re-hashed from disk and checked against the server — the
+    /// + mtime) is discarded, every file is re-hashed from disk and checked against the server - the
     /// strongest way to detect and repair corrupt/broken files. Sync markers (last manifest/overlay
     /// version) are kept so a clean verify does not falsely demand an update.
     /// </summary>
@@ -1496,7 +1496,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
         _state.HashCache.Clear();
         _stateStore.Save(_state);
 
-        StatusText = "Cache cleared — re-verifying all files...";
+        StatusText = "Cache cleared - re-verifying all files...";
         DetailText = string.Empty;
         await CheckForUpdatesAsync(fullVerify: true, pruneUnknown: true);
     }
@@ -1790,7 +1790,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
             }
             else if (baseUpToDate && pendingDownloads == 0 && !notActive && IsInstalled)
             {
-                // Profile switch or overlay bookkeeping only — no files to download.
+                // Profile switch or overlay bookkeeping only - no files to download.
                 NeedsUpdate = true;
                 ResetProgress();
                 StatusText = notActive ? "Update available" : "Server content changes are pending.";
@@ -2195,7 +2195,7 @@ h1.title { color: #fff; font-size: 1.9em; margin: 0 0 4px; }
             installDir, configRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
         // First install (Config.wtf missing): seed the admin's template once so its defaults apply.
-        // Thereafter Config.wtf is player-owned — only the realmlist line is ever patched below.
+        // Thereafter Config.wtf is player-owned - only the realmlist line is ever patched below.
         if (configWtf is not null && !File.Exists(configPath))
         {
             await SettingsWriter.MergeConfigWtfAsync(

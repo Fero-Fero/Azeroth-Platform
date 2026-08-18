@@ -131,7 +131,7 @@ export default function ExternalReconnectPanel({ stack }: ExternalReconnectPanel
                   onChange={setPrivateKey}
                   hint={
                     canSaveWithoutNewKey
-                      ? 'Optional when only the host/IP changed — leave blank to keep the stored key.'
+                      ? 'Optional when only the host/IP changed - leave blank to keep the stored key.'
                       : 'Required to reconnect. Paste or select a key file from this machine.'
                   }
                 />

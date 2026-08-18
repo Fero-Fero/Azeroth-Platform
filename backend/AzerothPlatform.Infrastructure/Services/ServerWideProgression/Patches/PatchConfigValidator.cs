@@ -104,7 +104,7 @@ internal static class PatchConfigValidator
                     if (string.IsNullOrWhiteSpace(content))
                     {
                         check.Error = "Server config is empty.";
-                        errors.Add($"{patchKey} {configSource}: {relativeConf} is empty — key '{key}' unavailable.");
+                        errors.Add($"{patchKey} {configSource}: {relativeConf} is empty - key '{key}' unavailable.");
                     }
                     else if (!ServerConfigValueEditor.TryGetValue(content, key, out var value))
                     {

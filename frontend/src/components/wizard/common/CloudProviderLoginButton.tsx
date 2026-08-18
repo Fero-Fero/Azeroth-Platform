@@ -112,7 +112,7 @@ export function CloudProviderLoginButton({
         status?.loginMode === CloudLoginMode.AssumedRole
           ? 'Failed to start AWS account connect.'
           : status?.loginMode === CloudLoginMode.GuidedToken || provider === CloudProvider.Hetzner
-            ? 'Connection failed — check token.'
+            ? 'Connection failed - check token.'
             : 'Failed to start cloud sign-in.'
       ))
     },

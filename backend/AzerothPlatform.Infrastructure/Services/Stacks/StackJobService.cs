@@ -38,7 +38,7 @@ public sealed class StackJobService : IStackJobService
             return null;
         }
 
-        // Apply-public-host is a one-shot UI progress job — do not reattach after it finishes.
+        // Apply-public-host is a one-shot UI progress job - do not reattach after it finishes.
         if (status.Action == StackJobAction.ApplyPublicHost
             && status.Phase is StackJobPhase.Completed or StackJobPhase.Failed)
         {
