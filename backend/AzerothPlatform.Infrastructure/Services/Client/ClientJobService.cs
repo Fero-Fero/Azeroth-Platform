@@ -32,6 +32,17 @@ public sealed class ClientJobService : IClientJobService
     public ClientJobStatusDto? GetStatus(string stackId) =>
         Jobs.TryGetValue(stackId, out var status) ? status : null;
 
+    public void ReportProgress(string stackId, string message)
+    {
+        if (!Jobs.TryGetValue(stackId, out var status) || !status.IsRunning)
+        {
+            return;
+        }
+
+        status.Message = message;
+        Publish(status);
+    }
+
     public ClientJobStatusDto Enqueue(string stackId, ClientJobAction action)
     {
         if (Jobs.TryGetValue(stackId, out var existing) && existing.IsRunning)
@@ -68,6 +79,7 @@ public sealed class ClientJobService : IClientJobService
                 ClientJobAction.Stop => await stacks.StopClientAsync(stackId),
                 ClientJobAction.Restart => await stacks.RestartClientAsync(stackId),
                 ClientJobAction.Recreate => await stacks.StartClientAsync(stackId, forceRecreate: true),
+                ClientJobAction.DownloadBase => await DownloadBaseAsync(scope, stackId),
                 _ => false,
             };
 
@@ -106,6 +118,13 @@ public sealed class ClientJobService : IClientJobService
         Publish(status);
     }
 
+    private static async Task<bool> DownloadBaseAsync(IServiceScope scope, string stackId)
+    {
+        var client = scope.ServiceProvider.GetRequiredService<IClientService>();
+        await client.DownloadBaseClientAsync(stackId, CancellationToken.None);
+        return true;
+    }
+
     private void Publish(ClientJobStatusDto status) => _ = _publisher.PublishStatusAsync(status);
 
     private static ClientJobPhase InProgressPhase(ClientJobAction action) => action switch
@@ -114,6 +133,7 @@ public sealed class ClientJobService : IClientJobService
         ClientJobAction.Stop => ClientJobPhase.Stopping,
         ClientJobAction.Restart => ClientJobPhase.Restarting,
         ClientJobAction.Recreate => ClientJobPhase.Recreating,
+        ClientJobAction.DownloadBase => ClientJobPhase.Downloading,
         _ => ClientJobPhase.Starting,
     };
 
@@ -123,6 +143,7 @@ public sealed class ClientJobService : IClientJobService
         ClientJobAction.Stop => "Stopping the client file server…",
         ClientJobAction.Restart => "Restarting the client file server…",
         ClientJobAction.Recreate => "Rebuilding the client image and restarting…",
+        ClientJobAction.DownloadBase => "Downloading the base client…",
         _ => "Working…",
     };
 
@@ -132,6 +153,7 @@ public sealed class ClientJobService : IClientJobService
         ClientJobAction.Stop => "Client file server stopped.",
         ClientJobAction.Restart => "Client file server restarted.",
         ClientJobAction.Recreate => "Client rebuilt and restarted.",
+        ClientJobAction.DownloadBase => "Base client downloaded and installed.",
         _ => "Done.",
     };
 }

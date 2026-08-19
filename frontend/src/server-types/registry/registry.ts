@@ -1,5 +1,6 @@
 import {
   customServerType,
+  expressServerType,
   individualProgressionServerType,
   npcBotsServerType,
   playerbotsServerType,
@@ -15,6 +16,7 @@ export const serverTypeDefinitions: ServerTypeDefinition[] = [
   individualProgressionServerType,
   npcBotsServerType,
   customServerType,
+  expressServerType,
 ]
 
 const byId = new Map(serverTypeDefinitions.map((definition) => [definition.id, definition]))

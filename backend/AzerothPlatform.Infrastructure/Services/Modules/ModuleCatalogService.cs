@@ -114,10 +114,11 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
         {
             Id = "black-market-auction-house",
             Name = "Black Market Auction House",
-            Description = "A faithful backport of the Mists of Pandaria Black Market Auction House assets and functionality to AzerothCore 3.3.5 using the Eluna Lua engine.",
+            Description = "A faithful backport of the Mists of Pandaria Black Market Auction House to AzerothCore 3.3.5 using the Eluna Lua engine. Extra-data install copies Server Files/lua_scripts onto the stack and Client Files/AddOns into the client. Requires ALE.",
             Repository = "https://github.com/Youpeoples/Black-Market-Auction-House.git",
             Branch = "main",
-            IsBuiltIn = true
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-ale"]
         },
         new()
         {
@@ -214,7 +215,7 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
             Id = "mod-dungeon-clear",
             Name = "Dungeon Clear",
             Description = "Autonomous tank-led 5-man dungeon clears for playerbots - the tank drives the party boss to boss, clears trash, and handles scripted events. Requires mod-playerbots. Pairs with the DungeonClear client addon for in-game control.",
-            Repository = "https://github.com/jrad7/mod-dungeon-clear.git",
+            Repository = "https://github.com/TopHatMan/mod-dungeon-clear.git",
             Branch = "master",
             IsBuiltIn = true
         },
@@ -227,6 +228,178 @@ public sealed partial class ModuleCatalogService : IModuleCatalogService
             Branch = "main",
             IsBuiltIn = true,
             RequiredModuleIds = ["mod-dungeon-clear"]
+        },
+        new()
+        {
+            Id = "mod-rotation",
+            Name = "Rotation",
+            Description = "One-button rotation for AzerothCore 3.3.5a (Playerbot fork compatible): one trigger spell, 10 classes, 30 specializations, Wowhead WotLK Classic priorities. No SQL; optional cosmetic MPQ is not installed.",
+            Repository = "https://github.com/Maddnes95/mod-rotation",
+            Branch = "main",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "mod-pet-battle",
+            Name = "Pet Battle System",
+            Description = "Pet battles against world creatures and other players. Extra-data install copies the stock Interface/AddOns/PetBattleUI addon into the client.",
+            Repository = "https://github.com/Faris-Kai/PetBattleSystem-AzerothCore",
+            Branch = "main",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "aio",
+            Name = "AIO",
+            Description = "Rochet2 Addon Input/Output: server Lua for addon messaging (AIO_Server is copied into lua_scripts). The matching client addon already ships with the platform client. Requires ALE.",
+            Repository = "https://github.com/Rochet2/AIO",
+            Branch = "master",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-ale"]
+        },
+        new()
+        {
+            Id = "mod-guild-levels",
+            Name = "Guild Levels",
+            Description = "Guild experience, 25 levels, and Cataclysm-inspired perks. Extra-data install copies client_addon/GuildLevels into the client and lua/extensions/guild_levels into lua_scripts. Requires AIO (auto-selected).",
+            Repository = "https://github.com/Old-Man-Warcraft/mod-guild-levels",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["aio"]
+        },
+        new()
+        {
+            Id = "mod-dynamic-loot-rates",
+            Name = "Dynamic Loot Rates",
+            Description = "Separate group/reference loot rates for dungeons and raids. Depends on AzerothCore PR #17456 being present on the core.",
+            Repository = "https://github.com/hallgaeuer/mod-dynamic-loot-rates",
+            Branch = "master",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "mod-ip-challengesystem",
+            Name = "IP Challenge System",
+            Description = "Tiered opt-in challenges (Hardcore, SSF, Solo, Ascetic) for Individual Progression servers. Extra-data install applies the characters SQL under sql/ (not data/sql/). Requires Individual Progression.",
+            Repository = "https://github.com/AzoghMartins/mod-ip-challengesystem",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-individual-progression"]
+        },
+        new()
+        {
+            Id = "mod-character-services",
+            Name = "Character Services",
+            Description = "NPC for name, appearance, race, and faction changes, plus purchasing Individual Progression tiers. Spawn with .npc add 390011 after install. This fork requires Individual Progression.",
+            Repository = "https://github.com/Badgermilk0/mod-character-services",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-individual-progression"]
+        },
+        new()
+        {
+            Id = "mod-quest-loot-party",
+            Name = "Quest Loot Party",
+            Description = "When one party member loots a quest item, every eligible member receives it. Depends on AzerothCore PR #16509 being present on the core.",
+            Repository = "https://github.com/pangolp/mod-quest-loot-party",
+            Branch = "master",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "mod-playerbots-artisans",
+            Name = "Playerbots Artisans",
+            Description = "Crafter playerbots advertise real learned recipes in Trade chat. Requires mod-playerbots.",
+            Repository = "https://github.com/TopHatMan/mod-playerbots-artisans",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-playerbots"]
+        },
+        new()
+        {
+            Id = "mod-world-events",
+            Name = "World Events",
+            Description = "Records boss kills, loot, level-ups, and achievements into one queryable characters table. Independent of other modules. Disabled by default until WorldEvents.Enable is set to 1.",
+            Repository = "https://github.com/robbyczgw-cla/mod-world-events",
+            Branch = "main",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "mod-optimal-bot-raid",
+            Name = "Optimal Bot Raid",
+            Description = "Assembles a mathematically optimized playerbot raid (buff coverage, GearScore, role quotas) with .botraid assemble. Requires mod-playerbots.",
+            Repository = "https://github.com/barnaclebarry/mod-optimal-bot-raid",
+            Branch = "master",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-playerbots"]
+        },
+        new()
+        {
+            Id = "mod-world-buff-bots",
+            Name = "World Buff Bots",
+            Description = "Simulates classic world buff turn-ins (Warchief's Blessing, Rallying Cry of the Dragonslayer, Spirit of Zandalar) on independent randomized timers, announced and applied by online playerbots. Requires mod-playerbots.",
+            Repository = "https://github.com/Rockhopper1776/mod-world-buff-bots",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-playerbots"]
+        },
+        new()
+        {
+            Id = "mod-ollama-bot-buddy",
+            Name = "Ollama Bot Buddy (Simple)",
+            Description = "Experimental LLM-driven playerbot control via the Ollama API (questing, grinding, chat overrides). Requires mod-playerbots. Cannot be compiled together with Ollama Bot Buddy Advanced. Optional BuddyBotUI debug addon appears in Addons when this module is selected.",
+            Repository = "https://github.com/DustinHendrickson/mod-ollama-bot-buddy",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-playerbots"]
+        },
+        new()
+        {
+            Id = "mod-ollama-bot-buddy-advanced",
+            Name = "Ollama Bot Buddy (Advanced)",
+            Description = "Fero-Fero fork with bot memory and a heavier LLM loop. Requires mod-playerbots. Cannot be compiled together with Ollama Bot Buddy Simple. Optional BuddyBotUI debug addon appears in Addons when this module is selected.",
+            Repository = "https://github.com/Fero-Fero/mod-ollama-bot-buddy",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-playerbots"]
+        },
+        new()
+        {
+            Id = "clancentaur",
+            Name = "Clan Centaur",
+            Description = "Gelkis and Magram centaur reputation, quartermasters, and custom rewards in Desolace. Extra-data install imports DBClientFiles/Faction.csv and applies the world SQL under data/sql/world/base (not AzerothCore data/sql/db-world).",
+            Repository = "https://github.com/araxiaonline/ClanCentaur",
+            Branch = "main",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "delves",
+            Name = "Delves",
+            Description = "Custom solo and group delve maps for AzerothCore. Extra-data install imports DBC_CSV/DBFilesClient, packs MPQ/ into overlay patch-E.MPQ, seeds Server Map Files (maps/mmaps/vmaps), and copies lua_scripts. World SQL under data/sql/db-world is imported the normal way. Requires ALE.",
+            Repository = "https://github.com/araxiaonline/Delves",
+            Branch = "main",
+            IsBuiltIn = true,
+            RequiredModuleIds = ["mod-ale"]
+        },
+        new()
+        {
+            Id = "mod-profession-experience",
+            Name = "Profession Experience",
+            Description = "Awards experience when crafting or gathering with professions. Enable professions and tune XP amounts in the module conf.",
+            Repository = "https://github.com/Tereneckla/mod-profession-experience",
+            Branch = "main",
+            IsBuiltIn = true
+        },
+        new()
+        {
+            Id = "mod-missing-objectives",
+            Name = "Missing Objectives",
+            Description = "Adds quest_poi and quest_poi_points for classic dungeon and raid objectives that are not in sniffs. World SQL under data/sql/db-world is imported the normal way. Pair with a client map patch to see the dungeon maps.",
+            Repository = "https://github.com/forumcorex/mod-missing-objectives",
+            Branch = "master",
+            IsBuiltIn = true
         }
     ];
 

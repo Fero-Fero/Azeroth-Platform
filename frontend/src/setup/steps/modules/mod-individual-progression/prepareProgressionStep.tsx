@@ -43,6 +43,7 @@ export function prepareProgressionStep(): SetupStep {
     defaultExpanded: true,
     applies: (ctx) =>
       hasIndividualProgressionModule(ctx.stack) &&
+      ctx.status.moduleExtraData.ipContentMode !== 'Standard' &&
       !ctx.status.progress.isSkipped(STEP_IDS.prepareProgression),
     isComplete: (ctx) =>
       isStepDoneOrSkipped(STEP_IDS.prepareProgression, isIpProgressionReady(ctx.status), ctx.status.progress),

@@ -123,11 +123,6 @@ public sealed class LauncherBuildService : ILauncherBuildService
 
         var meta = ReadMetadata()
             ?? throw new InvalidOperationException("No launcher build is available yet. Build the launcher first.");
-        var finalExe = Path.Combine(_distPath, _options.ExecutableName);
-        if (!File.Exists(finalExe))
-        {
-            throw new InvalidOperationException("The built launcher executable is missing. Build the launcher again.");
-        }
 
         ManagedStackEntity stack;
         MigrationOptions migrationOptions;
@@ -144,8 +139,20 @@ public sealed class LauncherBuildService : ILauncherBuildService
             throw new InvalidOperationException("This stack has no client container to serve the launcher.");
         }
 
+        var flavorDir = Path.Combine(_distPath, stack.IncludeArmory ? "with-armory" : "no-armory");
+        var flavorExe = Path.Combine(flavorDir, _options.ExecutableName);
+        if (!File.Exists(flavorExe))
+        {
+            flavorExe = Path.Combine(_distPath, _options.ExecutableName);
+        }
+        if (!File.Exists(flavorExe))
+        {
+            throw new InvalidOperationException("The built launcher executable is missing. Build the launcher again.");
+        }
+
+        var flavorMeta = ReadMetadataFrom(flavorDir) ?? meta;
         await StoreOnStackAsync(
-            stack, finalExe, meta.Version, meta.SizeBytes, meta.Sha256 ?? string.Empty, meta.BuiltAt, cancellationToken);
+            stack, flavorExe, flavorMeta.Version, flavorMeta.SizeBytes, flavorMeta.Sha256 ?? string.Empty, flavorMeta.BuiltAt, cancellationToken);
 
         var portalUrl = PortalUrlFor(stack, migrationOptions);
         var deployed = await TryReadStackVersionAsync(stack, migrationOptions, cancellationToken);
@@ -273,38 +280,33 @@ public sealed class LauncherBuildService : ILauncherBuildService
             WriteBakedSettings(srcDir, config, version, seedPortalUrl, signingPublicKey);
             ApplyIcon(srcDir, iconPath);
 
-            var publishDir = Path.Combine(_distPath, "publish");
-            if (Directory.Exists(publishDir)) { Directory.Delete(publishDir, recursive: true); }
-            Directory.CreateDirectory(publishDir);
-
-            SetPhase(LauncherBuildPhase.Publishing, "Compiling launcher locally (dotnet publish win-x64)...");
-            await PublishAsync(srcDir, publishDir, cancellationToken);
-
-            SetPhase(LauncherBuildPhase.Packaging, "Packaging launcher executable...");
-            var producedExe = Path.Combine(publishDir, _options.ExecutableName);
-            if (!File.Exists(producedExe))
-            {
-                // Fall back to any single .exe the publish produced.
-                producedExe = Directory.EnumerateFiles(publishDir, "*.exe").FirstOrDefault()
-                    ?? throw new InvalidOperationException("Publish did not produce an .exe.");
-            }
+            SetPhase(LauncherBuildPhase.Publishing, "Compiling launcher flavors locally (with-armory and no-armory)...");
+            var withArmoryDir = Path.Combine(_distPath, "with-armory");
+            var noArmoryDir = Path.Combine(_distPath, "no-armory");
+            var withArmoryExe = await PublishFlavorAsync(srcDir, withArmoryDir, enableArmory: true, cancellationToken);
+            var noArmoryExe = await PublishFlavorAsync(srcDir, noArmoryDir, enableArmory: false, cancellationToken);
 
             var finalExe = Path.Combine(_distPath, _options.ExecutableName);
-            File.Copy(producedExe, finalExe, overwrite: true);
+            File.Copy(withArmoryExe, finalExe, overwrite: true);
 
             var builtAt = DateTime.UtcNow;
             var size = new FileInfo(finalExe).Length;
             var sha256 = await ComputeSha256Async(finalExe, cancellationToken);
+            var metadataJson = JsonSerializer.Serialize(
+                new BuildMetadata { Version = version, BuiltAt = builtAt, SizeBytes = size, Sha256 = sha256 },
+                JsonOptions);
+            await File.WriteAllTextAsync(Path.Combine(_distPath, "build.json"), metadataJson, cancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(withArmoryDir, "build.json"), metadataJson, cancellationToken);
+            var noArmorySize = new FileInfo(noArmoryExe).Length;
+            var noArmorySha = await ComputeSha256Async(noArmoryExe, cancellationToken);
             await File.WriteAllTextAsync(
-                Path.Combine(_distPath, "build.json"),
+                Path.Combine(noArmoryDir, "build.json"),
                 JsonSerializer.Serialize(
-                    new BuildMetadata { Version = version, BuiltAt = builtAt, SizeBytes = size, Sha256 = sha256 },
+                    new BuildMetadata { Version = version, BuiltAt = builtAt, SizeBytes = noArmorySize, Sha256 = noArmorySha },
                     JsonOptions),
                 cancellationToken);
 
-            try { Directory.Delete(publishDir, recursive: true); } catch { /* best effort cleanup */ }
-
-            AddLog($"Launcher built: {finalExe} ({size} bytes)");
+            AddLog($"Launcher built: {finalExe} ({size} bytes) plus no-armory flavor.");
 
             // Broadcast the built exe + a build.json to every target stack's launcher-dist volume (like
             // news distribution) so each stack's own client container serves it at /launcher/latest +
@@ -318,7 +320,10 @@ public sealed class LauncherBuildService : ILauncherBuildService
                 {
                     try
                     {
-                        await StoreOnStackAsync(stack, finalExe, version, size, sha256, builtAt, cancellationToken);
+                        var flavorExe = stack.IncludeArmory ? withArmoryExe : noArmoryExe;
+                        var flavorSize = stack.IncludeArmory ? size : noArmorySize;
+                        var flavorSha = stack.IncludeArmory ? sha256 : noArmorySha;
+                        await StoreOnStackAsync(stack, flavorExe, version, flavorSize, flavorSha, builtAt, cancellationToken);
                         pushed++;
                     }
                     catch (Exception ex)
@@ -751,20 +756,48 @@ public sealed class LauncherBuildService : ILauncherBuildService
     /// artifacts back to the local publish dir. This avoids any host bind mount so it works with the
     /// manager's data living in a named volume.
     /// </summary>
-    private async Task PublishAsync(string srcDir, string publishDir, CancellationToken cancellationToken)
+    private async Task<string> PublishFlavorAsync(
+        string srcDir,
+        string destDir,
+        bool enableArmory,
+        CancellationToken cancellationToken)
+    {
+        var publishDir = Path.Combine(_distPath, enableArmory ? "publish-with-armory" : "publish-no-armory");
+        if (Directory.Exists(publishDir)) { Directory.Delete(publishDir, recursive: true); }
+        Directory.CreateDirectory(publishDir);
+        await PublishAsync(srcDir, publishDir, enableArmory, cancellationToken);
+
+        var producedExe = Path.Combine(publishDir, _options.ExecutableName);
+        if (!File.Exists(producedExe))
+        {
+            producedExe = Directory.EnumerateFiles(publishDir, "*.exe").FirstOrDefault()
+                ?? throw new InvalidOperationException(
+                    $"Publish did not produce an .exe for the {(enableArmory ? "with-armory" : "no-armory")} flavor.");
+        }
+
+        if (Directory.Exists(destDir)) { Directory.Delete(destDir, recursive: true); }
+        Directory.CreateDirectory(destDir);
+        var destExe = Path.Combine(destDir, _options.ExecutableName);
+        File.Copy(producedExe, destExe, overwrite: true);
+        try { Directory.Delete(publishDir, recursive: true); } catch { /* best effort cleanup */ }
+        return destExe;
+    }
+
+    private async Task PublishAsync(string srcDir, string publishDir, bool enableArmory, CancellationToken cancellationToken)
     {
         const string srcVolume = "acore-launcher-src";
         const string outVolume = "acore-launcher-out";
 
-        AddLog("Seeding launcher source to the local engine...");
+        AddLog($"Seeding launcher source to the local engine ({(enableArmory ? "with-armory" : "no-armory")})...");
         // Reset both volumes so a previous build's artifacts/source can't leak into this one.
         await _remoteEngine.RemoveLocalVolumeAsync(outVolume, cancellationToken);
         await _remoteEngine.RemoveLocalVolumeAsync(srcVolume, cancellationToken);
         await _remoteEngine.SeedLocalVolumeAsync(srcVolume, srcDir, cancellationToken);
 
+        var armoryProperty = enableArmory ? "true" : "false";
         var innerCommand =
             $"cd /src && dotnet publish {_options.ProjectRelativePath} -c Release -r win-x64 " +
-            "-p:PublishSingleFile=true --self-contained true -o /out";
+            $"-p:PublishSingleFile=true -p:AZP_ENABLE_ARMORY={armoryProperty} --self-contained true -o /out";
         var arguments =
             $"run --rm -v {srcVolume}:/src -v {outVolume}:/out {_options.SdkImage} " +
             $"sh -c \"{innerCommand}\"";
@@ -907,9 +940,11 @@ public sealed class LauncherBuildService : ILauncherBuildService
         public bool DownloadAvailable { get; set; }
     }
 
-    private BuildMetadata? ReadMetadata()
+    private BuildMetadata? ReadMetadata() => ReadMetadataFrom(_distPath);
+
+    private BuildMetadata? ReadMetadataFrom(string directory)
     {
-        var metaPath = Path.Combine(_distPath, "build.json");
+        var metaPath = Path.Combine(directory, "build.json");
         if (!File.Exists(metaPath)) { return null; }
         try
         {

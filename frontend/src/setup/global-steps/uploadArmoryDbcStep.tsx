@@ -28,7 +28,9 @@ export function uploadArmoryDbcStep(): SetupStep {
     level: 'warning',
     title: 'Armory data not uploaded',
     applies: (ctx) =>
-      armoryDbcUploadApplies(ctx.status) && !ctx.status.progress.isSkipped(STEP_IDS.uploadArmoryDbc),
+      ctx.stack.configuration.includeArmory !== false &&
+      armoryDbcUploadApplies(ctx.status) &&
+      !ctx.status.progress.isSkipped(STEP_IDS.uploadArmoryDbc),
     isComplete: (ctx) => isArmoryDbcUploadComplete(ctx.status, ctx.status.progress),
     summary: () => 'The 3D model-viewer dataset is missing, so the armory viewer is disabled.',
     Component: () => <ArmoryDetails />,

@@ -1,8 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Hammer, Loader2, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  useModuleExtraDataChoices,
+  useSaveModuleExtraDataChoices,
+} from '@/hooks/useModuleExtraData'
 import { buildApi } from '@/services/api'
-import { BuildPhase, StackStatus, type StackDetailsDto } from '@/types/stack.types'
+import { MODULE_IDS } from '@/setup/constants'
+import {
+  ModuleContentChoicesForm,
+  buildApplyRequest,
+  defaultSelectionsByModule,
+} from '@/setup/steps/modules/moduleContentChoices'
+import type { IpContentMode, ModuleInstallSelections } from '@/types/module-extra-data.types'
+import { BuildPhase, ServerType, StackStatus, type StackDetailsDto } from '@/types/stack.types'
 
 interface InitialBuildRequiredPanelProps {
   stack: StackDetailsDto
@@ -22,6 +34,35 @@ export default function InitialBuildRequiredPanel({
   isDeleting,
 }: InitialBuildRequiredPanelProps) {
   const navigate = useNavigate()
+  const isExpress = stack.configuration.serverType === ServerType.Express
+  const hasIp = !isExpress && (stack.configuration.moduleIds?.includes(MODULE_IDS.individualProgression) ?? false)
+  const choicesQuery = useModuleExtraDataChoices(stackId, stack.status !== StackStatus.Building)
+  const saveChoices = useSaveModuleExtraDataChoices(stackId)
+  const modules = choicesQuery.data?.modules ?? []
+  const saved = choicesQuery.data?.saved
+
+  const [ipContentMode, setIpContentMode] = useState<IpContentMode>('Unset')
+  const [byModule, setByModule] = useState<Record<string, ModuleInstallSelections>>({})
+
+  const defaultByModule = useMemo(() => defaultSelectionsByModule(modules), [modules])
+
+  useEffect(() => {
+    if (!choicesQuery.data) return
+    setIpContentMode(
+      isExpress
+        ? 'ServerWideProgression'
+        : saved?.ipContentMode && saved.ipContentMode !== 'Unset'
+          ? saved.ipContentMode
+          : hasIp
+            ? 'Standard'
+            : 'Unset',
+    )
+    setByModule(
+      Object.keys(saved?.selectionsByModuleId ?? {}).length > 0
+        ? saved!.selectionsByModuleId
+        : defaultByModule,
+    )
+  }, [choicesQuery.data, defaultByModule, hasIp, isExpress, saved])
 
   const buildStatusQuery = useQuery({
     queryKey: ['build-status', stackId],
@@ -37,6 +78,11 @@ export default function InitialBuildRequiredPanel({
   const errorMessage =
     buildStatus?.errorMessage ??
     (buildStatusQuery.isError ? 'No build record found - the initial build may not have started.' : null)
+
+  const persistChoices = () =>
+    saveChoices.mutate(
+      buildApplyRequest(hasIp && ipContentMode === 'Unset' ? 'Standard' : ipContentMode, byModule),
+    )
 
   if (stack.status === StackStatus.Building) {
     return (
@@ -94,7 +140,7 @@ export default function InitialBuildRequiredPanel({
                 <p className={`mt-1 text-sm ${buildFailed ? 'text-red-800' : 'text-amber-800'}`}>
                   {buildFailed
                     ? 'The first build did not finish successfully. Retry the build before using this stack.'
-                    : 'This stack has not completed its first build yet. Start or retry the build to finish setup.'}
+                    : 'This stack has not completed its first build yet. Choose extra module content below, then start the build.'}
                 </p>
                 {errorMessage && (
                   <p className="mt-2 rounded-md bg-white/70 px-3 py-2 font-mono text-xs text-gray-800">
@@ -104,6 +150,36 @@ export default function InitialBuildRequiredPanel({
               </div>
             </div>
           </div>
+
+          {(hasIp || modules.length > 0) && (
+            <div className="space-y-3 rounded-lg border border-gray-200 p-4">
+              <h3 className="text-sm font-medium text-gray-800">Module extra content</h3>
+              <p className="text-xs text-gray-600">
+                These choices are saved now and prepared after the build. They are applied later from Setup
+                module content, after SOAP.
+              </p>
+              {choicesQuery.isLoading ? (
+                <p className="text-sm text-gray-500">Loading extra-data options…</p>
+              ) : (
+                <ModuleContentChoicesForm
+                  modules={modules}
+                  hasIpModule={hasIp}
+                  ipContentMode={ipContentMode === 'Unset' && hasIp ? 'Standard' : ipContentMode}
+                  onIpContentModeChange={setIpContentMode}
+                  byModule={Object.keys(byModule).length > 0 ? byModule : defaultByModule}
+                  onChange={setByModule}
+                />
+              )}
+              <button
+                type="button"
+                onClick={persistChoices}
+                disabled={saveChoices.isPending || choicesQuery.isLoading}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {saveChoices.isPending ? 'Saving…' : saveChoices.isSuccess ? 'Choices saved' : 'Save choices'}
+              </button>
+            </div>
+          )}
 
           {buildStatus?.recentLogs && buildStatus.recentLogs.length > 0 && (
             <div>
@@ -119,7 +195,10 @@ export default function InitialBuildRequiredPanel({
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={onRetryBuild}
+              onClick={() => {
+                persistChoices()
+                onRetryBuild()
+              }}
               disabled={isRetrying || isDeleting}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >

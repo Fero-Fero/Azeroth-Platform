@@ -24,6 +24,14 @@ describe('uploadStatus', () => {
     expect(armoryDbcUploadApplies(createMockStatus({ armory: { dbcUploaded: true, containerRunning: true, loading: false } }))).toBe(false)
   })
 
+  it('does not apply armory upload when the stack excluded the armory', () => {
+    const ctxApplies = (includeArmory: boolean) =>
+      includeArmory !== false &&
+      armoryDbcUploadApplies(createMockStatus({ armory: { dbcUploaded: false, containerRunning: true, loading: false } }))
+    expect(ctxApplies(true)).toBe(true)
+    expect(ctxApplies(false)).toBe(false)
+  })
+
   it('treats skipped armory upload as complete', () => {
     const progress = createMockProgress()
     const status = createMockStatus({ progress, armory: { dbcUploaded: false, containerRunning: true, loading: false } })

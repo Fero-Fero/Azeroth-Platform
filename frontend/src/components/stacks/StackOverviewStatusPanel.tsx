@@ -146,6 +146,7 @@ export default function StackOverviewStatusPanel({
   })
 
   const emailNeedsSetup =
+    stack.configuration.includeArmory !== false &&
     stack.configuration.armoryAccounts?.useEmailConfirmation &&
     !stack.configuration.armoryAccounts.emailConfigured
 

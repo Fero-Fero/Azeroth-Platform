@@ -133,7 +133,7 @@ public sealed class ArmoryImageService : IArmoryImageService
         var stack = await db.ManagedStacks
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
-        if (stack is null || !stack.ArmoryEnabled)
+        if (stack is null || !stack.IncludeArmory || !stack.ArmoryEnabled)
         {
             return;
         }

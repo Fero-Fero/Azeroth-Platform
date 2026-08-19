@@ -12,6 +12,21 @@ export type SetupStepContext = {
 
 export type SetupStepStatus = {
   soapInitialized: boolean
+  dbcStore: {
+    ready: boolean
+    inProgress: boolean
+    loading: boolean
+    tag: string | null
+  }
+  moduleExtraData: {
+    modules: import('@/types/module-extra-data.types').ModuleInstallChoicesDto[]
+    loading: boolean
+    jobPhase: import('@/types/module-extra-data.types').ModuleInstallJobPhase | null
+    ipContentMode: import('@/types/module-extra-data.types').IpContentMode
+    prepared: boolean
+    deposited: boolean
+    hasPendingDeposit: boolean
+  }
   client: {
     dataUploaded: boolean
     containerRunning: boolean

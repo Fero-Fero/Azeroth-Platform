@@ -230,7 +230,7 @@ public sealed class LauncherPortalService : ILauncherPortalService
                 RealmlistPort = stack.AuthServerPort,
                 // Advertise the armory port only when the armory is enabled so the launcher's
                 // "View all news" shortcut targets a stack that actually has an armory to open.
-                ArmoryPort = stack.ArmoryEnabled ? stack.ArmoryPort : 0,
+                ArmoryPort = stack.IncludeArmory && stack.ArmoryEnabled ? stack.ArmoryPort : 0,
                 BackgroundUrl = ResolveAsset(assetsDir, "background") is not null ? $"{profileBase}/background"
                     : ResolveStackDefaultBackgroundUrl(stackTemplate, config, dto.DefaultBackgroundUrl),
                 LogoUrl = ResolveAsset(assetsDir, "logo") is not null ? $"{profileBase}/logo"

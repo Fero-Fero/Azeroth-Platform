@@ -11,6 +11,9 @@ import { AdvancedStep } from '@/components/wizard/steps/AdvancedStep'
 import { DeploymentStep } from '@/components/wizard/steps/DeploymentStep'
 import { DatabaseStep } from '@/components/wizard/steps/DatabaseStep'
 import { EmailConfirmationStep } from '@/components/wizard/steps/EmailConfirmationStep'
+import { BotCountStep } from '@/components/wizard/steps/BotCountStep'
+import { ExpressAddonsStep } from '@/components/wizard/steps/ExpressAddonsStep'
+import { ExpressModulesStep } from '@/components/wizard/steps/ExpressModulesStep'
 import { ModulesStep } from '@/components/wizard/steps/ModulesStep'
 import { PortsStep } from '@/components/wizard/steps/PortsStep'
 import { ReviewStep } from '@/components/wizard/steps/ReviewStep'
@@ -19,7 +22,7 @@ import { useWizardDraft } from '@/hooks/useWizardDraft'
 import { useCreateStack, useStacks, stackKeys } from '@/hooks/useStacks'
 import { wizardSchema, WIZARD_DEFAULTS, STEP_TRIGGER_FIELDS_BY_ID, EMAIL_STEP_TRIGGER_FIELDS, type WizardFormData } from '@/schemas/wizard.schemas'
 import { DEFAULT_ARMORY_EMAIL } from '@/lib/armory-email-defaults'
-import { validationApi, buildApi, stackApi } from '@/services/api'
+import { validationApi, buildApi, stackApi, moduleExtraDataApi } from '@/services/api'
 import { apiErrorMessage } from '@/lib/utils'
 import { ServerType, DeploymentTarget, StackStatus } from '@/types/stack.types'
 import type {
@@ -42,13 +45,26 @@ const BASE_STEPS: WizardStep[] = [
   { id: 'review', label: 'Review' },
 ]
 
-function buildWizardSteps(useEmailConfirmation: boolean): WizardStep[] {
-  if (!useEmailConfirmation) {
-    return BASE_STEPS
+function buildWizardSteps(options: {
+  includeArmory: boolean
+  useEmailConfirmation: boolean
+  isExpress: boolean
+}): WizardStep[] {
+  const steps = [...BASE_STEPS]
+  if (options.isExpress) {
+    const hidden = new Set(['database', 'ports', 'advanced', 'review'])
+    const filtered = steps.filter((step) => !hidden.has(step.id))
+    const modulesIndex = filtered.findIndex((step) => step.id === 'modules')
+    if (modulesIndex >= 0) {
+      filtered.splice(modulesIndex + 1, 0, { id: 'addons', label: 'Addons' }, { id: 'bot-count', label: 'Bots' })
+    }
+    return filtered
   }
 
-  const steps = [...BASE_STEPS]
-  steps.splice(steps.length - 1, 0, { id: 'email', label: 'Email' })
+  if (options.includeArmory && options.useEmailConfirmation) {
+    steps.splice(steps.length - 1, 0, { id: 'email', label: 'Email' })
+  }
+
   return steps
 }
 
@@ -57,6 +73,7 @@ const VALIDATION_FIELD_PATHS = [
   'customFork.repositoryUrl',
   'customFork.branch',
   'moduleIds',
+  'addonIds',
   'database.rootPassword',
   'database.port',
   'ports.authServer',
@@ -65,6 +82,8 @@ const VALIDATION_FIELD_PATHS = [
   'advanced.realmName',
   'advanced.maxPlayers',
   'advanced.serviceEnvVars',
+  'includeArmory',
+  'randomBotCount',
   'armoryAccounts.useEmailConfirmation',
   'armoryAccounts.email.smtpHost',
   'armoryAccounts.email.smtpPort',
@@ -128,9 +147,15 @@ export default function CreateStackWizardPage() {
   })
   const { isDirty } = form.formState
   const useEmailConfirmation = form.watch('armoryAccounts.useEmailConfirmation')
+  const includeArmory = form.watch('includeArmory')
+  const serverType = form.watch('serverType')
   const draftStackId = form.watch('draftStackId')
   const isFinishingDraft = Boolean(resumeStackId || draftStackId)
-  const steps = useMemo(() => buildWizardSteps(useEmailConfirmation), [useEmailConfirmation])
+  const isExpress = serverType === ServerType.Express
+  const steps = useMemo(
+    () => buildWizardSteps({ includeArmory, useEmailConfirmation, isExpress }),
+    [includeArmory, useEmailConfirmation, isExpress],
+  )
   const reviewStepIndex = steps.findIndex((step) => step.id === 'review')
 
   useEffect(() => {
@@ -267,7 +292,11 @@ export default function CreateStackWizardPage() {
 
         const merged = mergeSetupDraft(response.data)
         form.reset(merged)
-        const resumeSteps = buildWizardSteps(Boolean(merged.armoryAccounts.useEmailConfirmation))
+        const resumeSteps = buildWizardSteps({
+          includeArmory: merged.includeArmory !== false,
+          useEmailConfirmation: Boolean(merged.armoryAccounts.useEmailConfirmation),
+          isExpress: merged.serverType === ServerType.Express,
+        })
         const stepId = resolveResumeStepId(merged, response.data.wizardStepId)
         const stepIndex = resumeSteps.findIndex((step) => step.id === stepId)
         setCurrentStep(stepIndex >= 0 ? stepIndex : 0)
@@ -327,7 +356,11 @@ export default function CreateStackWizardPage() {
     }
 
     form.reset({ ...WIZARD_DEFAULTS, ...pendingDraft.data })
-    const draftSteps = buildWizardSteps(Boolean(pendingDraft.data.armoryAccounts?.useEmailConfirmation))
+    const draftSteps = buildWizardSteps({
+      includeArmory: pendingDraft.data.includeArmory !== false,
+      useEmailConfirmation: Boolean(pendingDraft.data.armoryAccounts?.useEmailConfirmation),
+      isExpress: pendingDraft.data.serverType === ServerType.Express,
+    })
     setCurrentStep(Math.min(Math.max(pendingDraft.step, 0), draftSteps.length - 1))
     setShowResumeBanner(false)
     setPendingDraft(null)
@@ -442,6 +475,7 @@ export default function CreateStackWizardPage() {
     
     if (!validationResult.isValid) {
       console.log('[WIZARD] Validation still failed, aborting')
+      setSubmitError('Could not create the stack. Check the messages below.')
       return
     }
 
@@ -454,6 +488,13 @@ export default function CreateStackWizardPage() {
       const createResult = await createStack.mutateAsync(config)
       console.log('[WIZARD] Stack created:', createResult)
       const stackId = createResult.data.stackId
+
+      if (typedValues.serverType === ServerType.Express) {
+        await moduleExtraDataApi.saveChoices(stackId, {
+          ipContentMode: 'ServerWideProgression',
+          selectionsByModuleId: {},
+        })
+      }
       
       console.log('[WIZARD] Starting build for stack:', stackId)
       // Start the build
@@ -543,7 +584,9 @@ export default function CreateStackWizardPage() {
             />
           )}
           {steps[currentStep]?.id === 'server-config' && <ServerConfigStep form={form} />}
-          {steps[currentStep]?.id === 'modules' && <ModulesStep form={form} />}
+          {steps[currentStep]?.id === 'modules' && (isExpress ? <ExpressModulesStep form={form} /> : <ModulesStep form={form} />)}
+          {steps[currentStep]?.id === 'addons' && <ExpressAddonsStep form={form} />}
+          {steps[currentStep]?.id === 'bot-count' && <BotCountStep form={form} />}
           {steps[currentStep]?.id === 'database' && <DatabaseStep form={form} />}
           {steps[currentStep]?.id === 'ports' && <PortsStep form={form} />}
           {steps[currentStep]?.id === 'advanced' && <AdvancedStep form={form} />}
@@ -563,6 +606,13 @@ export default function CreateStackWizardPage() {
           <div className="mx-6 mb-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
             <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
             {submitError}
+          </div>
+        )}
+        {isExpress && validationErrors.length > 0 && (
+          <div className="mx-6 mb-4 space-y-1 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+            {validationErrors.map((error) => (
+              <p key={error}>{error}</p>
+            ))}
           </div>
         )}
 
@@ -605,8 +655,9 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
     stackName: values.stackName,
     serverType: values.serverType,
     moduleIds: values.moduleIds,
+    addonIds: values.addonIds ?? [],
     database: {
-      rootPassword: values.database.rootPassword,
+      rootPassword: values.serverType === ServerType.Express ? 'password' : values.database.rootPassword,
       port: values.database.port,
     },
     ports: {
@@ -616,8 +667,10 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
     },
     advanced: {
       maxPlayers: values.advanced.maxPlayers,
-      realmName: values.advanced.realmName,
-      realmlistHost: values.advanced.realmlistHost ?? '',
+      realmName: values.serverType === ServerType.Express
+        ? (values.advanced.realmName?.trim() || 'Express')
+        : values.advanced.realmName,
+      realmlistHost: values.serverType === ServerType.Express ? '127.0.0.1' : (values.advanced.realmlistHost ?? ''),
       serviceEnvVars: values.advanced.serviceEnvVars ?? {},
     },
     deployment: values.deployment
@@ -645,10 +698,20 @@ function formDataToDto(values: WizardFormData): StackConfigurationDto {
           branch: values.customFork?.branch?.trim() ?? '',
         }
       : undefined,
+    includeArmory: values.includeArmory,
+    randomBotCount: values.randomBotCount,
     armoryAccounts: {
-      useEmailConfirmation: values.armoryAccounts.useEmailConfirmation,
-      emailConfigured: values.armoryAccounts.emailConfigured,
-      email: values.armoryAccounts.useEmailConfirmation ? values.armoryAccounts.email ?? null : null,
+      useEmailConfirmation: values.serverType !== ServerType.Express && values.includeArmory
+        ? values.armoryAccounts.useEmailConfirmation
+        : false,
+      emailConfigured: values.serverType !== ServerType.Express && values.includeArmory
+        ? values.armoryAccounts.emailConfigured
+        : false,
+      email: values.serverType !== ServerType.Express
+        && values.includeArmory
+        && values.armoryAccounts.useEmailConfirmation
+        ? values.armoryAccounts.email ?? null
+        : null,
     },
     draftStackId: values.draftStackId?.trim() || undefined,
   }

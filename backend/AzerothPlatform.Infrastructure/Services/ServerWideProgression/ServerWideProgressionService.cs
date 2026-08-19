@@ -437,7 +437,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             return (true, null);
         }
 
-        if (ServerWideProgressionBuildFingerprint.IsCurrent(settings, stack))
+        if (stack.ServerType == ServerType.Express || ServerWideProgressionBuildFingerprint.IsCurrent(settings, stack))
         {
             return (true, null);
         }
@@ -635,6 +635,19 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             ? _dockerOptions.BuildsPath
             : Path.GetFullPath(_dockerOptions.BuildsPath);
         return Path.Combine(baseDir, stackId);
+    }
+
+    private async Task<bool> IsExpressStackRootAsync(string stackRoot, CancellationToken cancellationToken)
+    {
+        var stackId = Path.GetFileName(stackRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(stackId))
+        {
+            return false;
+        }
+
+        var stack = await _dbContext.ManagedStacks.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == stackId, cancellationToken);
+        return stack?.ServerType == ServerType.Express;
     }
 
     // ===== Progression Sync =====
@@ -922,6 +935,13 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
                 if (resolvedDir is not null && File.Exists(sourceFile))
                 {
+                    if (IsNonBaselineSwpDbcDestination(stackRoot, resolvedDir))
+                    {
+                        result.Log.Add(
+                            $"Skipped DBC '{entry.FileName}' for non-baseline patch (DBC belongs on 1.0 / 2.0 / 3.0).");
+                        continue;
+                    }
+
                     Directory.CreateDirectory(resolvedDir);
                     File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
                     result.CopiedFiles++;
@@ -992,10 +1012,18 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
         if (resolvedDir is not null && File.Exists(sourceFile))
         {
-            Directory.CreateDirectory(resolvedDir);
-            File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
-            result.CopiedFiles = 1;
-            result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
+            if (IsNonBaselineSwpDbcDestination(stackRoot, resolvedDir))
+            {
+                result.Log.Add(
+                    $"Skipped DBC '{entry.FileName}' for non-baseline patch (DBC belongs on 1.0 / 2.0 / 3.0).");
+            }
+            else
+            {
+                Directory.CreateDirectory(resolvedDir);
+                File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
+                result.CopiedFiles = 1;
+                result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
+            }
         }
         else
         {
@@ -1055,6 +1083,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         CancellationToken cancellationToken)
     {
         var repoDir = ResolveProgressionRepoDirectory(stackRoot);
+        var expressBranch = await IsExpressStackRootAsync(stackRoot, cancellationToken);
 
         if (IsGitRepository(repoDir))
         {
@@ -1063,6 +1092,18 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                 15,
                 "Pulling latest Azeroth-Platform-Progression changes…",
                 cancellationToken);
+
+            if (expressBranch)
+            {
+                var (checkoutExit, _, checkoutError) = await RunGitAsync(
+                    "checkout express-server",
+                    repoDir,
+                    cancellationToken);
+                if (checkoutExit != 0)
+                {
+                    return (repoDir, $"Failed to checkout express-server: {checkoutError}");
+                }
+            }
 
             var (exitCode, _, gitError) = await RunGitAsync("pull", repoDir, cancellationToken);
             if (exitCode != 0)
@@ -1087,10 +1128,10 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
         Directory.CreateDirectory(repoDir);
 
-        var (cloneExit, _, cloneError) = await RunGitAsync(
-            $"clone {ProgressionRepoUrl} .",
-            repoDir,
-            cancellationToken);
+        var cloneArgs = expressBranch
+            ? $"clone --branch express-server --single-branch {ProgressionRepoUrl} ."
+            : $"clone {ProgressionRepoUrl} .";
+        var (cloneExit, _, cloneError) = await RunGitAsync(cloneArgs, repoDir, cancellationToken);
 
         if (cloneExit != 0)
         {
@@ -1242,6 +1283,13 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             return;
         }
 
+        if (IsNonBaselineSwpDbcDestination(stackRoot, resolvedDestDir))
+        {
+            result.Log.Add(
+                $"Skipped DBC mapping '{entry.Source}' for non-baseline patch (DBC belongs on 1.0 / 2.0 / 3.0).");
+            return;
+        }
+
         Directory.CreateDirectory(resolvedDestDir);
 
         var sourcePath = ProgressionPatchFolderResolver.NormalizeModuleSourcePath(entry.Source);
@@ -1384,6 +1432,13 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                         continue;
                     }
 
+                    if (IsNonBaselineSwpDbcDestination(stackRoot, resolvedDir))
+                    {
+                        result.Log.Add(
+                            $"Skipped DBC '{Path.GetFileName(file)}' for non-baseline patch (DBC belongs on 1.0 / 2.0 / 3.0).");
+                        continue;
+                    }
+
                     if (!ProgressionSyncTargetPolicy.ShouldApplySyncToPath(stackRoot, resolvedDir, initialSync, result.Log))
                     {
                         continue;
@@ -1436,5 +1491,30 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         var relative = Path.GetRelativePath(migrationsRoot, resolvedPath);
         var patchKey = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
         return limitToPatchKeys.Contains(patchKey);
+    }
+
+    internal static bool IsNonBaselineSwpDbcDestination(string stackRoot, string destDir)
+    {
+        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
+        var relative = Path.GetRelativePath(migrationsRoot, destDir);
+        if (relative.StartsWith("..", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var patchKey = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+        if (!PatchFolderNames.TryParse(patchKey, out var index, out _))
+        {
+            return false;
+        }
+
+        if (index.IsExpansionBaseline)
+        {
+            return false;
+        }
+
+        var normalized = destDir.Replace('\\', '/');
+        return normalized.Contains("/dbc/", StringComparison.OrdinalIgnoreCase)
+               || normalized.EndsWith("/dbc", StringComparison.OrdinalIgnoreCase);
     }
 }

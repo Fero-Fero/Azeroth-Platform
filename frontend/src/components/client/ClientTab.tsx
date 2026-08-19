@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
-import { Loader2, Upload, CheckCircle2, XCircle, RefreshCw, HardDrive } from 'lucide-react'
-import { useClientBaseInfo, useUploadBaseClient, useRescanBaseClient } from '@/hooks/useClient'
+import { useEffect, useRef, useState } from 'react'
+import { Download, Loader2, Upload, CheckCircle2, XCircle, RefreshCw, HardDrive } from 'lucide-react'
+import { useClientBaseInfo, useUploadBaseClient, useRescanBaseClient, useDownloadBaseClient } from '@/hooks/useClient'
+import { useClientJobContext } from '@/contexts/ClientJobContext'
 import { apiErrorMessage as errorMessage } from '@/lib/utils'
 import ClientFileBrowser from '@/components/client/ClientFileBrowser'
 import RebuildClientManifestButton from '@/components/client/RebuildClientManifestButton'
@@ -33,6 +34,16 @@ export default function ClientTab({ stackId }: { stackId: string }) {
   const { data: info, isLoading, error, refetch, isFetching } = useClientBaseInfo(stackId)
   const uploadBase = useUploadBaseClient(stackId)
   const rescanBase = useRescanBaseClient(stackId)
+  const downloadBase = useDownloadBaseClient(stackId)
+  const { job: clientJob, isClientBusy, applyStatus: applyClientStatus } = useClientJobContext()
+  const downloading = isClientBusy && clientJob?.action === 'DownloadBase'
+
+  useEffect(() => {
+    if (clientJob?.action === 'DownloadBase' && clientJob.success) {
+      void refetch()
+      setMessage('Base client downloaded and installed.')
+    }
+  }, [clientJob, refetch])
 
   const [uploadPercent, setUploadPercent] = useState<number | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -223,6 +234,33 @@ export default function ClientTab({ stackId }: { stackId: string }) {
                 onChange={(e) => onFile(e.target.files?.[0])}
               />
             </label>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setPageError(null)
+                setMessage(null)
+                try {
+                  const job = await downloadBase.mutateAsync()
+                  applyClientStatus(job)
+                } catch (err) {
+                  setPageError(errorMessage(err))
+                }
+              }}
+              disabled={!info?.downloadAvailable || downloading || uploadBase.isPending || downloadBase.isPending}
+              title={info?.downloadAvailable ? 'Download the configured 3.3.5a client from Google Drive' : info?.downloadUnavailableReason ?? 'Download is not configured'}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {downloading || downloadBase.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {downloading ? clientJob?.message || 'Downloading…' : 'Download Client'}
+            </button>
+            {!info?.downloadAvailable && (
+              <p className="text-xs text-gray-500">{info?.downloadUnavailableReason}</p>
+            )}
 
             <button
               onClick={onRescan}

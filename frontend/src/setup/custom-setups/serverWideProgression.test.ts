@@ -48,4 +48,31 @@ describe('serverWideProgressionSetup', () => {
     expect(prepare?.isComplete(ctx)).toBe(true)
     expect(prepare?.applies(ctx)).toBe(false)
   })
+
+  it('hides SWP prepare when Standard IP content mode is selected', () => {
+    const ctx = createMockContext({
+      stack: {
+        configuration: {
+          serverType: ServerType.IndividualProgression,
+          moduleIds: [MODULE_IDS.individualProgression],
+        } as never,
+      },
+      status: {
+        moduleExtraData: {
+          modules: [],
+          loading: false,
+          jobPhase: null,
+          ipContentMode: 'Standard',
+          prepared: false,
+          deposited: false,
+          hasPendingDeposit: false,
+        },
+      },
+    })
+    const ids = collectAllSteps(ctx)
+      .filter((step) => step.applies(ctx))
+      .map((step) => step.id)
+    expect(ids).not.toContain(STEP_IDS.prepareProgression)
+    expect(ids).not.toContain(STEP_IDS.ipSyncHint)
+  })
 })

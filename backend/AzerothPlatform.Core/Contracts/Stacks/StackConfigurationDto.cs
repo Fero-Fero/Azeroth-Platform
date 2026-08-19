@@ -19,6 +19,11 @@ public class StackConfigurationDto
     /// List of module IDs to include in build
     /// </summary>
     public List<string> ModuleIds { get; set; } = new();
+
+    /// <summary>
+    /// Catalog addon ids to install after the stack client is available (Express wizard).
+    /// </summary>
+    public List<string> AddonIds { get; set; } = new();
     
     /// <summary>
     /// Database configuration
@@ -50,10 +55,24 @@ public class StackConfigurationDto
     public ArmoryAccountsConfigDto ArmoryAccounts { get; set; } = new();
 
     /// <summary>
+    /// When false, the stack never builds or starts the armory. Omitted on create means include.
+    /// </summary>
+    public bool? IncludeArmory { get; set; }
+
+    /// <summary>
+    /// Random playerbot count written into <c>playerbots.conf</c> after first conf seed (0–2500).
+    /// Used by Express setup; ignored for other server types unless explicitly applied.
+    /// </summary>
+    public int RandomBotCount { get; set; }
+
+    /// <summary>
     /// When set, <c>POST /api/stacks</c> completes this <see cref="StackStatus.SetupIncomplete"/> draft
     /// instead of creating a new stack id.
     /// </summary>
     public string? DraftStackId { get; set; }
+
+    /// <summary>True when this stack is configured to include the armory (default yes).</summary>
+    public bool IncludesArmory() => IncludeArmory != false;
 }
 
 /// <summary>

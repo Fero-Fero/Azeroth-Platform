@@ -30,4 +30,7 @@ public sealed class ServerTypeInfoDto
     /// Modules that must be selected for this server type (auto-selected and locked in the wizard).
     /// </summary>
     public List<string> RequiredModuleIds { get; set; } = new();
+
+    /// <summary>When true, the wizard only offers this type for local deployments.</summary>
+    public bool LocalOnly { get; set; }
 }

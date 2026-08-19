@@ -113,4 +113,10 @@ public class StackDetailsDto
 
     /// <summary>When SSH hardening last succeeded (root / image-default users locked out of internet SSH).</summary>
     public DateTime? SshHardeningCompletedAt { get; set; }
+
+    /// <summary>Express auto-provisioner state. <see cref="ExpressProvisionStatus.None"/> for other types.</summary>
+    public ExpressProvisionStatus ExpressProvisionStatus { get; set; }
+
+    /// <summary>Last Express provisioner progress or error message.</summary>
+    public string ExpressProvisionMessage { get; set; } = string.Empty;
 }

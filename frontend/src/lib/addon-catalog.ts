@@ -88,6 +88,27 @@ export function sortCatalogIdsForInstall(
   })
 }
 
+/** Add the first missing related module when none of the addon's modules are selected. */
+export function ensureRelatedModules(
+  relatedModuleIds: string[] | undefined,
+  moduleIds: string[],
+): string[] {
+  if (!relatedModuleIds?.length) {
+    return moduleIds
+  }
+  if (relatedModuleIds.some((id) => moduleIds.includes(id))) {
+    return moduleIds
+  }
+  return [...moduleIds, relatedModuleIds[0]!]
+}
+
+export function addonRequiresUnselectedModule(
+  relatedModuleIds: string[] | undefined,
+  moduleIds: string[],
+): boolean {
+  return !!relatedModuleIds?.length && !relatedModuleIds.some((id) => moduleIds.includes(id))
+}
+
 export function catalogEntrySort(a: AddonCatalogEntryDto, b: AddonCatalogEntryDto) {
   if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
   if (!!a.suggested !== !!b.suggested) return a.suggested ? -1 : 1

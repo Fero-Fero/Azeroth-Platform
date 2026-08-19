@@ -21,20 +21,29 @@ namespace AzerothPlatform.Infrastructure.Services;
 public sealed class ClientService : IClientService
 {
     private readonly ClientDistributionOptions _options;
+    private readonly ClientDownloadOptions _downloadOptions;
     private readonly IRemoteEngineService _remoteEngine;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly BaseClientDownloader _downloader;
+    private readonly IClientJobService _clientJobs;
     private readonly ILogger<ClientService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public ClientService(
         IOptions<ClientDistributionOptions> options,
+        IOptions<ClientDownloadOptions> downloadOptions,
         IRemoteEngineService remoteEngine,
         IServiceScopeFactory scopeFactory,
+        BaseClientDownloader downloader,
+        IClientJobService clientJobs,
         ILogger<ClientService> logger)
     {
         _options = options.Value;
+        _downloadOptions = downloadOptions.Value;
         _remoteEngine = remoteEngine;
         _scopeFactory = scopeFactory;
+        _downloader = downloader;
+        _clientJobs = clientJobs;
         _logger = logger;
     }
 
@@ -56,6 +65,62 @@ public sealed class ClientService : IClientService
             ?? throw new InvalidOperationException("Stack was not found.");
         var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, ClientBaseVolume(stackId), cancellationToken);
         return BuildInfo(stackId, summary);
+    }
+
+    public async Task<ClientBaseInfoDto> DownloadBaseClientAsync(string stackId, CancellationToken cancellationToken = default)
+    {
+        var url = (_downloadOptions.BaseClientUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new InvalidOperationException("A base-client download URL is not configured.");
+        }
+
+        if (BaseClientDownloader.IsGoogleDriveFolder(url))
+        {
+            return await DownloadDriveFolderAsync(stackId, url, cancellationToken);
+        }
+
+        await using var stream = await _downloader.DownloadAsync(url, cancellationToken);
+        return await UploadBaseClientAsync(stackId, stream, cancellationToken);
+    }
+
+    private async Task<ClientBaseInfoDto> DownloadDriveFolderAsync(
+        string stackId,
+        string folderUrl,
+        CancellationToken cancellationToken)
+    {
+        var stack = await GetStackAsync(stackId, cancellationToken)
+            ?? throw new InvalidOperationException("Stack was not found.");
+        var volumeName = ClientBaseVolume(stackId);
+        var progress = new Progress<string>(message => _clientJobs.ReportProgress(stackId, message));
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await _remoteEngine.ClearVolumeContentsAsync(stack, volumeName, cancellationToken);
+            await _downloader.DownloadGoogleDriveFolderAsync(
+                folderUrl,
+                async (relativePath, stream, token) =>
+                {
+                    await _remoteEngine.WriteVolumeFileFromStreamAsync(stack, volumeName, relativePath, stream, token);
+                },
+                progress,
+                cancellationToken);
+
+            var summary = await _remoteEngine.GetVolumeTreeSummaryAsync(stack, volumeName, cancellationToken);
+            if (!summary.HasWowExe && !summary.HasDataMpq)
+            {
+                throw new InvalidOperationException(
+                    "The Google Drive folder does not look like a WoW client (no Wow.exe or Data/*.MPQ found).");
+            }
+
+            _logger.LogInformation("Base client for stack {StackId} installed from Google Drive folder.", stackId);
+            return BuildInfo(stackId, summary);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<ClientBaseInfoDto> RescanBaseAsync(string stackId, CancellationToken cancellationToken = default)
@@ -563,7 +628,7 @@ public sealed class ClientService : IClientService
         return Directory.Exists(dataDir) && Directory.EnumerateFiles(dataDir, "*.MPQ").Any();
     }
 
-    private static ClientBaseInfoDto BuildInfo(string stackId, VolumeTreeSummary summary)
+    private ClientBaseInfoDto BuildInfo(string stackId, VolumeTreeSummary summary)
     {
         var volumeName = ClientBaseVolume(stackId);
         var exists = summary.HasWowExe || summary.HasDataMpq || summary.FileCount > 0;
@@ -580,7 +645,7 @@ public sealed class ClientService : IClientService
                 "The client-base Docker volume exists on the stack engine but appears empty. Re-upload the client if you removed it intentionally.";
         }
 
-        return new ClientBaseInfoDto
+        return ApplyDownloadAvailability(new ClientBaseInfoDto
         {
             GamePath = $"docker://{volumeName}",
             Exists = exists,
@@ -590,7 +655,17 @@ public sealed class ClientService : IClientService
             TotalSize = summary.TotalBytes,
             HasWowExe = summary.HasWowExe,
             HasDataMpq = summary.HasDataMpq,
-        };
+        });
+    }
+
+    private ClientBaseInfoDto ApplyDownloadAvailability(ClientBaseInfoDto info)
+    {
+        var url = (_downloadOptions.BaseClientUrl ?? string.Empty).Trim();
+        info.DownloadAvailable = !string.IsNullOrWhiteSpace(url);
+        info.DownloadUnavailableReason = info.DownloadAvailable
+            ? null
+            : "No base-client download URL is configured yet.";
+        return info;
     }
 
     private void TryDelete(string path, bool isDirectory)

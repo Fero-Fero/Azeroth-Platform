@@ -32,5 +32,11 @@ public enum ServerType
     /// User-supplied fork: the core repository URL and branch are provided at stack-creation time
     /// (see <see cref="StackConfigurationDto.CustomFork"/>) rather than resolved from the catalog.
     /// </summary>
-    Custom
+    Custom,
+
+    /// <summary>
+    /// Local-only one-click setup on the Individual Progression (Grimfeather) core, with playerbots
+    /// compiled as a module and Server Wide Progression applied automatically.
+    /// </summary>
+    Express
 }

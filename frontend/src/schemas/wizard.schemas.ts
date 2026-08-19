@@ -26,10 +26,13 @@ export const serverConfigSchema = z.object({
     })
     .optional()
     .default({ repositoryUrl: '', branch: 'master' }),
+  includeArmory: z.boolean().default(true),
+  randomBotCount: z.coerce.number().int().min(0).max(2500).default(50),
 })
 
 export const modulesSchema = z.object({
   moduleIds: z.array(z.string()),
+  addonIds: z.array(z.string()).default([]),
 })
 
 export const databaseSchema = z.object({
@@ -179,7 +182,15 @@ export const wizardSchema = serverConfigSchema
       }
     }
 
-    if (values.armoryAccounts.useEmailConfirmation && values.armoryAccounts.emailConfigured) {
+    if (values.serverType === ServerType.Express && values.deployment.target === DeploymentTarget.External) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Express Setup is only available for local deployments',
+        path: ['serverType'],
+      })
+    }
+
+    if (values.armoryAccounts.useEmailConfirmation && values.armoryAccounts.emailConfigured && values.includeArmory) {
       const email = values.armoryAccounts.email
       if (!email?.smtpHost?.trim()) {
         ctx.addIssue({
@@ -225,7 +236,10 @@ export const WIZARD_DEFAULTS: WizardFormData = {
   stackName: '',
   serverType: ServerType.Standard,
   customFork: { repositoryUrl: '', branch: 'master' },
+  includeArmory: true,
+  randomBotCount: 50,
   moduleIds: [],
+  addonIds: [],
   database: { rootPassword: '', port: 3306 },
   ports: { authServer: 3724, worldServer: 8085, soapPort: 7878 },
   advanced: { maxPlayers: 100, realmName: 'AzerothCore', realmlistHost: '', serviceEnvVars: {} },
@@ -262,8 +276,10 @@ export const WIZARD_DEFAULTS: WizardFormData = {
 
 export const STEP_TRIGGER_FIELDS_BY_ID: Record<string, Array<keyof WizardFormData>> = {
   deployment: ['deployment'],
-  'server-config': ['stackName', 'serverType', 'customFork'],
+  'server-config': ['stackName', 'serverType', 'customFork', 'includeArmory'],
   modules: ['moduleIds'],
+  addons: ['addonIds'],
+  'bot-count': ['randomBotCount'],
   database: ['database'],
   ports: ['ports'],
   advanced: ['advanced', 'armoryAccounts'],

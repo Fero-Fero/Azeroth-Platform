@@ -31,4 +31,10 @@ public sealed class ClientBaseInfoDto
 
     /// <summary>Absolute path of the base client's <c>game/</c> directory on the manager host.</summary>
     public string GamePath { get; set; } = string.Empty;
+
+    /// <summary>True when a configured base-client download URL is available.</summary>
+    public bool DownloadAvailable { get; set; }
+
+    /// <summary>Shown when <see cref="DownloadAvailable"/> is false.</summary>
+    public string? DownloadUnavailableReason { get; set; }
 }

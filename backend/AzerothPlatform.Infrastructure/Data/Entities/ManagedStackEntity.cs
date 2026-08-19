@@ -19,6 +19,9 @@ public class ManagedStackEntity
 
     public string ModuleIdsJson { get; set; } = "[]";
 
+    /// <summary>Catalog addon ids selected in the Express wizard (JSON array).</summary>
+    public string AddonIdsJson { get; set; } = "[]";
+
     public string DatabaseRootPassword { get; set; } = string.Empty;
 
     public int DatabasePort { get; set; }
@@ -34,6 +37,21 @@ public class ManagedStackEntity
 
     /// <summary>Whether the per-stack armory container is currently intended to be running.</summary>
     public bool ArmoryEnabled { get; set; }
+
+    /// <summary>
+    /// When false, this stack never builds, starts, or advertises the armory. Distinct from
+    /// <see cref="ArmoryEnabled"/>, which is runtime compose state.
+    /// </summary>
+    public bool IncludeArmory { get; set; } = true;
+
+    /// <summary>Random playerbot autologin count (0–2500). Written into playerbots.conf after seed.</summary>
+    public int RandomBotCount { get; set; }
+
+    /// <summary>Express auto-provisioner state. Other server types stay <see cref="ExpressProvisionStatus.None"/>.</summary>
+    public ExpressProvisionStatus ExpressProvisionStatus { get; set; } = ExpressProvisionStatus.None;
+
+    /// <summary>Last Express provisioner progress or error message.</summary>
+    public string ExpressProvisionMessage { get; set; } = string.Empty;
 
     /// <summary>
     /// Host port the per-stack client-server (azeroth-platform-client) container is published on. The

@@ -317,6 +317,24 @@ public sealed class SavePatchLauncherThemeRequest
     public string Theme { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Thrown when a Server Wide Progression patch that is not an expansion baseline (1.0 / 2.0 / 3.0)
+/// tries to upload, edit, delete, or apply DBC files.
+/// </summary>
+public sealed class SwpDbcRestrictedException : InvalidOperationException
+{
+    public const string DefaultMessage =
+        "Server Wide Progression patches may ship DBC only on expansion baselines (1.0, 2.0, 3.0).";
+
+    public SwpDbcRestrictedException() : base(DefaultMessage)
+    {
+    }
+
+    public SwpDbcRestrictedException(string message) : base(message)
+    {
+    }
+}
+
 public sealed class PatchProgressionMetadataDto
 {
     public int State { get; set; }

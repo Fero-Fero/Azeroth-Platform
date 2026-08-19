@@ -30,6 +30,7 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
   const { data: envTemplates } = useServiceEnvTemplates()
   const [showModuleConfig, setShowModuleConfig] = useState(false)
 
+  const includeArmory = watch('includeArmory')
   const deploymentTarget = watch('deployment.target')
   const realmlistHost = watch('advanced.realmlistHost')
   const [suggestedHost, setSuggestedHost] = useState<string>('')
@@ -149,7 +150,7 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
         />
       </FormField>
 
-      <div className="rounded-lg border border-gray-200 p-4">
+      {includeArmory && <div className="rounded-lg border border-gray-200 p-4">
         <div className="mb-3">
           <span className="text-sm font-medium text-gray-700">Armory Accounts</span>
           <p className="text-xs text-gray-500">
@@ -177,7 +178,7 @@ export function AdvancedStep({ form }: AdvancedStepProps) {
             </span>
           </span>
         </label>
-      </div>
+      </div>}
 
       <div>
         <div className="mb-2 flex items-center justify-between">

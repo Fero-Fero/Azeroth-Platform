@@ -24,7 +24,8 @@ import {
   useProgressionSyncStatus,
   patchKeys,
 } from '@/hooks/usePatches'
-import { stackKeys } from '@/hooks/useStacks'
+import { stackKeys, useStackDetail } from '@/hooks/useStacks'
+import { ServerType } from '@/types/stack.types'
 import type { PatchStatus, PatchFileDto, Expansion, ImportPatchCollectionMode, PatchKind, PatchSummaryDto } from '@/types/patch.types'
 import PatchFileCategory from './PatchFileCategory'
 import PatchConfigOverridesPreview, {
@@ -39,6 +40,7 @@ import MpqRemovalPanel from './MpqRemovalPanel'
 import MpqManifestPanel from './MpqManifestPanel'
 import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
+import DbcBaselinePanel from './DbcBaselinePanel'
 import type { ServerWideProgressionValidationResult } from '@/types/server-wide-progression.types'
 import { useLauncherConfig, useLauncherTemplates } from '@/hooks/useLauncher'
 
@@ -136,6 +138,11 @@ function comparePatchIndex(a: number[], b: number[]): number {
 function hasExpansionEntryPoint(index: string): boolean {
   const parts = parsePatchIndex(index)
   return parts.length === 1 || (parts.length >= 2 && parts[1] === 0 && (parts[2] ?? 0) === 0)
+}
+
+function isExpansionBaselineIndex(index: string): boolean {
+  const parts = parsePatchIndex(index)
+  return (parts.length === 1 || parts.length === 2) && (parts[1] ?? 0) === 0
 }
 
 function nextPatchIndex(
@@ -244,6 +251,8 @@ const STATUS_BADGE: Record<PatchStatus, { label: string; className: string; icon
 export default function PatchesTab({ stackId }: PatchesTabProps) {
   const queryClient = useQueryClient()
   const { data: overview, isLoading, error } = usePatchOverview(stackId)
+  const { data: stack } = useStackDetail(stackId)
+  const hideValidatePatches = stack?.configuration.serverType === ServerType.Express
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const { data: detail } = usePatchDetail(stackId, selectedKey)
   const { data: launcherConfig } = useLauncherConfig()
@@ -890,7 +899,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   )
 
   // Hide until progression sync replaces placeholders, or the operator has added real patch content.
+  // Express uses the three expansion baselines only — full-repo validation is not used.
   const showValidationPanel =
+    !hideValidatePatches &&
     hasIpModule &&
     ipBootstrapped &&
     (hasCompletedProgressionSync ||
@@ -923,6 +934,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
 
   return (
     <div className="space-y-5">
+      <DbcBaselinePanel />
       {/* Header */}
       <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
@@ -1122,6 +1134,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
               )}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {!hideValidatePatches && (
               <button
                 type="button"
                 onClick={handleValidatePatches}
@@ -1135,6 +1148,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
                 )}
                 Validate patches
               </button>
+              )}
             </div>
           </div>
 
@@ -1846,17 +1860,24 @@ Flat layout also works:
                 onUploadItems={(items) => handleContainerUpload('sql/characters', items)}
                 onDelete={(fileName) => handleDelete('sql/characters', fileName)}
               />
-              <ContainerFileCategory
-                title="DBC (CSV / .txt / .dbc)"
-                accept=".txt,.csv,.dbc"
-                collapseStorageKey={sectionCollapseKey('dbc')}
-                files={filesByCategory['dbc'] ?? []}
-                uploading={uploadingCategory === 'dbc'}
-                error={errorFor('dbc')}
-                onUploadItems={(items) => handleContainerUpload('dbc', items)}
-                onDelete={(fileName) => handleDelete('dbc', fileName)}
-                onEdit={(fileName) => setEditFile(fileName)}
-              />
+              {detail?.progression && selectedSummary && !isExpansionBaselineIndex(selectedSummary.index) ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  DBC belongs on expansion baselines (1.0 / 2.0 / 3.0). Later Server Wide Progression
+                  tiers are SQL / map / MPQ / conf only.
+                </div>
+              ) : (
+                <ContainerFileCategory
+                  title="DBC (CSV / .txt / .dbc)"
+                  accept=".txt,.csv,.dbc"
+                  collapseStorageKey={sectionCollapseKey('dbc')}
+                  files={filesByCategory['dbc'] ?? []}
+                  uploading={uploadingCategory === 'dbc'}
+                  error={errorFor('dbc')}
+                  onUploadItems={(items) => handleContainerUpload('dbc', items)}
+                  onDelete={(fileName) => handleDelete('dbc', fileName)}
+                  onEdit={(fileName) => setEditFile(fileName)}
+                />
+              )}
               <ContainerFileCategory
                 title="Maps"
                 collapseStorageKey={sectionCollapseKey('map')}

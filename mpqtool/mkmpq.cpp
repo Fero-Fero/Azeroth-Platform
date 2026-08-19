@@ -18,6 +18,36 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+static bool DirExists(const char* path)
+{
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static void CollectFiles(const std::string& dir, const std::string& relative, std::vector<std::string>& files)
+{
+    DIR* d = opendir(dir.c_str());
+    if (!d)
+        return;
+
+    while (struct dirent* ent = readdir(d))
+    {
+        if (ent->d_name[0] == '.')
+            continue;
+        const std::string name = ent->d_name;
+        const std::string full = dir + "/" + name;
+        const std::string rel = relative.empty() ? name : relative + "/" + name;
+        struct stat st;
+        if (stat(full.c_str(), &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode))
+            CollectFiles(full, rel, files);
+        else if (S_ISREG(st.st_mode))
+            files.push_back(rel);
+    }
+    closedir(d);
+}
+
 // MPQ v1 hash table size must be a power of two; give a little headroom for the (listfile).
 static DWORD NextPow2(size_t n)
 {
@@ -40,20 +70,8 @@ int main(int argc, char** argv)
     const std::string prefix = (argc > 3) ? argv[3] : "DBFilesClient";
 
     std::vector<std::string> files;
-    if (DIR* d = opendir(srcDir))
-    {
-        while (struct dirent* ent = readdir(d))
-        {
-            if (ent->d_name[0] == '.')
-                continue;
-            const std::string full = std::string(srcDir) + "/" + ent->d_name;
-            struct stat st;
-            if (stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode))
-                files.push_back(ent->d_name);
-        }
-        closedir(d);
-    }
-    else
+    CollectFiles(srcDir, "", files);
+    if (files.empty() && !DirExists(srcDir))
     {
         std::fprintf(stderr, "cannot open source dir '%s'\n", srcDir);
         return 2;
@@ -79,7 +97,14 @@ int main(int argc, char** argv)
     for (const std::string& f : files)
     {
         const std::string local = std::string(srcDir) + "/" + f;
-        const std::string archived = prefix + "\\" + f;
+        std::string archived = f;
+        for (char& c : archived)
+        {
+            if (c == '/')
+                c = '\\';
+        }
+        if (!prefix.empty())
+            archived = prefix + "\\" + archived;
         if (!SFileAddFileEx(hMpq, local.c_str(), archived.c_str(),
                             MPQ_FILE_COMPRESS | MPQ_FILE_REPLACEEXISTING,
                             MPQ_COMPRESSION_ZLIB, MPQ_COMPRESSION_ZLIB))

@@ -27,6 +27,13 @@ export function useUploadBaseClient(stackId: string) {
   })
 }
 
+/** Enqueues a configured-URL download of the base client archive. */
+export function useDownloadBaseClient(stackId: string) {
+  return useMutation({
+    mutationFn: async () => (await clientApi.downloadBase(stackId)).data,
+  })
+}
+
 /** Re-seeds the stack's base client volume from its base directory. */
 export function useRescanBaseClient(stackId: string) {
   const qc = useQueryClient()

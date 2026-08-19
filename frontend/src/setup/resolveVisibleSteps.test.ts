@@ -10,7 +10,7 @@ import type { SetupStep } from '@/setup/types'
 import { ServerType } from '@/types/stack.types'
 
 describe('globalSteps', () => {
-  it('starts with SOAP, upload client, upload armory DBC', () => {
+  it('starts with SOAP, DBC baseline, upload client, upload armory DBC', () => {
     expect(globalSteps.map((step) => step.id)).toEqual([...GLOBAL_STEP_IDS])
   })
 })

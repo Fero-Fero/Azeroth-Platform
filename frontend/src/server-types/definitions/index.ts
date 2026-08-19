@@ -1,4 +1,5 @@
 export { customServerType } from '@/server-types/definitions/custom'
+export { expressServerType } from '@/server-types/definitions/express'
 export { individualProgressionServerType } from '@/server-types/definitions/individualProgression'
 export { npcBotsServerType } from '@/server-types/definitions/npcBots'
 export { playerbotsServerType } from '@/server-types/definitions/playerbots'

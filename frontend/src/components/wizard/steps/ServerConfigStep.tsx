@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, GitFork, Server, TrendingUp, Users, type LucideIcon } from 'lucide-react'
+import { Bot, GitFork, Server, TrendingUp, Users, Zap, type LucideIcon } from 'lucide-react'
 import { BranchCombobox } from '@/components/wizard/common/BranchCombobox'
 import { FormField } from '@/components/wizard/common/FormField'
 import type { WizardForm } from '@/components/wizard/types'
@@ -7,13 +7,27 @@ import { useRepositoryBranches, useServerTypes } from '@/hooks/useModules'
 import { mergeRequiredModuleIds } from '@/lib/server-type-modules'
 import { normalizeStackNameInput } from '@/lib/stack-name'
 import { cn } from '@/lib/utils'
-import { ServerType } from '@/types/stack.types'
+import { expressDefaultModuleIds } from '@/setup/constants'
+import { DeploymentTarget, ServerType } from '@/types/stack.types'
 
 interface ServerConfigStepProps {
   form: WizardForm
 }
 
-/** Pulls a human-friendly message out of the axios error returned by the branches endpoint. */
+function applyExpressLocalDefaults(
+  setValue: WizardForm['setValue'],
+  watch: WizardForm['watch'],
+) {
+  setValue('database.rootPassword', 'password', { shouldDirty: true, shouldValidate: true })
+  setValue('advanced.realmlistHost', '127.0.0.1', { shouldDirty: false })
+  setValue('armoryAccounts.useEmailConfirmation', false, { shouldDirty: true })
+  setValue('armoryAccounts.emailConfigured', false, { shouldDirty: true })
+  const realmName = watch('advanced.realmName') ?? ''
+  if (!realmName.trim() || realmName === 'AzerothCore') {
+    setValue('advanced.realmName', 'Express', { shouldDirty: false })
+  }
+}
+
 function branchErrorMessage(error: unknown): string | null {
   if (!error) return null
   const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message
@@ -27,6 +41,7 @@ const ICONS: Record<string, LucideIcon> = {
   'trending-up': TrendingUp,
   users: Users,
   'git-fork': GitFork,
+  zap: Zap,
 }
 
 export function ServerConfigStep({ form }: ServerConfigStepProps) {
@@ -38,8 +53,24 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
   } = form
 
   const serverType = watch('serverType')
+  const deploymentTarget = watch('deployment.target')
   const { data: serverTypes, isLoading } = useServerTypes()
-  const selectedType = serverTypes?.find((type) => type.id === serverType)
+  const visibleServerTypes = (serverTypes ?? []).filter(
+    (type) => !type.localOnly || deploymentTarget === DeploymentTarget.Local,
+  )
+  const selectedType = visibleServerTypes.find((type) => type.id === serverType)
+
+  useEffect(() => {
+    if (deploymentTarget === DeploymentTarget.External && serverType === ServerType.Express) {
+      setValue('serverType', ServerType.Standard, { shouldDirty: true, shouldValidate: true })
+    }
+  }, [deploymentTarget, serverType, setValue])
+
+  useEffect(() => {
+    if (serverType === ServerType.Express) {
+      applyExpressLocalDefaults(setValue, watch)
+    }
+  }, [serverType, setValue, watch])
   const allowsCustomRepo = selectedType?.allowCustomRepository ?? false
 
   const repositoryUrl = watch('customFork.repositoryUrl') ?? ''
@@ -111,7 +142,7 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
         )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Server type">
-          {(serverTypes ?? []).map(({ id, displayName, description, icon }) => {
+          {visibleServerTypes.map(({ id, displayName, description, icon }) => {
             const Icon = ICONS[icon] ?? Server
             const selected = serverType === id
 
@@ -124,11 +155,16 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
                 onClick={() => {
                   if (serverType === id) return
                   setValue('serverType', id as ServerType, { shouldDirty: true, shouldValidate: true })
-                  setValue(
-                    'moduleIds',
-                    mergeRequiredModuleIds(watch('moduleIds') ?? [], id as ServerType, serverTypes),
-                    { shouldDirty: true },
-                  )
+                  if (id === ServerType.Express) {
+                    setValue('moduleIds', expressDefaultModuleIds(), { shouldDirty: true })
+                    applyExpressLocalDefaults(setValue, watch)
+                  } else {
+                    setValue(
+                      'moduleIds',
+                      mergeRequiredModuleIds(watch('moduleIds') ?? [], id as ServerType, serverTypes),
+                      { shouldDirty: true },
+                    )
+                  }
                 }}
                 className={cn(
                   'flex items-start gap-3 rounded-lg border-2 p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
@@ -203,6 +239,28 @@ export function ServerConfigStep({ form }: ServerConfigStepProps) {
           </div>
         )}
       </fieldset>
+
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-4">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          {...register('includeArmory', {
+            onChange: (event) => {
+              if (!event.target.checked) {
+                setValue('armoryAccounts.useEmailConfirmation', false, { shouldDirty: true })
+                setValue('armoryAccounts.emailConfigured', false, { shouldDirty: true })
+              }
+            },
+          })}
+        />
+        <span>
+          <span className="text-sm font-medium text-gray-800">Include Armory</span>
+          <span className="mt-0.5 block text-xs text-gray-500">
+            When off, this stack never builds or starts the armory. The launcher still downloads client
+            files from this stack.
+          </span>
+        </span>
+      </label>
     </div>
   )
 }

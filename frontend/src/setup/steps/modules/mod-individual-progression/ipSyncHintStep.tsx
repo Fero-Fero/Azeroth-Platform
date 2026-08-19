@@ -46,6 +46,7 @@ export function ipSyncHintStep(): SetupStep {
     title: 'Individual Progression - patches',
     applies: (ctx) =>
       hasIndividualProgressionModule(ctx.stack) &&
+      ctx.status.moduleExtraData.ipContentMode !== 'Standard' &&
       !ctx.status.progress.isSkipped(STEP_IDS.prepareProgression) &&
       isIpPipelineComplete(ctx) &&
       !ctx.status.progress.isDismissed(STEP_IDS.ipSyncHint),

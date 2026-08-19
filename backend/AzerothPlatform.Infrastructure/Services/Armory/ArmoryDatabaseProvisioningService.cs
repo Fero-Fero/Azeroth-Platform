@@ -65,7 +65,7 @@ public sealed class ArmoryDatabaseProvisioningService : IArmoryDatabaseProvision
     public async Task EnsureProvisionedAsync(string stackId, CancellationToken cancellationToken = default)
     {
         var stack = await LoadStackAsync(stackId, cancellationToken);
-        if (!stack.ArmoryEnabled)
+        if (!stack.IncludeArmory || !stack.ArmoryEnabled)
         {
             return;
         }

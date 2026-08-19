@@ -646,15 +646,16 @@ public sealed class BuildService : IBuildService
         var dataBind = string.IsNullOrWhiteSpace(_dockerOptions.DataPlaneBindAddress)
             ? "127.0.0.1:"
             : _dockerOptions.DataPlaneBindAddress.Trim() + ":";
+        var gameBind = config.ServerType == ServerType.Express ? "127.0.0.1:" : string.Empty;
 
         // Quote password to handle special characters
         sb.AppendLine($"DOCKER_DB_ROOT_PASSWORD=\"{config.Database.RootPassword}\"");
         sb.AppendLine($"DOCKER_DB_EXTERNAL_PORT={dataBind}{config.Database.Port}");
-        sb.AppendLine($"DOCKER_WORLD_EXTERNAL_PORT={config.Ports.WorldServer}");
+        sb.AppendLine($"DOCKER_WORLD_EXTERNAL_PORT={gameBind}{config.Ports.WorldServer}");
         sb.AppendLine($"DOCKER_SOAP_EXTERNAL_PORT={dataBind}{config.Ports.SoapPort}");
         
         // Auth server port - need to override in docker-compose.override.yml
-        sb.AppendLine($"DOCKER_AUTH_EXTERNAL_PORT={config.Ports.AuthServer}");
+        sb.AppendLine($"DOCKER_AUTH_EXTERNAL_PORT={gameBind}{config.Ports.AuthServer}");
         
         // Use stackId as unique image tag to avoid collision between stacks
         sb.AppendLine($"DOCKER_IMAGE_TAG={stackId}");
@@ -904,6 +905,11 @@ public sealed class BuildService : IBuildService
         {
             await CompleteUpdateAsync(stackId, stack?.AppliedPatchLevel ?? 0);
         }
+        else if (stack is { ServerType: ServerType.Express, ExpressProvisionStatus: ExpressProvisionStatus.Pending, DeploymentTarget: DeploymentTarget.Local })
+        {
+            using var provisionScope = _scopeFactory.CreateScope();
+            provisionScope.ServiceProvider.GetRequiredService<IExpressProvisionService>().Enqueue(stackId);
+        }
     }
 
     /// <summary>
@@ -914,7 +920,7 @@ public sealed class BuildService : IBuildService
     private async Task ShipImagesToRemoteAsync(ManagedStackEntity stack)
     {
         await AddLogAsync(stack.Id, "Shipping built images to remote engine...");
-        await _stackImageShipping.ShipStackImagesAsync(stack, includeArmory: true, includeClient: true, CancellationToken.None);
+        await _stackImageShipping.ShipStackImagesAsync(stack, includeArmory: stack.IncludeArmory, includeClient: true, CancellationToken.None);
         await AddLogAsync(stack.Id, "Remote image shipping finished.");
     }
 

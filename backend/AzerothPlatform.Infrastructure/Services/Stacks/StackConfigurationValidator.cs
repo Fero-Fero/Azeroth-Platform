@@ -41,6 +41,8 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
         ValidatePorts(configuration, result);
         ValidateAdvanced(configuration, result);
         ValidateDeployment(configuration, result);
+        ValidateExpressDeployment(configuration, result);
+        ValidateRandomBotCount(configuration, result);
         ValidateArmoryAccounts(configuration, result);
         ValidateCustomFork(configuration, result);
         await ValidateModulesAsync(configuration, result, cancellationToken);
@@ -128,6 +130,27 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
             .Any(bucket => bucket.Any(entry => string.IsNullOrWhiteSpace(entry.Key))))
         {
             AddError(result, "advanced.serviceEnvVars", "Environment variable keys cannot be empty.");
+        }
+    }
+
+    private static void ValidateExpressDeployment(StackConfigurationDto configuration, ValidationResultDto result)
+    {
+        if (configuration.ServerType != ServerType.Express)
+        {
+            return;
+        }
+
+        if (configuration.Deployment.Target == DeploymentTarget.External)
+        {
+            AddError(result, "serverType", "Express Setup is only available for local deployments.");
+        }
+    }
+
+    private static void ValidateRandomBotCount(StackConfigurationDto configuration, ValidationResultDto result)
+    {
+        if (configuration.RandomBotCount is < 0 or > 2500)
+        {
+            AddError(result, "randomBotCount", "Random bot count must be between 0 and 2500.");
         }
     }
 
@@ -220,9 +243,13 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
                     $"Module '{module.Name}' is not available for the {configuration.ServerType} server type.");
             }
 
+            var bundled = _serverTypeCatalog.GetBundledModuleIds(configuration.ServerType)
+                          ?? Array.Empty<string>();
+
             foreach (var requiredId in module.RequiredModuleIds)
             {
-                if (configuration.ModuleIds.Contains(requiredId, StringComparer.OrdinalIgnoreCase))
+                if (configuration.ModuleIds.Contains(requiredId, StringComparer.OrdinalIgnoreCase)
+                    || bundled.Any(id => string.Equals(id, requiredId, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
@@ -246,6 +273,18 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
                 : requiredId;
             AddError(result, "moduleIds",
                 $"{requiredName} is required for the {configuration.ServerType} server type.");
+        }
+
+        var hasSimpleOllama = configuration.ModuleIds.Contains("mod-ollama-bot-buddy", StringComparer.OrdinalIgnoreCase);
+        var hasAdvancedOllama = configuration.ModuleIds.Contains("mod-ollama-bot-buddy-advanced", StringComparer.OrdinalIgnoreCase);
+        if (hasSimpleOllama && hasAdvancedOllama)
+        {
+            AddError(result, "moduleIds", "Ollama Bot Buddy Simple and Advanced cannot be selected together.");
+        }
+
+        if (configuration.ServerType == ServerType.Express && !hasSimpleOllama && !hasAdvancedOllama)
+        {
+            AddError(result, "moduleIds", "Express Setup requires Ollama Bot Buddy (Simple or Advanced).");
         }
     }
 
@@ -386,6 +425,11 @@ public sealed class StackConfigurationValidator : IStackConfigurationValidator
 
     private static void ValidateArmoryAccounts(StackConfigurationDto configuration, ValidationResultDto result)
     {
+        if (!configuration.IncludesArmory())
+        {
+            return;
+        }
+
         var accounts = configuration.ArmoryAccounts ?? new ArmoryAccountsConfigDto();
         if (!accounts.UseEmailConfirmation)
         {

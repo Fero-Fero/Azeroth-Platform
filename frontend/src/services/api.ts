@@ -901,6 +901,9 @@ export const clientApi = {
     })
   },
 
+  downloadBase: (stackId: string) =>
+    apiClient.post<import('@/types/stack.types').ClientJobStatus>(`/stacks/${stackId}/client/download`),
+
   rescanBase: (stackId: string) =>
     apiClient.post<import('@/types/client.types').ClientBaseInfoDto>(`/stacks/${stackId}/client/rescan`),
 
@@ -1199,3 +1202,46 @@ export const launcherApi = {
     )
   },
 }
+
+export const dbcStoreApi = {
+  status: () => apiClient.get<import('@/types/module-extra-data.types').DbcBaselineStoreDto>('/dbc-store'),
+  sync: (force = false) =>
+    apiClient.post<import('@/types/module-extra-data.types').DbcBaselineStoreDto>('/dbc-store/sync', undefined, {
+      params: { force },
+    }),
+}
+
+export const moduleExtraDataApi = {
+  choices: (stackId: string) =>
+    apiClient.get<import('@/types/module-extra-data.types').StackModuleInstallChoicesDto>(
+      `/stacks/${stackId}/module-extra-data/choices`
+    ),
+  saveChoices: (stackId: string, request: import('@/types/module-extra-data.types').ApplyModuleExtraDataRequest) =>
+    apiClient.put<import('@/types/module-extra-data.types').ModuleExtraDataStackStatusDto>(
+      `/stacks/${stackId}/module-extra-data/choices`,
+      request
+    ),
+  stackStatus: (stackId: string) =>
+    apiClient.get<import('@/types/module-extra-data.types').ModuleExtraDataStackStatusDto>(
+      `/stacks/${stackId}/module-extra-data/stack-status`
+    ),
+  status: (stackId: string) =>
+    apiClient.get<import('@/types/module-extra-data.types').ModuleInstallJobStatusDto | null>(
+      `/stacks/${stackId}/module-extra-data/status`
+    ),
+  prepare: (stackId: string, request: import('@/types/module-extra-data.types').ApplyModuleExtraDataRequest) =>
+    apiClient.post<import('@/types/module-extra-data.types').ModuleInstallJobStatusDto>(
+      `/stacks/${stackId}/module-extra-data/prepare`,
+      request
+    ),
+  deposit: (stackId: string) =>
+    apiClient.post<import('@/types/module-extra-data.types').ModuleInstallJobStatusDto>(
+      `/stacks/${stackId}/module-extra-data/deposit`
+    ),
+  apply: (stackId: string, request: import('@/types/module-extra-data.types').ApplyModuleExtraDataRequest) =>
+    apiClient.post<import('@/types/module-extra-data.types').ModuleInstallJobStatusDto>(
+      `/stacks/${stackId}/module-extra-data/apply`,
+      request
+    ),
+}
+

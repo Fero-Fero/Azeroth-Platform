@@ -70,6 +70,13 @@ public readonly struct PatchIndex : IComparable<PatchIndex>, IEquatable<PatchInd
 
     public int Sub2 => _c2;
 
+    /// <summary>
+    /// First patch of an expansion: <c>1</c>, <c>1.0</c>, <c>2.0</c>, <c>3.0</c>.
+    /// Not <c>1.1</c> or a hotfix such as <c>1.0.1</c>.
+    /// </summary>
+    public bool IsExpansionBaseline =>
+        _c1 == 0 && _c2 == 0 && ComponentCount is 1 or 2;
+
     public static PatchIndex ComputeNext(
         PatchTier tier,
         int expansionRoot,

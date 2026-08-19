@@ -147,4 +147,42 @@ public interface IMigrationService
     /// applied. The removal runs before the patch publishes any new MPQ files.
     /// </summary>
     Task SetMpqRemovalsAsync(string stackId, string patchKey, IReadOnlyList<string> fileNames, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Extracts live <c>/data/dbc</c> into <c>server_dbc/</c> when the volume exists.
+    /// Returns false when the stack has not populated client-data yet (deposit should be deferred).
+    /// </summary>
+    Task<bool> TryEnsureServerDbcBaselineAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>Copies named DBC files from <c>server_dbc/</c> into the live data volume.</summary>
+    Task PushServerDbcFilesAsync(
+        string stackId,
+        IReadOnlyList<string> dbcFileNames,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Rebuilds <c>patch-D.MPQ</c> from the current <c>server_dbc/</c> set and publishes it.</summary>
+    Task RebuildPatchDAsync(string stackId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies every SQL file against one AzerothCore database in a single transaction
+    /// (world, then auth, then characters — callers sequence the three databases).
+    /// </summary>
+    Task ApplySqlFilesAsync(
+        string stackId,
+        string database,
+        IReadOnlyList<string> sqlFilePaths,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Copies an MPQ into the client overlay Data/ folder, pushes the overlay, and rescans.</summary>
+    Task PublishOverlayMpqAsync(string stackId, string mpqPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copies files into a stack data-volume subfolder (<c>maps</c>, <c>mmaps</c>, or <c>vmaps</c>),
+    /// flattening to the filename so they land at <c>/data/{subdir}/...</c>.
+    /// </summary>
+    Task PublishDataVolumeFilesAsync(
+        string stackId,
+        string volumeSubdir,
+        IReadOnlyList<string> sourceFiles,
+        CancellationToken cancellationToken = default);
 }

@@ -1,5 +1,12 @@
 import { useArmoryAssetsInfo } from '@/hooks/useArmoryAssets'
 import { useClientBaseInfo } from '@/hooks/useClient'
+import {
+  useAutoPrepareModuleExtras,
+  useDbcStoreStatus,
+  useModuleExtraDataChoices,
+  useModuleExtraDataJob,
+  useModuleExtraDataStackStatus,
+} from '@/hooks/useModuleExtraData'
 import { MODULE_IDS } from '@/setup/constants'
 import { useSetupProgressStore } from '@/setup/progress/setupProgressStore'
 import { isStackServiceRunning } from '@/setup/stackServices'
@@ -10,13 +17,18 @@ import type { StackDetailsDto } from '@/types/stack.types'
 
 export function useSetupStepContext(
   stack: StackDetailsDto,
-  onSelectTab: (tab: SetupTabId) => void,
+  onSelectTab: (tabId: SetupTabId) => void,
 ): SetupStepContext {
   const patchesHref = `/stacks/${stack.stackId}?tab=patches`
   const hasIp = stack.configuration.moduleIds?.includes(MODULE_IDS.individualProgression) ?? false
 
   const clientBase = useClientBaseInfo(stack.stackId)
   const armoryAssets = useArmoryAssetsInfo(stack.stackId)
+  const dbcStore = useDbcStoreStatus()
+  const extraChoices = useModuleExtraDataChoices(stack.stackId)
+  const extraStack = useModuleExtraDataStackStatus(stack.stackId)
+  const extraJob = useModuleExtraDataJob(stack.stackId, extraChoices.data?.modules?.length ? true : false)
+  useAutoPrepareModuleExtras(stack.stackId, dbcStore.data?.ready === true)
   const playerbots = usePlayerbotsConf(stack.stackId)
   const ip = useIpProgressionStatus(stack.stackId, hasIp)
   const progress = useSetupProgressStore(stack.stackId)
@@ -27,6 +39,21 @@ export function useSetupStepContext(
     onSelectTab,
     status: {
       soapInitialized: stack.isAdminAccountInitialized,
+      dbcStore: {
+        ready: dbcStore.data?.ready ?? false,
+        inProgress: dbcStore.data?.inProgress ?? false,
+        loading: dbcStore.isLoading,
+        tag: dbcStore.data?.tag ?? null,
+      },
+      moduleExtraData: {
+        modules: extraChoices.data?.modules ?? [],
+        loading: extraChoices.isLoading || extraStack.isLoading,
+        jobPhase: extraJob.data?.phase ?? null,
+        ipContentMode: extraStack.data?.ipContentMode ?? extraChoices.data?.saved?.ipContentMode ?? 'Unset',
+        prepared: extraStack.data?.prepared ?? false,
+        deposited: extraStack.data?.deposited ?? false,
+        hasPendingDeposit: extraStack.data?.hasPendingDeposit ?? false,
+      },
       client: {
         dataUploaded: clientBase.data?.exists ?? false,
         containerRunning: isStackServiceRunning(stack, 'client'),

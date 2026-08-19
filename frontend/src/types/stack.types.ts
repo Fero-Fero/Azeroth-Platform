@@ -5,6 +5,7 @@ export enum ServerType {
   IndividualProgression = 'IndividualProgression',
   NpcBots = 'NpcBots',
   Custom = 'Custom',
+  Express = 'Express',
 }
 
 /** Wizard-facing server-type description sourced from the backend server-type catalog. */
@@ -20,6 +21,8 @@ export interface ServerTypeInfoDto {
   allowCustomRepository: boolean
   /** Modules auto-selected and locked for this server type. */
   requiredModuleIds?: string[]
+  /** When true, the wizard only offers this type for local deployments. */
+  localOnly?: boolean
 }
 
 /** User-supplied AzerothCore fork used when the selected server type allows a custom repository. */
@@ -383,12 +386,15 @@ export interface StackConfigurationDto {
   stackName: string
   serverType: ServerType
   moduleIds: string[]
+  addonIds?: string[]
   database: DatabaseConfigDto
   ports: PortConfigDto
   advanced: AdvancedConfigDto
   deployment?: DeploymentConfigDto
   customFork?: CustomForkConfigDto
   armoryAccounts?: ArmoryAccountsConfigDto
+  includeArmory?: boolean
+  randomBotCount?: number
   /** Completes this unfinished VPC draft instead of creating a new stack. */
   draftStackId?: string
 }
@@ -691,7 +697,11 @@ export interface StackDetailsDto {
   wizardStepId?: string | null
   /** When SSH hardening last succeeded (root / image-default users locked out of internet SSH). */
   sshHardeningCompletedAt?: string | null
+  expressProvisionStatus?: ExpressProvisionStatus
+  expressProvisionMessage?: string
 }
+
+export type ExpressProvisionStatus = 'None' | 'Pending' | 'Running' | 'Completed' | 'Failed'
 
 export interface StackSetupDraftRequestDto {
   stackId?: string
@@ -747,12 +757,13 @@ export interface ArmoryJobStatus {
   isRunning: boolean
 }
 
-export type ClientJobAction = 'Start' | 'Stop' | 'Restart' | 'Recreate'
+export type ClientJobAction = 'Start' | 'Stop' | 'Restart' | 'Recreate' | 'DownloadBase'
 export type ClientJobPhase =
   | 'Starting'
   | 'Stopping'
   | 'Restarting'
   | 'Recreating'
+  | 'Downloading'
   | 'Completed'
   | 'Failed'
 

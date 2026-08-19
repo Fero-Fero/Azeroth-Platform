@@ -16,10 +16,12 @@ namespace AzerothPlatform.Api.Controllers;
 public class ClientController : ControllerBase
 {
     private readonly IClientService _client;
+    private readonly IClientJobService _clientJobs;
 
-    public ClientController(IClientService client)
+    public ClientController(IClientService client, IClientJobService clientJobs)
     {
         _client = client;
+        _clientJobs = clientJobs;
     }
 
     /// <summary>Returns a summary of the stack's currently uploaded base client.</summary>
@@ -52,6 +54,19 @@ public class ClientController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    /// <summary>Downloads the configured base-client archive into this stack (background job).</summary>
+    [HttpPost("download")]
+    public async Task<ActionResult<ClientJobStatusDto>> DownloadBase(string stackId, CancellationToken cancellationToken)
+    {
+        var info = await _client.GetBaseInfoAsync(stackId, cancellationToken);
+        if (!info.DownloadAvailable)
+        {
+            return BadRequest(new { error = info.DownloadUnavailableReason ?? "Download is not configured." });
+        }
+
+        return Ok(_clientJobs.Enqueue(stackId, ClientJobAction.DownloadBase));
     }
 
     /// <summary>Re-seeds the stack's base client volume from its base directory.</summary>

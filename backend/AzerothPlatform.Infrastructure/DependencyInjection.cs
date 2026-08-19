@@ -5,6 +5,7 @@ using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Services;
 using AzerothPlatform.Infrastructure.Services.Cloud;
 using AzerothPlatform.Infrastructure.Services.Cloud.Auth;
+using AzerothPlatform.Infrastructure.Services.DbcStore;
 using AzerothPlatform.Infrastructure.Services.Parsers;
 using AzerothPlatform.Infrastructure.Services.RemoteHost;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +46,10 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(ClientDistributionOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.RootPath), "Client:RootPath is required.")
             .ValidateOnStart();
+
+        services
+            .AddOptions<ClientDownloadOptions>()
+            .Bind(configuration.GetSection(ClientDownloadOptions.SectionName));
 
         services
             .AddOptions<MigrationOptions>()
@@ -105,7 +110,13 @@ public static class DependencyInjection
         services.AddSingleton<ISecretProtector, SecretProtector>();
         services.AddSingleton<IManifestSigningKeyProvider, ManifestSigningKeyProvider>();
         services.AddSingleton<IClientDistributionService, ClientDistributionService>();
+        services.AddHttpClient("BaseClientDownload", client =>
+        {
+            client.Timeout = TimeSpan.FromHours(2);
+        });
+        services.AddSingleton<BaseClientDownloader>();
         services.AddScoped<IClientService, ClientService>();
+        services.AddSingleton<IExpressProvisionService, Services.Modules.Install.ExpressProvisionService>();
         services.AddScoped<IClientContainerService, ClientContainerService>();
         services.AddScoped<IMigrationService, Services.Migrations.MigrationService>();
         services.AddSingleton<IMigrationImageService, Services.Migrations.MigrationImageService>();
@@ -172,9 +183,26 @@ public static class DependencyInjection
         services.AddScoped<IModuleConfigParser, TransmogConfigParser>();
         services.AddScoped<IModuleConfigParser, AutoBalanceConfigParser>();
         services.AddScoped<IModuleConfigParser, AhBotConfigParser>();
+
+        services.AddSingleton<WowgamingClientDataClient>();
+        services.AddSingleton<IWdbxCli, Services.Modules.Install.WdbxCli>();
+        services.AddSingleton<IMpqToolCli, Services.Modules.Install.MpqToolCli>();
+        services.AddSingleton<IDbcBaselineStore, Services.DbcStore.DbcBaselineStore>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.IndividualProgressionInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.PetBattleInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.AioInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.GuildLevelsInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.BlackMarketAuctionHouseInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.IpChallengeSystemInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.ClanCentaurInstallHook>();
+        services.AddSingleton<IModuleInstallHook, Services.Modules.Install.Hooks.DelvesInstallHook>();
+        services.AddSingleton<IModuleInstallHookRunner, Services.Modules.Install.ModuleInstallHookRunner>();
+        services.AddScoped<IModuleInstallOrchestrator, Services.Modules.Install.ModuleInstallOrchestrator>();
+        services.AddSingleton<IModuleInstallJobService, Services.Modules.Install.ModuleInstallJobService>();
         
         // Background services
         services.AddHostedService<StackUpdateCheckerService>();
+        services.AddHostedService<Services.DbcStore.DbcBaselineStoreHostedService>();
 
         return services;
     }

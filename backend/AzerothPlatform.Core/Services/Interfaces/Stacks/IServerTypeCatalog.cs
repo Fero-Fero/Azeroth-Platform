@@ -34,6 +34,12 @@ public interface IServerTypeCatalog
     IReadOnlyList<string> GetRequiredModuleIds(ServerType serverType);
 
     /// <summary>
+    /// Module ids compiled into this server type's core fork. They satisfy
+    /// <see cref="ModuleDto.RequiredModuleIds"/> even when hidden from the catalog.
+    /// </summary>
+    IReadOnlyList<string> GetBundledModuleIds(ServerType serverType);
+
+    /// <summary>
     /// The repository URL + branch a module should be cloned from for the given server type, applying
     /// any per-type override (falling back to the module's own repository/branch).
     /// </summary>

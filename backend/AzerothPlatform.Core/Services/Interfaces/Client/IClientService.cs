@@ -20,6 +20,12 @@ public interface IClientService
     /// </summary>
     Task<ClientBaseInfoDto> UploadBaseClientAsync(string stackId, Stream archiveStream, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Downloads the configured base-client URL (archive or public Google Drive folder) into the
+    /// stack using the same extract/seed path as upload. Throws when the URL is not configured.
+    /// </summary>
+    Task<ClientBaseInfoDto> DownloadBaseClientAsync(string stackId, CancellationToken cancellationToken = default);
+
     /// <summary>Re-seeds the stack's base client volume from its base directory so a running stack picks up changes.</summary>
     Task<ClientBaseInfoDto> RescanBaseAsync(string stackId, CancellationToken cancellationToken = default);
 

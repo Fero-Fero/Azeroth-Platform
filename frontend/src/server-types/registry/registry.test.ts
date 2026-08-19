@@ -8,6 +8,7 @@ const DEFAULT_CATALOG_IDS = [
   ServerType.IndividualProgression,
   ServerType.NpcBots,
   ServerType.Custom,
+  ServerType.Express,
 ]
 
 describe('serverTypeDefinitions', () => {

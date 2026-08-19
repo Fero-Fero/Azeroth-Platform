@@ -300,9 +300,12 @@ public sealed class StackService : IStackService
             realmlistHost = RealmlistHostResolver.ResolveForRealmAddress(realmlistHost, cancellationToken);
         }
 
-        var armoryPort = existingDraft is { ArmoryPort: > 0 }
-            ? existingDraft.ArmoryPort
-            : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultArmoryPort);
+        var includeArmory = configuration.IncludesArmory();
+        var armoryPort = !includeArmory
+            ? 0
+            : existingDraft is { ArmoryPort: > 0 }
+                ? existingDraft.ArmoryPort
+                : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultArmoryPort);
         var clientPort = existingDraft is { ClientPort: > 0 }
             ? existingDraft.ClientPort
             : await AllocateStackPortAsync(cancellationToken, StackNetworkDefaults.DefaultClientPort, armoryPort);
@@ -323,18 +326,44 @@ public sealed class StackService : IStackService
         stack.ServerType = configuration.ServerType;
         stack.Status = StackStatus.Stopped;
         stack.ModuleIdsJson = JsonSerializer.Serialize(configuration.ModuleIds, JsonOptions);
+        stack.AddonIdsJson = JsonSerializer.Serialize(configuration.AddonIds ?? [], JsonOptions);
         stack.DatabaseRootPassword = configuration.Database.RootPassword;
         stack.DatabasePort = configuration.Database.Port;
         stack.AuthServerPort = configuration.Ports.AuthServer;
         stack.WorldServerPort = configuration.Ports.WorldServer;
         stack.SoapPort = configuration.Ports.SoapPort;
         stack.ArmoryPort = armoryPort;
+        stack.IncludeArmory = includeArmory;
+        if (!includeArmory)
+        {
+            stack.ArmoryEnabled = false;
+        }
+        stack.RandomBotCount = Math.Clamp(configuration.RandomBotCount, 0, 2500);
+        if (configuration.ServerType == ServerType.Express)
+        {
+            stack.ExpressProvisionStatus = ExpressProvisionStatus.Pending;
+            stack.ExpressProvisionMessage = "Waiting for the first build to finish.";
+            if (string.IsNullOrWhiteSpace(stack.DatabaseRootPassword))
+            {
+                stack.DatabaseRootPassword = "password";
+            }
+        }
         stack.ClientPort = clientPort;
         stack.ClientEnabled = true;
         stack.MaxPlayers = configuration.Advanced.MaxPlayers;
         stack.RealmName = configuration.Advanced.RealmName.Trim();
         stack.ServiceEnvVarsJson = serviceEnvJson;
         stack.RealmlistHostOverride = realmlistHost;
+        if (configuration.ServerType == ServerType.Express)
+        {
+            if (string.IsNullOrWhiteSpace(stack.RealmName))
+            {
+                stack.RealmName = "Express";
+            }
+
+            stack.RealmlistHostOverride = "127.0.0.1";
+            stack.PublishBindAddress = "127.0.0.1";
+        }
         stack.DeploymentTarget = deployment.Target;
         stack.ExternalHost = externalHost;
         stack.ExternalSshPort = deployment.ExternalSshPort <= 0 ? 22 : deployment.ExternalSshPort;
@@ -356,7 +385,7 @@ public sealed class StackService : IStackService
         ApplyCloudBinding(stack, deployment, replaceEmpty: true);
         StampSshHardeningIfBootstrapSecured(stack, deployment);
 
-        ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
+        ApplyArmoryEmailSettings(stack, includeArmory ? configuration.ArmoryAccounts : null);
 
         // For a custom-fork server type, persist the user-supplied core repository/branch up front. The
         // build pipeline prefers a stored CoreRepositoryUrl over the catalog, so this makes it clone the
@@ -407,7 +436,7 @@ public sealed class StackService : IStackService
                         RemoteOs = stack.RemoteOs,
                         AuthServerPort = stack.AuthServerPort,
                         WorldServerPort = stack.WorldServerPort,
-                        ArmoryPort = stack.ArmoryPort,
+                        ArmoryPort = stack.IncludeArmory ? stack.ArmoryPort : 0,
                         ClientPort = stack.ClientPort,
                         SshPort = stack.ExternalSshPort
                     },
@@ -472,6 +501,7 @@ public sealed class StackService : IStackService
             ServiceEnvVarsJson = "{}",
             AppliedPatchesJson = "[]",
             ClientEnabled = true,
+            IncludeArmory = true,
             RealmName = "AzerothCore",
             MaxPlayers = 100,
             ExternalSshPort = 22,
@@ -848,6 +878,7 @@ public sealed class StackService : IStackService
 
         // Update database record
         stack.ModuleIdsJson = JsonSerializer.Serialize(configuration.ModuleIds, JsonOptions);
+        stack.AddonIdsJson = JsonSerializer.Serialize(configuration.AddonIds ?? [], JsonOptions);
         // The details payload no longer returns the root password (see MapAsync), so a blank value on
         // update means "keep the existing password" rather than wiping it.
         if (!string.IsNullOrWhiteSpace(configuration.Database.RootPassword))
@@ -862,7 +893,13 @@ public sealed class StackService : IStackService
         stack.RealmName = configuration.Advanced.RealmName.Trim();
         stack.ServiceEnvVarsJson = BuildEnvJson(configuration.Advanced);
         stack.RealmlistHostOverride = RealmlistHostResolver.NormalizeHost(configuration.Advanced.RealmlistHost ?? string.Empty);
-        ApplyArmoryEmailSettings(stack, configuration.ArmoryAccounts);
+        stack.IncludeArmory = configuration.IncludesArmory();
+        stack.RandomBotCount = Math.Clamp(configuration.RandomBotCount, 0, 2500);
+        if (!stack.IncludeArmory)
+        {
+            stack.ArmoryEnabled = false;
+        }
+        ApplyArmoryEmailSettings(stack, stack.IncludeArmory ? configuration.ArmoryAccounts : null);
 
         // Post-create deployment editing: the target itself is fixed (flipping local<->external is a
         // migration, not an edit), but an external stack's connection details can be updated. A blank
@@ -1027,7 +1064,7 @@ public sealed class StackService : IStackService
             {
                 WasFullyStopped = snapshot.WasFullyStopped,
                 ClientEnabled = stack.ClientEnabled,
-                ArmoryEnabled = stack.ArmoryEnabled,
+                ArmoryEnabled = stack.IncludeArmory && stack.ArmoryEnabled,
                 DatabaseRunning = snapshot.Database,
                 AuthRunning = snapshot.Auth,
                 WorldRunning = snapshot.World,
@@ -1315,7 +1352,7 @@ public sealed class StackService : IStackService
     /// </summary>
     private void MaybeQueueArmoryDbcSync(ManagedStackEntity stack, bool wasLoadDbcsEnabled)
     {
-        if (!stack.ArmoryEnabled)
+        if (!stack.IncludeArmory || !stack.ArmoryEnabled)
         {
             return;
         }
@@ -1590,9 +1627,9 @@ public sealed class StackService : IStackService
         {
             ReportLifecycleProgress(stackId, "Preparing stack images…");
 
-            // Start the armory alongside the stack. Best-effort: if the image can't be built we
-            // simply omit it from the compose so the game servers still start.
-            var armoryReady = await TryEnsureArmoryImageAsync(stack.Id, cancellationToken);
+            // Start the armory alongside the stack only when the stack includes it. Best-effort:
+            // if the image can't be built we omit it from the compose so the game servers still start.
+            var armoryReady = stack.IncludeArmory && await TryEnsureArmoryImageAsync(stack.Id, cancellationToken);
             stack.ArmoryEnabled = armoryReady;
 
             // Same for the per-stack client-server: build/ensure the shared image (on the stack's
@@ -1812,7 +1849,7 @@ public sealed class StackService : IStackService
 
         try
         {
-            var armoryReady = await TryEnsureArmoryImageAsync(stack.Id, cancellationToken);
+            var armoryReady = stack.IncludeArmory && await TryEnsureArmoryImageAsync(stack.Id, cancellationToken);
             stack.ArmoryEnabled = armoryReady;
             var clientReady = stack.ClientEnabled && await TryEnsureClientImageAsync(stack, cancellationToken);
 
@@ -2055,6 +2092,11 @@ public sealed class StackService : IStackService
         if (stack is null)
         {
             return false;
+        }
+
+        if (!stack.IncludeArmory)
+        {
+            throw new InvalidOperationException("This stack was created without the armory.");
         }
 
         var repoPath = Path.Combine(GetStackPath(stackId), "azerothcore-wotlk");
@@ -3252,6 +3294,7 @@ public sealed class StackService : IStackService
                 StackName = stack.StackName,
                 ServerType = stack.ServerType,
                 ModuleIds = Deserialize<List<string>>(stack.ModuleIdsJson) ?? [],
+                AddonIds = Deserialize<List<string>>(stack.AddonIdsJson) ?? [],
                 Database = new DatabaseConfigDto
                 {
                     // Secrets are not returned in the standard payload; use the audited reveal endpoint
@@ -3295,7 +3338,9 @@ public sealed class StackService : IStackService
                         Branch = stack.CoreBranch
                     }
                     : null,
-                ArmoryAccounts = MapArmoryAccountsConfig(stack)
+                ArmoryAccounts = MapArmoryAccountsConfig(stack),
+                IncludeArmory = stack.IncludeArmory,
+                RandomBotCount = stack.RandomBotCount,
             },
             UpdateStatus = updateStatus,
             IsAdminAccountInitialized = isAdminAccountInitialized,
@@ -3312,6 +3357,8 @@ public sealed class StackService : IStackService
                 ? (string.IsNullOrWhiteSpace(stack.WizardStepId) ? "deployment" : stack.WizardStepId)
                 : null,
             SshHardeningCompletedAt = stack.SshHardeningCompletedAt,
+            ExpressProvisionStatus = stack.ExpressProvisionStatus,
+            ExpressProvisionMessage = stack.ExpressProvisionMessage,
         };
     }
 
@@ -4203,13 +4250,13 @@ public sealed class StackService : IStackService
     {
         // The armory service is only rendered into the override when requested; otherwise a plain
         // `up -d` would try to use the (registry-less) armory image and fail the whole stack.
-        var renderArmory = includeArmory ?? stack.ArmoryEnabled;
+        var renderArmory = stack.IncludeArmory && (includeArmory ?? stack.ArmoryEnabled);
         var renderClient = includeClient ?? stack.ClientEnabled;
         var environmentPath = Path.Combine(repoPath, ".env");
         var overridePath = Path.Combine(repoPath, "docker-compose.override.yml");
         var composeProjectName = DockerComposeOverrideGenerator.GetComposeProjectName(stack.Id);
 
-        if (stack.ArmoryPort <= 0 || stack.ClientPort <= 0)
+        if (stack.ClientPort <= 0 || (stack.IncludeArmory && stack.ArmoryPort <= 0))
         {
             throw new InvalidOperationException(
                 $"Stack '{stack.StackName}' is missing required published ports (armory={stack.ArmoryPort}, client={stack.ClientPort}).");
@@ -4263,13 +4310,15 @@ public sealed class StackService : IStackService
         var dataBind = localStack
             ? WithColon(_dockerOptions.DataPlaneBindAddress, "127.0.0.1")
             : (string.IsNullOrWhiteSpace(externalDataBind) ? string.Empty : externalDataBind + ":");
+        // Express is this-machine only: bind auth/world to loopback so they are not reachable on LAN.
+        var gameBind = stack.ServerType == ServerType.Express ? "127.0.0.1:" : string.Empty;
         var environment = new StringBuilder()
             .AppendLine("# AzerothCore Environment Configuration")
             .AppendLine($"DOCKER_DB_ROOT_PASSWORD=\"{stack.DatabaseRootPassword.Replace("$", "$$")}\"")
             .AppendLine($"DOCKER_DB_EXTERNAL_PORT={dataBind}{stack.DatabasePort}")
-            .AppendLine($"DOCKER_WORLD_EXTERNAL_PORT={stack.WorldServerPort}")
+            .AppendLine($"DOCKER_WORLD_EXTERNAL_PORT={gameBind}{stack.WorldServerPort}")
             .AppendLine($"DOCKER_SOAP_EXTERNAL_PORT={dataBind}{stack.SoapPort}")
-            .AppendLine($"DOCKER_AUTH_EXTERNAL_PORT={stack.AuthServerPort}")
+            .AppendLine($"DOCKER_AUTH_EXTERNAL_PORT={gameBind}{stack.AuthServerPort}")
             .AppendLine($"DOCKER_ARMORY_EXTERNAL_PORT={publishBind}{stack.ArmoryPort}")
             .AppendLine($"DOCKER_CLIENT_EXTERNAL_PORT={publishBind}{stack.ClientPort}")
             .AppendLine($"DOCKER_IMAGE_TAG={stack.Id}")
@@ -4509,7 +4558,7 @@ public sealed class StackService : IStackService
             DisplayName = displayName,
             RealmlistHost = ResolveRealmlistHost(stack),
             RealmlistPort = stack.AuthServerPort,
-            ArmoryPort = stack.ArmoryEnabled ? stack.ArmoryPort : 0,
+            ArmoryPort = stack.IncludeArmory && stack.ArmoryEnabled ? stack.ArmoryPort : 0,
             Template = stack.LauncherTemplate,
         };
     }
@@ -4596,7 +4645,7 @@ public sealed class StackService : IStackService
     /// </summary>
     private (string AssetProxyUrl, bool AssetsAvailable) ResolveArmoryAssets(ManagedStackEntity stack)
     {
-        if (!stack.ArmoryEnabled)
+        if (!stack.IncludeArmory || !stack.ArmoryEnabled)
         {
             return (string.Empty, false);
         }
@@ -5745,7 +5794,7 @@ public sealed class StackService : IStackService
                 EnableUnattendedUpgrades = false,
                 AuthServerPort = stack.AuthServerPort,
                 WorldServerPort = stack.WorldServerPort,
-                ArmoryPort = stack.ArmoryPort,
+                ArmoryPort = stack.IncludeArmory ? stack.ArmoryPort : 0,
                 ClientPort = stack.ClientPort,
                 SshPort = stack.ExternalSshPort
             },
@@ -5844,7 +5893,7 @@ public sealed class StackService : IStackService
                 RemoteOs = stack.RemoteOs,
                 AuthServerPort = stack.AuthServerPort,
                 WorldServerPort = stack.WorldServerPort,
-                ArmoryPort = stack.ArmoryPort,
+                ArmoryPort = stack.IncludeArmory ? stack.ArmoryPort : 0,
                 ClientPort = stack.ClientPort,
                 SshPort = stack.ExternalSshPort
             },
@@ -5864,7 +5913,7 @@ public sealed class StackService : IStackService
             stack.ExternalHost,
             stack.AuthServerPort,
             stack.WorldServerPort,
-            stack.ArmoryPort,
+            stack.IncludeArmory ? stack.ArmoryPort : 0,
             stack.ClientPort,
             stack.DatabasePort,
             stack.SoapPort,
@@ -5886,7 +5935,7 @@ public sealed class StackService : IStackService
             stack.ExternalHost,
             stack.AuthServerPort,
             stack.WorldServerPort,
-            stack.ArmoryPort,
+            stack.IncludeArmory ? stack.ArmoryPort : 0,
             stack.ClientPort,
             stack.DatabasePort,
             stack.SoapPort,

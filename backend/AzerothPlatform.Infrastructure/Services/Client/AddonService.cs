@@ -88,6 +88,18 @@ public sealed class AddonService : IAddonService
         },
         new()
         {
+            Id = "buddy-bot-ui",
+            Name = "BuddyBotUI",
+            Description = "Debug panels for mod-ollama-bot-buddy: live bot state, recent commands, and LLM reasoning. Optional; only offered when that module is on the stack.",
+            Category = "UI",
+            DownloadUrl = "https://github.com/DustinHendrickson/addon-ollama-bot-buddy/archive/refs/heads/main.zip",
+            Website = "https://github.com/DustinHendrickson/addon-ollama-bot-buddy",
+            Folders = ["BuddyBotUI"],
+            InstallAsFolder = "BuddyBotUI",
+            RelatedModuleIds = ["mod-ollama-bot-buddy", "mod-ollama-bot-buddy-advanced"],
+        },
+        new()
+        {
             Id = "atlas-loot-individual-progression",
             Name = "AtlasLoot Individual Progression",
             Description = "Restored loot tables for Naxxramas 40-man, Onyxia's Lair 40-man, and Kazzak for progressive servers running through Vanilla, TBC, and WotLK.",
@@ -96,7 +108,7 @@ public sealed class AddonService : IAddonService
             Website = "https://github.com/Day36512/Atlas-Loot-Individual-Progression-3.3.5",
             Folders = ["AtlasLoot"],
             RelatedModuleIds = ["mod-individual-progression"],
-            RelatedServerTypes = [nameof(ServerType.IndividualProgression)],
+            RelatedServerTypes = [nameof(ServerType.IndividualProgression), nameof(ServerType.Express)],
         },
         new()
         {
@@ -337,7 +349,7 @@ public sealed class AddonService : IAddonService
         try
         {
             var http = _httpClientFactory.CreateClient();
-            http.Timeout = TimeSpan.FromMinutes(5);
+            http.Timeout = TimeSpan.FromMinutes(30);
             using (var response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
             {
                 response.EnsureSuccessStatusCode();
@@ -355,6 +367,38 @@ public sealed class AddonService : IAddonService
             try { File.Delete(tempZip); } catch { /* best effort */ }
         }
 
+        await RescanAsync(stackId, cancellationToken);
+        return BuildList(stackId, addonsDir);
+    }
+
+    public async Task<AddonListDto> InstallFromDirectoryAsync(
+        string? stackId,
+        string sourceDirectory,
+        string folderName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(folderName)
+            || folderName.IndexOfAny(['/', '\\']) >= 0
+            || folderName.Contains("..", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Invalid addon folder name.", nameof(folderName));
+        }
+
+        if (!Directory.Exists(sourceDirectory))
+        {
+            throw new DirectoryNotFoundException($"Addon source directory not found: {sourceDirectory}");
+        }
+
+        var addonsDir = ResolveAddonsDir(stackId);
+        Directory.CreateDirectory(addonsDir);
+        var target = SafeResolveChild(addonsDir, folderName);
+        if (Directory.Exists(target))
+        {
+            Directory.Delete(target, recursive: true);
+        }
+
+        CopyDirectory(sourceDirectory, target);
+        _logger.LogInformation("Installed addon folder {Folder} into {Dir}", folderName, addonsDir);
         await RescanAsync(stackId, cancellationToken);
         return BuildList(stackId, addonsDir);
     }

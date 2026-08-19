@@ -68,4 +68,16 @@ public sealed class MigrationOptions
     /// </summary>
     public string ClientSettingsTemplatePath { get; set; } = "/app/client-example/settings";
 
+    /// <summary>
+    /// When true, failed extra-data sessions keep their temp directory for debugging.
+    /// Default is always delete.
+    /// </summary>
+    public bool KeepModuleInstallTemp { get; set; }
+
+    /// <summary>
+    /// When true, the manager starts a background wowgaming/client-data sync if <c>dbc-store/</c> is empty.
+    /// Disable in tests so the suite never downloads Data.zip.
+    /// </summary>
+    public bool DbcStoreAutoSyncOnStart { get; set; } = true;
+
 }

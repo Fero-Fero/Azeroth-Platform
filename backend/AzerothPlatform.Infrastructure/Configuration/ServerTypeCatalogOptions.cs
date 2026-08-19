@@ -24,7 +24,8 @@ public sealed class ServerTypeCatalogOptions
             Playerbots.Catalog,
             IndividualProgression.Catalog,
             NpcBots.Catalog,
-            Custom.Catalog
+            Custom.Catalog,
+            Express.Catalog
         ],
         ModuleRules = [.. ModuleVisibilityRules.All]
     };
@@ -55,6 +56,9 @@ public sealed class ServerTypeDefinition
     public List<string> BundledModuleIds { get; set; } = new();
 
     public List<string> RequiredModuleIds { get; set; } = new();
+
+    /// <summary>When true, this type is only valid for local deployments.</summary>
+    public bool LocalOnly { get; set; }
 }
 
 public sealed class ModuleVisibilityRule

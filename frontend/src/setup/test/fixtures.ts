@@ -11,6 +11,8 @@ export function createMockStatus(overrides: Partial<SetupStepStatus> = {}): Setu
   const progress = overrides.progress ?? createMockProgress()
   return {
     soapInitialized: false,
+    dbcStore: { ready: true, inProgress: false, loading: false, tag: 'v20.0' },
+    moduleExtraData: { modules: [], loading: false, jobPhase: null, ipContentMode: 'Unset', prepared: false, deposited: false, hasPendingDeposit: false },
     client: { dataUploaded: false, containerRunning: false, loading: false },
     armory: { dbcUploaded: false, containerRunning: false, loading: false },
     playerbots: { confPath: null, enabled: null, loading: false },

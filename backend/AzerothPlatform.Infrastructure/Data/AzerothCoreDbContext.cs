@@ -42,6 +42,7 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.ServerType).HasConversion<string>().IsRequired();
             entity.Property(stack => stack.Status).HasConversion<string>().IsRequired();
             entity.Property(stack => stack.ModuleIdsJson).IsRequired();
+            entity.Property(stack => stack.AddonIdsJson).IsRequired();
             entity.Property(stack => stack.DatabaseRootPassword).HasMaxLength(256).IsRequired();
             entity.Property(stack => stack.RealmName).HasMaxLength(50).IsRequired();
             entity.Property(stack => stack.ServiceEnvVarsJson).IsRequired();
@@ -49,6 +50,8 @@ public class AzerothCoreDbContext : DbContext
             entity.Property(stack => stack.ApplyingPatchKey).HasMaxLength(128);
             entity.Property(stack => stack.ApplyRunId).HasMaxLength(64);
             entity.Property(stack => stack.PostBuildAction).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(stack => stack.ExpressProvisionStatus).HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(stack => stack.ExpressProvisionMessage).HasMaxLength(512).IsRequired();
             entity.Property(stack => stack.LauncherDisplayName).HasMaxLength(100).IsRequired();
             entity.Property(stack => stack.LauncherDescription).HasMaxLength(2000).IsRequired();
             entity.Property(stack => stack.RealmlistHostOverride).HasMaxLength(255).IsRequired();

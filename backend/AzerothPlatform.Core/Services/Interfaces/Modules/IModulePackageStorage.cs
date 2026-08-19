@@ -20,4 +20,7 @@ public interface IModulePackageStorage
 
     /// <summary>Returns the module's README markdown, or null when none is present.</summary>
     Task<string?> ReadReadmeAsync(string moduleId, CancellationToken cancellationToken = default);
+
+    /// <summary>Absolute path of the stored package directory (may not exist yet).</summary>
+    string GetPackageDirectory(string moduleId);
 }

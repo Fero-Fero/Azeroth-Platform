@@ -42,12 +42,16 @@ public sealed class ServerTypeCatalog : IServerTypeCatalog
                 CoreRepositoryUrl = definition.CoreRepositoryUrl,
                 CoreBranch = definition.CoreBranch,
                 AllowCustomRepository = definition.AllowCustomRepository,
-                RequiredModuleIds = definition.RequiredModuleIds.ToList()
+                RequiredModuleIds = definition.RequiredModuleIds.ToList(),
+                LocalOnly = definition.LocalOnly
             })
             .ToList();
 
     public IReadOnlyList<string> GetRequiredModuleIds(ServerType serverType) =>
         Find(serverType)?.RequiredModuleIds ?? [];
+
+    public IReadOnlyList<string> GetBundledModuleIds(ServerType serverType) =>
+        Find(serverType)?.BundledModuleIds ?? [];
 
     public (string RepositoryUrl, string Branch) GetCoreRepository(ServerType serverType)
     {

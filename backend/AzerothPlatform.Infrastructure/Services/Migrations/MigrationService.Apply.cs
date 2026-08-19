@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
+using AzerothPlatform.Infrastructure.Services.Modules.Install;
 using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using Microsoft.Extensions.Logging;
 
@@ -231,6 +232,20 @@ public sealed partial class MigrationService
         var hasDbcCsv = dbcCsvFiles.Count > 0;
         var hasDbcDirect = dbcBinaryFiles.Count > 0;
         var hasDbc = hasDbcCsv || hasDbcDirect;
+        if (hasDbc)
+        {
+            var swpMeta = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
+            if (swpMeta is not null && !patch.Index.IsExpansionBaseline)
+            {
+                result.Success = false;
+                result.Error =
+                    $"{SwpDbcRestrictedException.DefaultMessage} Patch '{patch.Key}' still has files under dbc/.";
+                activity?.SetStatus(ActivityStatusCode.Error, result.Error);
+                _logger.LogWarning("Rejected apply of patch {PatchKey} on stack {StackId}: {Reason}", patch.Key, stackId, result.Error);
+                return result;
+            }
+        }
+
         var hasSql = PatchHasSql(stackRoot, patch.Key);
         var hasMap = PatchHasMap(stackRoot, patch.Key);
         var hasMpq = PatchHasMpq(stackRoot, patch.Key);
@@ -321,6 +336,13 @@ public sealed partial class MigrationService
                     updatedDbc = updatedDbc.Concat(placed).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     return Task.CompletedTask;
                 }, cancellationToken);
+            }
+
+            if (updatedDbc.Count > 0)
+            {
+                await RunStageAsync("restamp-module-csvs", result,
+                    () => RestampInstalledModuleCsvsAsync(stack, stackRoot, updatedDbc, result, cancellationToken),
+                    cancellationToken);
             }
 
             if (hasDbc)
@@ -677,6 +699,17 @@ public sealed partial class MigrationService
             foreach (var plan in plans)
             {
                 var patch = plan.Patch;
+                var patchUpdated = new List<string>();
+
+                if (plan.DbcCsv.Count > 0 || plan.DbcBinary.Count > 0)
+                {
+                    var swpMeta = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
+                    if (swpMeta is not null && !patch.Index.IsExpansionBaseline)
+                    {
+                        throw new SwpDbcRestrictedException(
+                            $"{SwpDbcRestrictedException.DefaultMessage} Patch '{patch.Key}' still has files under dbc/.");
+                    }
+                }
 
                 if (plan.DbcCsv.Count > 0)
                 {
@@ -684,7 +717,7 @@ public sealed partial class MigrationService
                     {
                         AddLog(result, $"Compiling {plan.DbcCsv.Count} DBC CSV(s) for {patch.Key}...");
                         var compiled = await ApplyDbcAsync(stack, stackRoot, patch.Key, plan.DbcCsv, result, cancellationToken);
-                        updatedDbc.AddRange(compiled);
+                        patchUpdated.AddRange(compiled);
                     }, cancellationToken);
                 }
 
@@ -693,9 +726,17 @@ public sealed partial class MigrationService
                     await RunStageAsync($"place-dbc:{patch.Key}", result, () =>
                     {
                         var placed = PlaceDirectDbc(stackRoot, plan.DbcBinary, result);
-                        updatedDbc.AddRange(placed);
+                        patchUpdated.AddRange(placed);
                         return Task.CompletedTask;
                     }, cancellationToken);
+                }
+
+                if (patchUpdated.Count > 0)
+                {
+                    await RunStageAsync($"restamp-module-csvs:{patch.Key}", result,
+                        () => RestampInstalledModuleCsvsAsync(stack, stackRoot, patchUpdated, result, cancellationToken),
+                        cancellationToken);
+                    updatedDbc.AddRange(patchUpdated);
                 }
 
                 if (plan.HasSql)
@@ -1044,6 +1085,98 @@ public sealed partial class MigrationService
 
         AddLog(result, $"Staged {names.Count} uploaded DBC file(s) directly into the server baseline (no CSV compile).");
         return names;
+    }
+
+    /// <summary>
+    /// Re-imports matching InstalledModules CSVs onto DBC tables this patch just wrote (Update + TakeNewest).
+    /// SQL/map/MPQ-only patches skip this. Conflicts still fail the apply.
+    /// </summary>
+    private async Task RestampInstalledModuleCsvsAsync(
+        Data.Entities.ManagedStackEntity stack,
+        string stackRoot,
+        List<string> updatedDbc,
+        ApplyPatchResultDto result,
+        CancellationToken cancellationToken)
+    {
+        var moduleIds = JsonSerializer.Deserialize<List<string>>(stack.ModuleIdsJson, JsonOptions) ?? [];
+        if (moduleIds.Count == 0 || updatedDbc.Count == 0)
+        {
+            return;
+        }
+
+        var tables = updatedDbc
+            .Select(CsvNormalizer.NormalizeTableName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var workDir = Path.Combine(stackRoot, ".migration-tmp", $"restamp-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workDir);
+        try
+        {
+            await _imageService.EnsureWdbxImageAsync(cancellationToken);
+            await SidecarImageShipping.ShipToStackEngineIfNeededAsync(
+                stack, _remoteEngine, _migrationOptions.WdbxImage, cancellationToken);
+
+            foreach (var table in tables)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sources = InstalledModulesLayout.CollectCsvSources(stackRoot, moduleIds, table);
+                if (sources.Count == 0)
+                {
+                    continue;
+                }
+
+                IReadOnlyList<DbcCoalesceHelper.CoalescedTable> coalesced;
+                try
+                {
+                    coalesced = await DbcCoalesceHelper.CoalesceAsync(sources, cancellationToken);
+                }
+                catch (ModuleDbcConflictException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Module CSV restamp failed for {table}.dbc: {ex.Message}", ex);
+                }
+
+                foreach (var coalescedTable in coalesced)
+                {
+                    var dbcName = $"{coalescedTable.TableName}.dbc";
+                    var baselineDbc = Path.Combine(MigrationLayout.ServerDbcDir(stackRoot), dbcName);
+                    if (!File.Exists(baselineDbc))
+                    {
+                        AddLog(result, $"  Skipping restamp of {dbcName}: no live server DBC.");
+                        continue;
+                    }
+
+                    var workDbc = Path.Combine(workDir, dbcName);
+                    var csvName = CsvNormalizer.TableFileName(coalescedTable.TableName);
+                    var workCsv = Path.Combine(workDir, csvName);
+                    File.Copy(baselineDbc, workDbc, overwrite: true);
+                    await CsvNormalizer.WriteCrlfAsync(workCsv, coalescedTable.CsvText, cancellationToken);
+
+                    AddLog(result, $"Restamping {dbcName} with InstalledModules CSVs (Update + TakeNewest)...");
+                    var toolArgs =
+                        $"-import -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -c \"{csvName}\" -h true -u Update -i TakeNewest";
+                    var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
+                        stack, workDir, _migrationOptions.WdbxImage, toolArgs, cancellationToken);
+                    if (run.ExitCode != 0)
+                    {
+                        var importOutput = string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr;
+                        throw new InvalidOperationException(
+                            $"Module CSV restamp of {dbcName} failed: {importOutput?.Trim()}");
+                    }
+
+                    File.Copy(workDbc, baselineDbc, overwrite: true);
+                    if (!updatedDbc.Exists(name => string.Equals(name, dbcName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        updatedDbc.Add(dbcName);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(workDir);
+        }
     }
 
     /// <summary>
@@ -1817,6 +1950,28 @@ public sealed partial class MigrationService
         var normalized = new LineTransformingStream(body, NormalizeSqlCommentLine, encoding);
         var postamble = new MemoryStream(encoding.GetBytes("\nCOMMIT;\n"));
         return new ConcatenatedStream(preamble, normalized, postamble);
+    }
+
+    /// <summary>
+    /// Same as <see cref="OpenTransactionalSqlStream"/> but wraps every file in <paramref name="sqlFiles"/>
+    /// in one transaction so module extra-data SQL for a database commits together.
+    /// </summary>
+    private static Stream OpenCombinedTransactionalSqlStream(IReadOnlyList<string> sqlFiles)
+    {
+        var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        var streams = new List<Stream>
+        {
+            new MemoryStream(encoding.GetBytes("SET SESSION autocommit=0;\nSTART TRANSACTION;\n"))
+        };
+        foreach (var sqlFile in sqlFiles)
+        {
+            var body = new FileStream(sqlFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+            streams.Add(new LineTransformingStream(body, NormalizeSqlCommentLine, encoding));
+            streams.Add(new MemoryStream(encoding.GetBytes("\n")));
+        }
+
+        streams.Add(new MemoryStream(encoding.GetBytes("\nCOMMIT;\n")));
+        return new ConcatenatedStream(streams.ToArray());
     }
 
     /// <summary>

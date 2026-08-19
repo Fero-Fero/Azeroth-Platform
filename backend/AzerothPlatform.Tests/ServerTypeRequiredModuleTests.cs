@@ -61,6 +61,23 @@ public sealed class ServerTypeRequiredModuleTests
             .Should().Contain("mod-individual-progression");
         catalog.GetRequiredModuleIds(ServerType.IndividualProgression)
             .Should().NotContain("mod-playerbots");
+        catalog.GetBundledModuleIds(ServerType.Playerbots).Should().Contain("mod-playerbots");
+        catalog.GetBundledModuleIds(ServerType.Standard).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GetServerTypes_exposes_express_as_local_only_with_required_modules()
+    {
+        var catalog = new ServerTypeCatalog(
+            Microsoft.Extensions.Options.Options.Create(ServerTypeCatalogOptions.Defaults));
+
+        var type = catalog.GetServerTypes().Single(item => item.Id == ServerType.Express);
+        type.LocalOnly.Should().BeTrue();
+        type.RequiredModuleIds.Should().Contain("mod-individual-progression");
+        type.RequiredModuleIds.Should().Contain("mod-playerbots");
+        type.RequiredModuleIds.Should().Contain("mod-optimal-bot-raid");
+        type.RequiredModuleIds.Should().Contain("mod-ah-bot");
+        type.CoreRepositoryUrl.Should().Contain("Grimfeather");
     }
 
     private static StackConfigurationValidator CreateValidator(

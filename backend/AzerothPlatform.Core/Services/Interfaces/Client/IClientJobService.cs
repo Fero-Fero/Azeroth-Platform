@@ -10,4 +10,6 @@ public interface IClientJobService
     ClientJobStatusDto Enqueue(string stackId, ClientJobAction action);
 
     ClientJobStatusDto? GetStatus(string stackId);
+
+    void ReportProgress(string stackId, string message);
 }

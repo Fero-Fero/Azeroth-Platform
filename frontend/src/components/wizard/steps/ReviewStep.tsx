@@ -150,6 +150,10 @@ export function ReviewStep({
             </span>
           }
         />
+        <ReviewRow label="Include Armory" value={values.includeArmory ? 'Yes' : 'No'} />
+        {values.serverType === ServerType.Express && (
+          <ReviewRow label="Random bots" value={values.randomBotCount} />
+        )}
         {selectedServerType?.allowCustomRepository && (
           <ReviewRow
             label="Custom Fork"
@@ -178,6 +182,16 @@ export function ReviewStep({
               : 'None'
           }
         />
+        {values.serverType === ServerType.Express && (
+          <ReviewRow
+            label="Selected Addons"
+            value={
+              (values.addonIds?.length ?? 0) > 0
+                ? `${values.addonIds.length} addon${values.addonIds.length !== 1 ? 's' : ''}`
+                : 'None'
+            }
+          />
+        )}
       </Section>
 
       <Section title="Database">
@@ -191,7 +205,7 @@ export function ReviewStep({
         <ReviewRow label="SOAP Port" value={values.ports.soapPort} />
       </Section>
 
-      {armoryAccounts?.useEmailConfirmation && (
+      {values.includeArmory && armoryAccounts?.useEmailConfirmation && (
         <Section title="Email Confirmation">
           {armoryAccounts.emailConfigured ? (
             <>

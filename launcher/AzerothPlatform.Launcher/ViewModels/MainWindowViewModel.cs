@@ -152,7 +152,12 @@ public partial class MainWindowViewModel : ObservableObject
     public string SelectedServerName => SelectedProfile?.DisplayName ?? string.Empty;
 
     /// <summary>True when the selected server exposes an armory the "View all news" card can open.</summary>
-    public bool CanOpenArmory => SelectedProfile is { ArmoryPort: > 0 };
+    public bool CanOpenArmory =>
+#if AZP_ENABLE_ARMORY
+        SelectedProfile is { ArmoryPort: > 0 };
+#else
+        false;
+#endif
     public bool HasNews => News.Count > 0;
     public bool HasMoreNews => News.Count > TopNews.Count;
     public bool HasAddons => Addons.Count > 0;
@@ -1185,6 +1190,11 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void Register()
     {
+#if !AZP_ENABLE_ARMORY
+        StatusText = "Registration isn't available in this launcher.";
+        DetailText = "This launcher was built without armory support.";
+        return;
+#else
         var profile = SelectedProfile is { ArmoryPort: > 0 }
             ? SelectedProfile
             : Profiles.FirstOrDefault(p => p.ArmoryPort > 0);
@@ -1197,6 +1207,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         OpenArmoryPathForProfile(profile, "/register");
+#endif
     }
 
     /// <summary>Opens the selected server's armory front page in the default browser.</summary>
@@ -1213,6 +1224,9 @@ public partial class MainWindowViewModel : ObservableObject
     /// </summary>
     private void OpenArmoryPath(string path)
     {
+#if !AZP_ENABLE_ARMORY
+        return;
+#else
         var profile = SelectedProfile;
         if (profile is null || profile.ArmoryPort <= 0)
         {
@@ -1220,6 +1234,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         OpenArmoryPathForProfile(profile, path);
+#endif
     }
 
     /// <summary>Opens a path on a specific profile's armory web app in the default browser.</summary>

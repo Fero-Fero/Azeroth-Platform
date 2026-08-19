@@ -27,9 +27,11 @@ RUN git clone --depth 1 --branch v9.25 https://github.com/ladislav-zezula/StormL
 RUN cmake -S StormLib -B StormLib/build -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
     && cmake --build StormLib/build -j"$(nproc)"
 
-COPY mkmpq.cpp .
+COPY mkmpq.cpp exmpq.cpp .
 # Link the static StormLib plus zlib/bzip2 (StormLib compresses DBC sectors with zlib).
 RUN g++ -O2 -std=c++17 -o mkmpq mkmpq.cpp -I StormLib/src \
+        StormLib/build/libstorm.a -lz -lbz2 -lpthread \
+    && g++ -O2 -std=c++17 -o exmpq exmpq.cpp -I StormLib/src \
         StormLib/build/libstorm.a -lz -lbz2 -lpthread
 
 # ---------------------------------------------------------------------------
@@ -42,6 +44,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/mkmpq /usr/local/bin/mkmpq
+COPY --from=build /src/exmpq /usr/local/bin/exmpq
 COPY create-patch-mpq.sh /usr/local/bin/create-patch-mpq.sh
 RUN sed -i 's/\r$//' /usr/local/bin/create-patch-mpq.sh \
     && chmod +x /usr/local/bin/create-patch-mpq.sh

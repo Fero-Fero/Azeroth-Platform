@@ -192,6 +192,10 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AddonIdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("AdminAccountInitializedAt")
                         .HasColumnType("TEXT");
 
@@ -245,6 +249,19 @@ namespace AzerothPlatform.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("ClientEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExpressProvisionMessage")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpressProvisionStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IncludeArmory")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("ClientPort")
@@ -406,6 +423,9 @@ namespace AzerothPlatform.Infrastructure.Migrations
                     b.Property<string>("PublishBindAddress")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("RandomBotCount")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("RealmName")
                         .IsRequired()

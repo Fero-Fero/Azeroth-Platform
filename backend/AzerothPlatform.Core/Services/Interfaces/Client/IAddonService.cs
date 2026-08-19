@@ -38,4 +38,14 @@ public interface IAddonService
     /// addon folder(s) into <c>Interface/AddOns/</c>, then rescans the client manifest.
     /// </summary>
     Task<AddonListDto> InstallFromCatalogAsync(string? stackId, string addonId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Copies an already-extracted addon folder into <c>Interface/AddOns/{folderName}</c> and rescans
+    /// the client manifest. Used by module extra-data install (not a zip upload).
+    /// </summary>
+    Task<AddonListDto> InstallFromDirectoryAsync(
+        string? stackId,
+        string sourceDirectory,
+        string folderName,
+        CancellationToken cancellationToken = default);
 }

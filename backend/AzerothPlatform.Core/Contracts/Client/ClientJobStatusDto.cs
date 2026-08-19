@@ -9,6 +9,7 @@ public enum ClientJobAction
     Stop,
     Restart,
     Recreate,
+    DownloadBase,
 }
 
 /// <summary>Coarse-grained phase of a client background job.</summary>
@@ -18,6 +19,7 @@ public enum ClientJobPhase
     Stopping,
     Restarting,
     Recreating,
+    Downloading,
     Completed,
     Failed,
 }

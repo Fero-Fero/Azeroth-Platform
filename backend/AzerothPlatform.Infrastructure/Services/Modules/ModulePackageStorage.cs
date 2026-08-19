@@ -90,6 +90,8 @@ public sealed class ModulePackageStorage : IModulePackageStorage
         return await File.ReadAllTextAsync(readme, cancellationToken);
     }
 
+    public string GetPackageDirectory(string moduleId) => GetPackageDir(moduleId);
+
     private string GetPackageDir(string moduleId)
     {
         // moduleId is validated (letters/digits/._-) before it reaches here, but guard anyway.

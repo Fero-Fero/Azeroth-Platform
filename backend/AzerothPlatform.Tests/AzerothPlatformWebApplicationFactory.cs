@@ -39,6 +39,7 @@ public sealed class AzerothPlatformWebApplicationFactory : WebApplicationFactory
         builder.UseSetting("Docker:BuildsPath", "/tmp/azp-test-builds");
         builder.UseSetting("StackUpdateChecker:CheckOnStartup", "false");
         builder.UseSetting("StackUpdateChecker:Enabled", "false");
+        builder.UseSetting("Migrations:DbcStoreAutoSyncOnStart", "false");
 
         builder.ConfigureServices(services =>
         {

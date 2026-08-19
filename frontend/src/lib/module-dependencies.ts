@@ -43,10 +43,19 @@ export function applyModuleToggle(
     const next = new Set(selectedIds)
     next.delete(moduleId)
 
-    for (const depId of collectDependencyTree(moduleId, requiredBy)) {
-      const stillNeeded = [...next].some((other) => (requiredBy[other] ?? []).includes(depId))
-      if (!stillNeeded) {
-        next.delete(depId)
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const depId of collectDependencyTree(moduleId, requiredBy)) {
+        if (!next.has(depId)) {
+          continue
+        }
+
+        const stillNeeded = [...next].some((other) => (requiredBy[other] ?? []).includes(depId))
+        if (!stillNeeded) {
+          next.delete(depId)
+          changed = true
+        }
       }
     }
 
@@ -55,8 +64,11 @@ export function applyModuleToggle(
 
   const next = new Set(selectedIds)
   next.add(moduleId)
-  for (const requiredId of requiredBy[moduleId] ?? []) {
-    next.add(requiredId)
+  const available = new Set(modules.map((module) => module.id))
+  for (const requiredId of collectDependencyTree(moduleId, requiredBy)) {
+    if (available.has(requiredId)) {
+      next.add(requiredId)
+    }
   }
   return [...next]
 }

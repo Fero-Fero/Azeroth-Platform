@@ -4085,7 +4085,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         // fail or time out on large (~17 GB) client volumes - especially over a remote docker context.
         const string summaryScript =
             "set +e; " +
-            "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
+            "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe -o -f /dest/wow.exe && wow=1; " +
             "mpq=0; if test -d /dest/Data; then ls /dest/Data/*.MPQ >/dev/null 2>&1 && mpq=1; fi; " +
             "bytes=$(du -sb /dest 2>/dev/null | cut -f1); [ -n \"$bytes\" ] || bytes=0; " +
             "files=0; if [ \"$wow\" = \"1\" ] || [ \"$mpq\" = \"1\" ]; then " +
@@ -4098,7 +4098,7 @@ public sealed class RemoteEngineService : IRemoteEngineService
         {
             const string fallbackScript =
                 "set +e; " +
-                "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe && wow=1; " +
+                "wow=0; test -f /dest/Wow.exe -o -f /dest/WoW.exe -o -f /dest/wow.exe && wow=1; " +
                 "mpq=0; if test -d /dest/Data; then ls /dest/Data/*.MPQ >/dev/null 2>&1 && mpq=1; fi; " +
                 "bytes=$(du -sb /dest 2>/dev/null | cut -f1); [ -n \"$bytes\" ] || bytes=0; " +
                 "files=0; find /dest -type f ! -name .hashcache.json ! -name .manifest.json -print -quit 2>/dev/null | grep -q . && files=1; " +

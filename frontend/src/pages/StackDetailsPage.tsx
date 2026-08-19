@@ -230,8 +230,11 @@ function StackDetailsPageContent() {
         recentLifecycleAction && Date.now() - recentLifecycleAction < 120_000
 
       const shouldPollForJob = isStackBusy
+      const shouldPollExpress =
+        query.state.data?.expressProvisionStatus === 'Pending' ||
+        query.state.data?.expressProvisionStatus === 'Running'
 
-      if (!(shouldPollForStatus || shouldPollForRecent || shouldPollForJob)) {
+      if (!(shouldPollForStatus || shouldPollForRecent || shouldPollForJob || shouldPollExpress)) {
         return false
       }
 
@@ -254,9 +257,19 @@ function StackDetailsPageContent() {
   // VPC SSH probes are slow; only surface a banner when a refresh is genuinely stuck, not on every poll.
   const isLiveStatusRefreshing = useDelayedTrue(isBackgroundRefetch, 8000)
 
+  const includeArmory = stack?.configuration.includeArmory !== false
   const visibleTabGroups = useMemo(
-    () => TAB_GROUPS.filter((group) => group.id !== 'vpc-overview' || isExternalStack),
-    [isExternalStack],
+    () =>
+      TAB_GROUPS.filter((group) => {
+        if (group.id === 'vpc-overview' && !isExternalStack) {
+          return false
+        }
+        if (group.id === 'armory' && !includeArmory) {
+          return false
+        }
+        return true
+      }),
+    [isExternalStack, includeArmory],
   )
 
   useEffect(() => {
@@ -266,13 +279,19 @@ function StackDetailsPageContent() {
       setSearchParams(next, { replace: true })
       setActiveTab('overview')
     }
-  }, [activeTab, stack, isExternalStack, searchParams, setSearchParams])
+    if (stack && !includeArmory && ['armory', 'armory-styling', 'armory-layout', 'armory-email'].includes(activeTab)) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('tab')
+      setSearchParams(next, { replace: true })
+      setActiveTab('overview')
+    }
+  }, [activeTab, stack, isExternalStack, includeArmory, searchParams, setSearchParams])
 
   const { data: diskUsage } = useDockerDiskUsage()
   const { data: armoryNetwork } = useQuery({
     queryKey: ['armory-network', stackId],
     queryFn: () => stackApi.armoryNetwork(stackId!).then((res) => res.data),
-    enabled: !!stackId,
+    enabled: !!stackId && includeArmory,
   })
 
   // Calculate stack uptime based on earliest running container
@@ -742,43 +761,47 @@ function StackDetailsPageContent() {
             {isStackBusy && stackJob?.action === 'StartDatabase' ? 'Starting DB...' : 'DB Maintenance'}
           </button>
 
-          {isArmoryBusy ? (
-            <button
-              disabled
-              className="px-4 py-2 bg-teal-600 text-white rounded opacity-80 cursor-not-allowed inline-flex items-center gap-2"
-              title={armoryJob?.message ?? 'Armory operation in progress'}
-            >
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {armoryJob?.message ?? 'Working…'}
-            </button>
-          ) : stack.armoryRunning ? (
-            <button
-              onClick={() => armoryStopMutation.mutate()}
-              disabled={isArmoryPending}
-              className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              title="Stop the armory web app for this stack"
-            >
-              {armoryStopMutation.isPending ? 'Stopping...' : 'Stop Armory'}
-            </button>
-          ) : (
-            <button
-              onClick={() => armoryStartMutation.mutate()}
-              disabled={!canStartArmory || isArmoryPending}
-              className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              title="Build (if needed) and start the armory web app for this stack (starts the database first if it isn't running)"
-            >
-              {armoryStartMutation.isPending ? 'Starting Armory...' : 'Start Armory'}
-            </button>
-          )}
-          {stack.armoryRunning && armoryUrl && (
-            <a
-              href={armoryUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2 border border-teal-600 text-teal-700 rounded hover:bg-teal-50 transition"
-            >
-              Open Armory ↗
-            </a>
+          {includeArmory && (
+            <>
+              {isArmoryBusy ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-teal-600 text-white rounded opacity-80 cursor-not-allowed inline-flex items-center gap-2"
+                  title={armoryJob?.message ?? 'Armory operation in progress'}
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {armoryJob?.message ?? 'Working…'}
+                </button>
+              ) : stack.armoryRunning ? (
+                <button
+                  onClick={() => armoryStopMutation.mutate()}
+                  disabled={isArmoryPending}
+                  className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  title="Stop the armory web app for this stack"
+                >
+                  {armoryStopMutation.isPending ? 'Stopping...' : 'Stop Armory'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => armoryStartMutation.mutate()}
+                  disabled={!canStartArmory || isArmoryPending}
+                  className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  title="Build (if needed) and start the armory web app for this stack (starts the database first if it isn't running)"
+                >
+                  {armoryStartMutation.isPending ? 'Starting Armory...' : 'Start Armory'}
+                </button>
+              )}
+              {stack.armoryRunning && armoryUrl && (
+                <a
+                  href={armoryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 border border-teal-600 text-teal-700 rounded hover:bg-teal-50 transition"
+                >
+                  Open Armory ↗
+                </a>
+              )}
+            </>
           )}
 
           <div className="flex-1"></div>

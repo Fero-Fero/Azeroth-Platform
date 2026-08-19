@@ -10,6 +10,8 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>AzerothPlatformLauncher</AssemblyName>
     <RootNamespace>AzerothPlatform.Launcher</RootNamespace>
+    <AZP_ENABLE_ARMORY Condition="'$(AZP_ENABLE_ARMORY)' == ''">true</AZP_ENABLE_ARMORY>
+    <DefineConstants Condition="'$(AZP_ENABLE_ARMORY)' == 'true'">$(DefineConstants);AZP_ENABLE_ARMORY</DefineConstants>
   </PropertyGroup>
 
   <!-- Global app icon: the build pipeline drops AppIcon.ico here when one is uploaded on the

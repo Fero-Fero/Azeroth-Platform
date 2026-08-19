@@ -14,7 +14,7 @@ public static class ModuleVisibilityRules
         new()
         {
             ModuleId = "mod-individual-progression",
-            VisibleForServerTypes = [ServerType.IndividualProgression]
+            VisibleForServerTypes = [ServerType.IndividualProgression, ServerType.Express]
         },
         new()
         {
@@ -25,6 +25,41 @@ public static class ModuleVisibilityRules
         {
             ModuleId = "mod-playerbot-dungeon-sim",
             HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-playerbots-artisans",
+            HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-optimal-bot-raid",
+            HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-world-buff-bots",
+            HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-ollama-bot-buddy",
+            HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-ollama-bot-buddy-advanced",
+            HiddenForServerTypes = [ServerType.NpcBots]
+        },
+        new()
+        {
+            ModuleId = "mod-ip-challengesystem",
+            VisibleForServerTypes = [ServerType.IndividualProgression, ServerType.Express]
+        },
+        new()
+        {
+            ModuleId = "mod-character-services",
+            VisibleForServerTypes = [ServerType.IndividualProgression, ServerType.Express]
         }
     ];
 }

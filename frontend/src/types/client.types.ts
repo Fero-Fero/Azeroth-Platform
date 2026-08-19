@@ -11,6 +11,8 @@ export interface ClientBaseInfoDto {
   hasWowExe: boolean
   hasDataMpq: boolean
   gamePath: string
+  downloadAvailable?: boolean
+  downloadUnavailableReason?: string | null
 }
 
 /** A single entry (file or sub-directory) within the base client tree. */

@@ -1,12 +1,16 @@
 #!/bin/sh
-# Creates a WoW 3.3.5a-compatible MPQ from a directory of files, using the mkmpq tool (StormLib).
-# Files are stored under the directory name as the internal path prefix (e.g. DBFilesClient/Spell.dbc
-# -> DBFilesClient\Spell.dbc).
+# Packs a directory into a WoW 3.3.5a-compatible MPQ, or extracts one.
 #
-# Usage: create-patch-mpq.sh <output.mpq> [source-dir]
-#   <output.mpq>  Name of the MPQ to create under /work (e.g. "patch-D.MPQ").
-#   [source-dir]  Directory under /work whose files are packed (default: DBFilesClient).
+# Usage:
+#   create-patch-mpq.sh <output.mpq> [source-dir]
+#   create-patch-mpq.sh extract <archive.mpq> <outdir>
 set -eu
+
+if [ "${1:-}" = "extract" ]; then
+  ARCHIVE="${2:?archive.mpq required}"
+  OUT="${3:?outdir required}"
+  exec /usr/local/bin/exmpq "$ARCHIVE" "$OUT"
+fi
 
 OUT="${1:?output MPQ name required}"
 SRC="${2:-DBFilesClient}"
@@ -18,11 +22,14 @@ if [ ! -d "$SRC" ]; then
     exit 2
 fi
 
-if [ -z "$(ls -A "$SRC" 2>/dev/null)" ]; then
+if [ -z "$(find "$SRC" -type f 2>/dev/null | head -n 1)" ]; then
     echo "Source directory '/work/$SRC' is empty; nothing to package." >&2
     exit 3
 fi
 
-# mkmpq stores files under the prefix (the source dir's base name), matching the client's
-# DBFilesClient\ layout.
-mkmpq "$OUT" "$SRC" "$SRC"
+# Empty prefix packs files under their relative paths (used when stripping DBC from overlay MPQs).
+if [ "${3:-}" = "--preserve-paths" ]; then
+  mkmpq "$OUT" "$SRC" ""
+else
+  mkmpq "$OUT" "$SRC" "$SRC"
+fi
