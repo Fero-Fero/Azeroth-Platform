@@ -48,7 +48,7 @@ secrets at rest.
 
 **Windows (Express / local):** clone this repo, then double-click `install-platform.bat`. It installs
 the latest Docker Desktop if needed, copies `.env`, and runs `docker compose up -d --build`. When it
-finishes, open **https://localhost/admin**, log in, and create a stack with **Express Setup**. Later,
+finishes, double-click `open-manager.bat` (or open **https://localhost/admin**), log in, and create a stack with **Express Setup**. Later,
 `update-platform.bat` pulls GitHub `main` (Git for Windows is optional), and `restart-platform.bat` rebuilds with
 `docker compose up -d --build`.
 
