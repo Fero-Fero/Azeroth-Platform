@@ -1,4 +1,5 @@
-import { FileJson, FileText, Trash2, Pencil } from 'lucide-react'
+import { Binary, FileJson, FileSpreadsheet, FileText, Pencil, Trash2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 export function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB']
@@ -17,23 +18,31 @@ function fileExtension(name: string): string {
   return dot >= 0 ? base.slice(dot + 1).toLowerCase() : ''
 }
 
-function iconForExtension(ext: string) {
+type ExtStyle = { Icon: LucideIcon; icon: string; tag: string }
+
+function styleForExtension(ext: string): ExtStyle {
   if (ext === 'json') {
-    return { Icon: FileJson, className: 'text-amber-600 bg-amber-50 border-amber-100' }
+    return { Icon: FileJson, icon: 'text-amber-600 bg-amber-50 border-amber-100', tag: 'border-amber-200 bg-amber-50 text-amber-800' }
   }
   if (ext === 'lua' || ext === 'ext') {
-    return { Icon: FileText, className: 'text-sky-600 bg-sky-50 border-sky-100' }
+    return { Icon: FileText, icon: 'text-sky-600 bg-sky-50 border-sky-100', tag: 'border-sky-200 bg-sky-50 text-sky-800' }
   }
   if (ext === 'sql') {
-    return { Icon: FileText, className: 'text-violet-600 bg-violet-50 border-violet-100' }
+    return { Icon: FileText, icon: 'text-violet-600 bg-violet-50 border-violet-100', tag: 'border-violet-200 bg-violet-50 text-violet-800' }
   }
   if (ext === 'mpq') {
-    return { Icon: FileText, className: 'text-indigo-600 bg-indigo-50 border-indigo-100' }
+    return { Icon: FileText, icon: 'text-indigo-600 bg-indigo-50 border-indigo-100', tag: 'border-indigo-200 bg-indigo-50 text-indigo-800' }
   }
-  if (ext === 'csv' || ext === 'txt' || ext === 'dbc') {
-    return { Icon: FileText, className: 'text-emerald-600 bg-emerald-50 border-emerald-100' }
+  if (ext === 'csv') {
+    return { Icon: FileSpreadsheet, icon: 'text-emerald-600 bg-emerald-50 border-emerald-100', tag: 'border-emerald-200 bg-emerald-50 text-emerald-800' }
   }
-  return { Icon: FileText, className: 'text-slate-600 bg-slate-100 border-slate-200' }
+  if (ext === 'txt') {
+    return { Icon: FileText, icon: 'text-teal-600 bg-teal-50 border-teal-100', tag: 'border-teal-200 bg-teal-50 text-teal-800' }
+  }
+  if (ext === 'dbc') {
+    return { Icon: Binary, icon: 'text-orange-600 bg-orange-50 border-orange-100', tag: 'border-orange-200 bg-orange-50 text-orange-800' }
+  }
+  return { Icon: FileText, icon: 'text-slate-600 bg-slate-100 border-slate-200', tag: 'border-gray-200 bg-white text-gray-500' }
 }
 
 interface PatchFileListRowProps {
@@ -56,7 +65,7 @@ export default function PatchFileListRow({
   showEdit,
 }: PatchFileListRowProps) {
   const ext = fileExtension(label)
-  const { Icon, className: iconClassName } = iconForExtension(ext)
+  const { Icon, icon: iconClassName, tag: tagClassName } = styleForExtension(ext)
   const rowAlign = description ? 'items-start' : 'items-center'
 
   return (
@@ -72,7 +81,7 @@ export default function PatchFileListRow({
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate font-mono text-sm font-medium leading-snug text-gray-900">{label}</span>
               {ext && (
-                <span className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-gray-500">
+                <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide ${tagClassName}`}>
                   {ext}
                 </span>
               )}
