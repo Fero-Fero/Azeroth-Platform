@@ -1,3 +1,4 @@
+import { WipBadge } from '@/components/common/WipBadge'
 import { MODULE_IDS } from '@/setup/constants'
 import type {
   ApplyModuleExtraDataRequest,
@@ -116,7 +117,10 @@ export function ModuleContentChoicesForm({
               onChange={() => onIpContentModeChange('ServerWideProgression')}
             />
             <span>
-              Sync with Server Wide Progression
+              <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                Sync with Server Wide Progression
+                <WipBadge />
+              </span>
               <span className="block text-xs text-gray-500">
                 Skip IP optional extras. Prepare and sync progression patches after the first build.
               </span>

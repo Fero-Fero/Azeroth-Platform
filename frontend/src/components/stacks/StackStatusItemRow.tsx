@@ -38,6 +38,7 @@ export interface StackStatusItemRowProps {
   id: string
   level: StackStatusLevel
   title: string
+  titleEnd?: ReactNode
   summary?: string
   defaultExpanded?: boolean
   details?: ReactNode
@@ -49,6 +50,7 @@ export interface StackStatusItemRowProps {
 export default function StackStatusItemRow({
   level,
   title,
+  titleEnd,
   summary,
   defaultExpanded = false,
   details,
@@ -82,6 +84,7 @@ export default function StackStatusItemRow({
                 aria-expanded={expanded}
               >
                 <span className="text-sm font-medium leading-snug">{title}</span>
+                {titleEnd}
                 <ChevronDown
                   className={`mt-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform ${
                     expanded ? 'rotate-180' : ''
@@ -89,7 +92,10 @@ export default function StackStatusItemRow({
                 />
               </button>
             ) : (
-              <div className={`text-sm font-medium leading-snug ${styles.title}`}>{title}</div>
+              <div className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium leading-snug ${styles.title}`}>
+                <span>{title}</span>
+                {titleEnd}
+              </div>
             )}
           </div>
           {summary && (

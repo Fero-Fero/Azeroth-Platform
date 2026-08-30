@@ -1,3 +1,4 @@
+import { WipBadge } from '@/components/common/WipBadge'
 import { CustomSetupNotice } from '@/server-types/notices/CustomSetupNotice'
 import { RecommendedAddonsNotice } from '@/server-types/notices/RecommendedAddonsNotice'
 import type { ServerTypeDefinition } from '@/server-types/types'
@@ -115,9 +116,10 @@ export const individualProgressionServerType: ServerTypeDefinition = {
       <div className="space-y-1 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">
         {showPlayerbots && <p>You will be asked to disable playerbots before the first launch.</p>}
         {showProgression && (
-          <p>
+          <p className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
             After creating the stack, you can complete the <strong>optional</strong> Server Wide
             Progression Setup for an even more immersive experience.
+            <WipBadge />
           </p>
         )}
       </div>

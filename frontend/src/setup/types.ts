@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { StackDetailsDto } from '@/types/stack.types'
 import type { SetupProgressStore } from '@/setup/progress/setupProgressStore'
 
@@ -61,6 +62,8 @@ export type SetupStep = {
   dependsOn?: string[]
   level: SetupStepLevel | ((ctx: SetupStepContext) => SetupStepLevel)
   title: string
+  /** Optional mark rendered beside the title (for example a work-in-progress badge). */
+  titleEnd?: ReactNode
   summary: (ctx: SetupStepContext) => string
   applies: (ctx: SetupStepContext) => boolean
   isComplete: (ctx: SetupStepContext) => boolean

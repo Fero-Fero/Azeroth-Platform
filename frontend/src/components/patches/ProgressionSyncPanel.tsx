@@ -6,6 +6,7 @@ import {
   useResolveProgressionOptionalFiles,
 } from '@/hooks/usePatches'
 import type { ProgressionSyncPendingFile } from '@/types/server-wide-progression.types'
+import { WipBadge } from '@/components/common/WipBadge'
 import IgnoredFilesDialog from './IgnoredFilesDialog'
 
 interface ProgressionSyncPanelProps {
@@ -177,8 +178,9 @@ export default function ProgressionSyncPanel({ stackId, onReapplyAllRecommended 
               <ChevronDown
                 className={`h-4 w-4 shrink-0 text-indigo-700 transition-transform ${descriptionExpanded ? '' : '-rotate-90'}`}
               />
-              <span className="text-sm font-semibold text-indigo-900">
+              <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold text-indigo-900">
                 Sync with mod-individual-progression
+                <WipBadge />
               </span>
             </button>
           </div>

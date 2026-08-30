@@ -6,6 +6,7 @@ import { useClientBaseInfo, useDownloadBaseClient, useUploadBaseClient } from '@
 import { useClientJobContext } from '@/contexts/ClientJobContext'
 import { useExpressProvision } from '@/hooks/useExpressProvision'
 import { apiErrorMessage } from '@/lib/utils'
+import { WipBadge } from '@/components/common/WipBadge'
 import { setupActionButton } from '@/setup/ui'
 import type { SetupStep, SetupStepContext } from '@/setup/types'
 import { ServerType } from '@/types/stack.types'
@@ -217,6 +218,7 @@ function pipelineStep(phase: ExpressPipelinePhase, index: number): SetupStep {
     defaultExpanded: (ctx) => isCurrent(ctx),
     compactWhenComplete: true,
     title,
+    titleEnd: phase === 'SwpSync' ? <WipBadge /> : undefined,
     applies: (ctx) =>
       isExpress(ctx)
       && expressPipelineStepApplies(

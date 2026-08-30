@@ -1,3 +1,4 @@
+import { WipBadge } from '@/components/common/WipBadge'
 import { MODULE_IDS } from '@/setup/constants'
 import { ipSyncHintStep } from '@/setup/steps/modules/mod-individual-progression/ipSyncHintStep'
 import { prepareProgressionStep } from '@/setup/steps/modules/mod-individual-progression/prepareProgressionStep'
@@ -14,10 +15,11 @@ export const serverWideProgressionSetup: CustomSetup = {
     'Bootstrap progression, sync from mod-individual-progression, then apply patches in order.',
   skippable: true,
   notice: (
-    <>
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
       After creating the stack, you can complete the <strong>optional</strong> Server Wide Progression
       Setup for an even more immersive experience.
-    </>
+      <WipBadge />
+    </span>
   ),
   requiresModuleIds: [MODULE_IDS.individualProgression],
   buildSteps: () => [prepareProgressionStep(), ipSyncHintStep()],

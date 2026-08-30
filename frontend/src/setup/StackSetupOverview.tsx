@@ -34,6 +34,7 @@ export default function StackSetupOverview({ stack, onSelectTab, ctx: providedCt
             id={step.id}
             level={typeof step.level === 'function' ? step.level(ctx) : step.level}
             title={step.title}
+            titleEnd={step.titleEnd}
             summary={step.summary(ctx)}
             defaultExpanded={defaultExpanded}
             forceCollapsed={compactComplete}

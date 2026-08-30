@@ -43,6 +43,7 @@ import ProgressionSyncPanel from './ProgressionSyncPanel'
 import FirstPatchSetupBanner from './FirstPatchSetupBanner'
 import DbcBaselinePanel from './DbcBaselinePanel'
 import type { ServerWideProgressionValidationResult } from '@/types/server-wide-progression.types'
+import { SyncWithIndividualProgressionLabel, WipBadge } from '@/components/common/WipBadge'
 import { useLauncherConfig, useLauncherTemplates } from '@/hooks/useLauncher'
 
 interface PatchesTabProps {
@@ -1097,10 +1098,13 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
         <section className="rounded-lg border border-violet-200 bg-violet-50 px-5 py-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-violet-900">Server Wide Progression</p>
+              <p className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-semibold text-violet-900">
+                Server Wide Progression
+                <WipBadge />
+              </p>
               <p className="mt-1 max-w-2xl text-sm text-violet-800">
                 Prepare server-wide progression settings, then use{' '}
-                <strong>Sync with mod-individual-progression</strong> below to pull both repositories,
+                <SyncWithIndividualProgressionLabel /> below to pull both repositories,
                 create patch folders from Azeroth-Platform-Progression, and import mapped module files.
               </p>
             </div>
@@ -1290,8 +1294,9 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
       )}
 
       {importSummary && (
-        <div className="bg-green-50 border border-green-200 rounded-md px-4 py-2 text-sm text-green-700">
-          {importSummary}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 bg-green-50 border border-green-200 rounded-md px-4 py-2 text-sm text-green-700">
+          <span>{importSummary}</span>
+          {importSummary.includes('Sync with mod-individual-progression') ? <WipBadge /> : null}
         </div>
       )}
 

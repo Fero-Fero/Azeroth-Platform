@@ -1,4 +1,5 @@
 import { TrendingUp } from 'lucide-react'
+import { SyncWithIndividualProgressionLabel, WipBadge } from '@/components/common/WipBadge'
 import { MODULE_IDS, STEP_IDS } from '@/setup/constants'
 import { isStepDoneOrSkipped } from '@/setup/progress/setupProgressStore'
 import {
@@ -12,7 +13,7 @@ function PrepareDetails() {
   return (
     <p className="text-sm">
       Optional. Open the Patches tab to <strong>prepare server-wide progression</strong> (bootstrap), then
-      run <strong>Sync with mod-individual-progression</strong> and apply patches in order. You can skip
+      run <SyncWithIndividualProgressionLabel /> and apply patches in order. You can skip
       this if you want a standard realm.
     </p>
   )
@@ -41,6 +42,7 @@ export function prepareProgressionStep(): SetupStep {
     skippable: true,
     level: 'warning',
     title: 'Prepare server-wide progression',
+    titleEnd: <WipBadge />,
     defaultExpanded: true,
     applies: (ctx) =>
       hasIndividualProgressionModule(ctx.stack) &&

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, Loader2, RotateCcw, TrendingUp } from 'lucide-react'
+import { SyncWithIndividualProgressionLabel } from '@/components/common/WipBadge'
 import { MODULE_IDS, STEP_IDS } from '@/setup/constants'
 import {
   isPlayerbotsSetupComplete,
@@ -38,7 +39,7 @@ function ReenableConfirmDialog({
           </p>
           <p className="mt-3 text-sm text-gray-600">
             Open the Patches tab first if you have not run <strong>Prepare progression</strong> and{' '}
-            <strong>Sync with mod-individual-progression</strong>.
+            <SyncWithIndividualProgressionLabel />.
           </p>
         </div>
         <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
@@ -79,8 +80,8 @@ function ReenableDetails(ctx: SetupStepContext) {
       ) : (
         <p>
           The stack is running with playerbots off. Prepare server-wide progression on the Patches tab -
-          click <strong>Prepare progression</strong>, then{' '}
-          <strong>Sync with mod-individual-progression</strong> - before re-enabling playerbots.
+          click <strong>Prepare progression</strong>, then <SyncWithIndividualProgressionLabel /> - before
+          re-enabling playerbots.
         </p>
       )}
       {playerbots.toggleError && (
