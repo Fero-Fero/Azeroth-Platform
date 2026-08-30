@@ -1739,7 +1739,7 @@ public sealed partial class MigrationService : IMigrationService
         var ext = Path.GetExtension(fileName);
         return normalizedCategory switch
         {
-            // CSV/.txt are compiled onto the server baseline; .dbc are uploaded directly (no compile).
+            // CSV/.txt compile onto server_dbc (onto a same-named .dbc in this patch when present).
             "dbc" => ext.Equals(".txt", StringComparison.OrdinalIgnoreCase)
                      || ext.Equals(".csv", StringComparison.OrdinalIgnoreCase)
                      || ext.Equals(".dbc", StringComparison.OrdinalIgnoreCase),
@@ -1825,9 +1825,25 @@ public sealed partial class MigrationService : IMigrationService
                || ext.Equals(".txt", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>True for a pre-built .dbc uploaded directly (no server export / CSV compile needed).</summary>
+    /// <summary>True for a pre-built .dbc uploaded directly into <c>server_dbc/</c>.</summary>
     internal static bool IsDbcBinary(string path) =>
         Path.GetExtension(path).Equals(".dbc", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Table identity for a DBC-category file: <c>Spell.dbc</c> and <c>Spell.csv</c> share <c>Spell</c>.</summary>
+    internal static string DbcTableName(string path) => Path.GetFileNameWithoutExtension(path);
+
+    internal static HashSet<string> DbcTableNames(IEnumerable<string> paths) =>
+        new(paths.Select(DbcTableName), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when any CSV/.txt has no same-named <c>.dbc</c> in this patch, so compile needs the live
+    /// <c>server_dbc/</c> export. A matching pair (Spell.dbc + Spell.csv) uses the uploaded DBC as the base.
+    /// </summary>
+    internal static bool CsvNeedsLiveBaseline(IEnumerable<string> csvFiles, IEnumerable<string> binaryFiles)
+    {
+        var binaryTables = DbcTableNames(binaryFiles);
+        return csvFiles.Any(csv => !binaryTables.Contains(DbcTableName(csv)));
+    }
 
     private sealed record PatchInfo(string Key, int Level, PatchIndex Index, string DisplayName);
 

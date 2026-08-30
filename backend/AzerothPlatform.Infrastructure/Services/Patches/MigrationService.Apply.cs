@@ -203,14 +203,15 @@ public sealed partial class MigrationService
 
         var dbcFiles = EnumerateDbcSourceFiles(MigrationLayout.DbcDir(stackRoot, patch.Key))
             .OrderBy(p => p).ToList();
-        // CSV/.txt sources must be compiled onto the exported server baseline; direct .dbc uploads are
-        // published as-is, so they need neither the server export nor the WDBXEditor compile.
+        // CSV/.txt without a matching .dbc compile onto the exported server baseline. A same-named
+        // .dbc in this patch is placed first and becomes that CSV's import base (no live export).
         var dbcCsvFiles = dbcFiles.Where(IsDbcCsvSource).ToList();
         var dbcBinaryFiles = dbcFiles.Where(IsDbcBinary).ToList();
+        var csvNeedsLiveBaseline = CsvNeedsLiveBaseline(dbcCsvFiles, dbcBinaryFiles);
 
-        // The baseline is only required to compile CSVs on top of the live DBCs. A patch that only
-        // ships pre-built .dbc files doesn't need it.
-        if (dbcCsvFiles.Count > 0 && !IsBaselineInitialized(stackRoot))
+        // Live baseline is only required when a CSV has no matching .dbc in this patch. A DBC-only
+        // patch, or Spell.dbc + Spell.csv together, can apply without a captured export.
+        if (csvNeedsLiveBaseline && !IsBaselineInitialized(stackRoot))
         {
             result.Success = false;
             result.Error = "This patch contains DBC CSV edits but the server_dbc baseline has not been captured. Start the stack once, then initialize the baseline.";
@@ -317,33 +318,23 @@ public sealed partial class MigrationService
                 }, cancellationToken);
             }
 
-            // 4) DBC pipeline. CSV/.txt sources are compiled onto a fresh export of the live worldserver
-            //    DBCs; pre-built .dbc uploads are copied straight into the baseline. Then all DBCs are
-            //    packaged into the client patch-D.MPQ. The updated DBCs are pushed to the server volume in
-            //    the push-dbc stage below.
+            // 4) DBC pipeline. Direct .dbc files are staged into server_dbc first. A same-named CSV
+            //    (Spell.dbc + Spell.csv) is then imported onto that file (Update + TakeNewest). Other
+            //    CSVs compile onto a fresh export of the live worldserver DBCs (Update + FixIds). The
+            //    result is packaged into patch-D.MPQ and pushed to the server volume below.
             var updatedDbc = new List<string>();
-            if (hasDbcCsv)
+            if (csvNeedsLiveBaseline)
             {
                 await RunStageAsync("extract-dbc", result, async () =>
                 {
                     AddLog(result, "Extracting latest DBC files from the live worldserver data volume...");
                     await ExtractServerDbcFromVolumeAsync(stack, stackRoot, cancellationToken);
                 }, cancellationToken);
-
-                await RunStageAsync("dbc-compile", result,
-                    async () => updatedDbc = await ApplyDbcAsync(stack, stackRoot, patch.Key, dbcCsvFiles, result, cancellationToken), cancellationToken);
             }
 
-            // Direct .dbc uploads take final precedence over any compiled result for the same file.
-            if (hasDbcDirect)
-            {
-                await RunStageAsync("place-dbc", result, () =>
-                {
-                    var placed = PlaceDirectDbc(stackRoot, dbcBinaryFiles, result);
-                    updatedDbc = updatedDbc.Concat(placed).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    return Task.CompletedTask;
-                }, cancellationToken);
-            }
+            await StagePatchDbcAsync(
+                stack, stackRoot, patch.Key, dbcCsvFiles, dbcBinaryFiles, updatedDbc, result,
+                cancellationToken, placeStage: "place-dbc", compileStage: "dbc-compile");
 
             if (updatedDbc.Count > 0)
             {
@@ -717,16 +708,14 @@ public sealed partial class MigrationService
             };
         }).ToList();
 
-        var anyDbcCsv = plans.Any(p => p.DbcCsv.Count > 0);
+        var anyLiveBaselineCsv = plans.Any(p => CsvNeedsLiveBaseline(p.DbcCsv, p.DbcBinary));
         var anyDbc = plans.Any(p => p.DbcCsv.Count > 0 || p.DbcBinary.Count > 0);
         var anyMpqManifest = appliedPatches.Any(p =>
             ReadMpqManifest(stackRoot, p.Key) is { Add.Count: > 0 } or { Remove.Count: > 0 });
         var anyClientContent = anyDbc || anyMpqManifest || plans.Any(p => p.HasMpq || p.MpqRemovals.Count > 0);
 
-        if (anyDbcCsv && !IsBaselineInitialized(stackRoot))
+        if (anyLiveBaselineCsv && !IsBaselineInitialized(stackRoot))
         {
-            // ExtractServerDbcFromVolumeAsync will populate the baseline from the live volume, but a CSV
-            // compile still needs a baseline present; the extract below provides it. (No hard fail here.)
             AddLog(result, "No DBC baseline captured yet; it will be re-extracted from the running stack.");
         }
 
@@ -758,8 +747,9 @@ public sealed partial class MigrationService
                 await RunComposeAsync(stackId, "stop ac-worldserver ac-authserver", repoPath, cancellationToken);
             }, cancellationToken);
 
-            // 1) Fetch the DBC set from the server ONCE (fresh baseline the CSVs are compiled onto).
-            if (anyDbcCsv)
+            // 1) Fetch the DBC set from the server ONCE when any CSV compiles onto the live baseline
+            //    (no matching .dbc in that patch). Overlay pairs (Spell.dbc + Spell.csv) skip this.
+            if (anyLiveBaselineCsv)
             {
                 await RunStageAsync("extract-dbc", result, async () =>
                 {
@@ -768,9 +758,9 @@ public sealed partial class MigrationService
                 }, cancellationToken);
             }
 
-            // 2) Walk each applied patch in order: compile its DBC CSVs onto the cumulative baseline,
-            //    stage its direct .dbc uploads, apply its SQL, and re-apply its maps. patch-D and the
-            //    MPQ overlay are built/published ONCE after the loop from the accumulated results.
+            // 2) Walk each applied patch in order: stage its direct .dbc uploads, import matching
+            //    CSVs onto those files, compile remaining CSVs onto the cumulative baseline, apply SQL,
+            //    and re-apply maps. patch-D and the MPQ overlay are built/published ONCE after the loop.
             var updatedDbc = new List<string>();
             foreach (var plan in plans)
             {
@@ -793,25 +783,11 @@ public sealed partial class MigrationService
                     }
                 }
 
-                if (plan.DbcCsv.Count > 0)
-                {
-                    await RunStageAsync($"dbc-compile:{patch.Key}", result, async () =>
-                    {
-                        AddLog(result, $"Compiling {plan.DbcCsv.Count} DBC CSV(s) for {patch.Key}...");
-                        var compiled = await ApplyDbcAsync(stack, stackRoot, patch.Key, plan.DbcCsv, result, cancellationToken);
-                        patchUpdated.AddRange(compiled);
-                    }, cancellationToken);
-                }
-
-                if (plan.DbcBinary.Count > 0)
-                {
-                    await RunStageAsync($"place-dbc:{patch.Key}", result, () =>
-                    {
-                        var placed = PlaceDirectDbc(stackRoot, plan.DbcBinary, result);
-                        patchUpdated.AddRange(placed);
-                        return Task.CompletedTask;
-                    }, cancellationToken);
-                }
+                await StagePatchDbcAsync(
+                    stack, stackRoot, patch.Key, plan.DbcCsv, plan.DbcBinary, patchUpdated, result,
+                    cancellationToken,
+                    placeStage: $"place-dbc:{patch.Key}",
+                    compileStage: $"dbc-compile:{patch.Key}");
 
                 if (patchUpdated.Count > 0)
                 {
@@ -1053,13 +1029,74 @@ public sealed partial class MigrationService
     }
 
     /// <summary>
-    /// Compiles the patch's CSVs onto the extracted baseline DBCs (promoting each result back into
-    /// <c>server_dbc/</c>) and returns the names of the DBCs that were updated. The updated DBCs are
-    /// NOT pushed to the live data volume here - that override runs after the SQL stage.
+    /// Stages this patch's <c>.dbc</c> files into <c>server_dbc/</c>, then imports CSVs onto that
+    /// baseline. A same-named CSV uses Update + TakeNewest; others use Update + FixIds onto the live
+    /// export. Results are not pushed to the data volume here.
+    /// </summary>
+    private async Task StagePatchDbcAsync(
+        Data.Entities.ManagedStackEntity stack,
+        string stackRoot,
+        string patchKey,
+        List<string> dbcCsvFiles,
+        List<string> dbcBinaryFiles,
+        List<string> updatedDbc,
+        ApplyPatchResultDto result,
+        CancellationToken cancellationToken,
+        string placeStage,
+        string compileStage)
+    {
+        if (dbcBinaryFiles.Count > 0)
+        {
+            await RunStageAsync(placeStage, result, () =>
+            {
+                var placed = PlaceDirectDbc(stackRoot, dbcBinaryFiles, result);
+                foreach (var name in placed)
+                {
+                    if (!updatedDbc.Exists(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        updatedDbc.Add(name);
+                    }
+                }
+
+                return Task.CompletedTask;
+            }, cancellationToken);
+        }
+
+        if (dbcCsvFiles.Count == 0)
+        {
+            return;
+        }
+
+        var overlayTables = DbcTableNames(dbcBinaryFiles);
+        await RunStageAsync(compileStage, result, async () =>
+        {
+            AddLog(result, $"Compiling {dbcCsvFiles.Count} DBC CSV(s) for {patchKey}...");
+            var compiled = await ApplyDbcAsync(
+                stack, stackRoot, patchKey, dbcCsvFiles, overlayTables, result, cancellationToken);
+            foreach (var name in compiled)
+            {
+                if (!updatedDbc.Exists(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    updatedDbc.Add(name);
+                }
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Compiles the patch's CSVs onto the current <c>server_dbc/</c> files (promoting each result
+    /// back) and returns the names of the DBCs that were updated. Overlay tables (a matching .dbc in
+    /// this patch) use TakeNewest; others use FixIds. The updated DBCs are not pushed to the live
+    /// data volume here - that override runs after the SQL stage.
     /// </summary>
     private async Task<List<string>> ApplyDbcAsync(
-        Data.Entities.ManagedStackEntity stack, string stackRoot, string patchKey, List<string> dbcTxtFiles,
-        ApplyPatchResultDto result, CancellationToken cancellationToken)
+        Data.Entities.ManagedStackEntity stack,
+        string stackRoot,
+        string patchKey,
+        List<string> dbcTxtFiles,
+        IReadOnlySet<string> overlayTables,
+        ApplyPatchResultDto result,
+        CancellationToken cancellationToken)
     {
         var serverDbcDir = MigrationLayout.ServerDbcDir(stackRoot);
 
@@ -1102,10 +1139,12 @@ public sealed partial class MigrationService
                 File.Copy(baselineDbc, workDbc, overwrite: true);
                 await NormalizeToCrlfAsync(txtPath, workCsv, cancellationToken);
 
-                AddLog(result, $"Importing {csvName} into {dbcName} (WDBXEditor)...");
+                var table = DbcTableName(txtPath);
+                var idMode = overlayTables.Contains(table) ? "TakeNewest" : "FixIds";
+                AddLog(result, $"Importing {csvName} into {dbcName} (Update + {idMode})...");
 
                 var toolArgs =
-                    $"-import -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -c \"{csvName}\" -h true -u Update -i FixIds";
+                    $"-import -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -c \"{csvName}\" -h true -u Update -i {idMode}";
 
                 var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
                     stack, workDir, _migrationOptions.WdbxImage, toolArgs, cancellationToken);
@@ -1145,10 +1184,10 @@ public sealed partial class MigrationService
     }
 
     /// <summary>
-    /// Copies pre-built <c>.dbc</c> uploads straight into the cumulative <c>server_dbc/</c> baseline
-    /// (overwriting same-named files) and returns their names, so they're packaged into patch-D.MPQ and
-    /// pushed to the server without any export/compile step. Creates the baseline dir if needed, so a
-    /// direct-DBC-only patch works even when no baseline was ever captured.
+    /// Copies pre-built <c>.dbc</c> uploads into the cumulative <c>server_dbc/</c> baseline
+    /// (overwriting same-named files). Matching CSVs in this patch are imported onto these files next.
+    /// Creates the baseline dir if needed, so a direct-DBC-only patch works even when no baseline
+    /// was ever captured.
     /// </summary>
     private List<string> PlaceDirectDbc(string stackRoot, IReadOnlyList<string> dbcFiles, ApplyPatchResultDto result)
     {
@@ -1158,13 +1197,13 @@ public sealed partial class MigrationService
         var names = new List<string>();
         foreach (var src in dbcFiles)
         {
-            // Flatten any container sub-folder: a DBC's identity is just its file name.
-            var name = Path.GetFileName(src);
+            // Identity is the table name; ApplyDbcAsync looks up `{table}.dbc` after overlay.
+            var name = DbcTableName(src) + ".dbc";
             File.Copy(src, Path.Combine(serverDbcDir, name), overwrite: true);
             names.Add(name);
         }
 
-        AddLog(result, $"Staged {names.Count} uploaded DBC file(s) directly into the server baseline (no CSV compile).");
+        AddLog(result, $"Staged {names.Count} uploaded DBC file(s) into the server baseline.");
         return names;
     }
 

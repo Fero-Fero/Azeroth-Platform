@@ -1935,7 +1935,14 @@ Flat layout also works:
                         <span className="font-mono">.dbc</span> files belong on 1.0 / 2.0 / 3.0
                         only.
                       </span>
-                    ) : undefined
+                    ) : (
+                      <span>
+                        A matching CSV (for example{' '}
+                        <span className="font-mono">Spell.dbc</span> +{' '}
+                        <span className="font-mono">Spell.csv</span>) is imported onto that DBC
+                        (Update + Take newest), then published to client and server.
+                      </span>
+                    )
                   }
                   onUploadItems={(items) => handleContainerUpload('dbc', items)}
                   onDelete={(fileName) => handleDelete('dbc', fileName)}

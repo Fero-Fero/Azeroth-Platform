@@ -83,7 +83,7 @@ wait until the whale icon is idle, then double-click **`restart-platform.bat`**.
 
 ## 3. Open the dashboard and sign in
 
-1. In your browser, go to **https://localhost/admin**
+1. Double-click **`open-manager.bat`**, or in your browser go to **https://localhost/admin**
 2. You will almost certainly see a scary page: **Your connection is not private** (Chrome) or
    similar. That is expected. The site uses a homemade certificate.
    - Chrome: **Advanced** → **Proceed to localhost**
@@ -147,7 +147,7 @@ Play on **this same PC**. Express is bound to this machine only (`127.0.0.1`).
 
 | You want to… | Do this |
 | --- | --- |
-| Play again tomorrow | Open **Docker Desktop**, wait until it is idle, open **https://localhost/admin**, open your stack, click **Start** if it is stopped |
+| Play again tomorrow | Open **Docker Desktop**, wait until it is idle, double-click **`open-manager.bat`**, open your stack, click **Start** if it is stopped |
 | Update the platform | Double-click **`update-platform.bat`**, then **`restart-platform.bat`** |
 | Rebuild after a change | Double-click **`restart-platform.bat`** |
 | Stop using the PC’s extra CPU | In the dashboard, **Stop** the stack. You can quit Docker Desktop after that |
