@@ -1,0 +1,262 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/index.css">
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-progression.css">
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/top-records.css">
+
+{{> layout-grid}}
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		const catalog = {{{JSONstringify catalog}}};
+		const difficultyParts = {{{JSONstringify difficultyParts}}};
+
+		const expansionLabels = { classic: "Classic", tbc: "The Burning Crusade", wotlk: "Wrath of the Lich King" };
+		const expansionOrder = ["classic", "tbc", "wotlk"];
+		const scopeLabels = { 0: "Solo", 1: "Party", 2: "Raid" };
+		const classNames = {
+			1: "Warrior", 2: "Paladin", 3: "Hunter", 4: "Rogue", 5: "Priest",
+			6: "Death Knight", 7: "Shaman", 8: "Mage", 9: "Warlock", 11: "Druid",
+		};
+
+		const heroicIcon = '<img class="diff-heroic-icon" src="{{websiteRoot}}/img/wow-icons/small/heroic.png" alt="Heroic">';
+		function difficultyLabelHtml(diff) {
+			switch (diff) {
+				case 0: return "Normal";
+				case 1: return `${heroicIcon} Heroic`;
+				case 2: return "10 Normal";
+				case 3: return "20 Normal";
+				case 4: return "25 Normal";
+				case 5: return "40 Normal";
+				case 6: return `10 ${heroicIcon} Heroic`;
+				case 7: return `25 ${heroicIcon} Heroic`;
+				default: return `Difficulty ${diff}`;
+			}
+		}
+
+		function formatTime(ms) {
+			if (!ms || ms <= 0) {
+				return "-";
+			}
+			const totalSeconds = Math.floor(ms / 1000);
+			const hours = Math.floor(totalSeconds / 3600);
+			const minutes = Math.floor((totalSeconds % 3600) / 60);
+			const seconds = totalSeconds % 60;
+			if (hours > 0) {
+				return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+			}
+			const millis = ms % 1000;
+			return `${minutes}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+		}
+
+		let availableDifficulties = [];
+		let selectedSize = null;
+		let selectedHeroic = null;
+
+		function currentInstance() {
+			const id = Number($("#select-instance").val());
+			return catalog.find((i) => i.id === id) ?? null;
+		}
+
+		function populateInstances() {
+			const content = $("#select-content").val();
+			const $select = $("#select-instance").empty();
+			for (const expansion of expansionOrder) {
+				const instances = catalog.filter((i) => i.content === content && i.expansion === expansion);
+				if (instances.length === 0) {
+					continue;
+				}
+				const $group = $("<optgroup></optgroup>").attr("label", expansionLabels[expansion]);
+				for (const instance of instances) {
+					$group.append($("<option></option>").attr("value", instance.id).text(instance.name));
+				}
+				$select.append($group);
+			}
+			populateTargets();
+		}
+
+		function populateTargets() {
+			const instance = currentInstance();
+			const $select = $("#select-target").empty();
+			if (instance === null || instance.content === "world") {
+				$("#target-selector").hide();
+				return;
+			}
+			$("#target-selector").show();
+			$select.append($("<option></option>").attr("value", "0").text("Full clear"));
+			for (const boss of instance.bosses) {
+				$select.append($("<option></option>").attr("value", boss.id).text(boss.name));
+			}
+		}
+
+		function sizesAvailable() {
+			return [...new Set(availableDifficulties.map((d) => difficultyParts[d]?.size).filter((s) => s !== undefined))].sort((a, b) => a - b);
+		}
+
+		function heroicChoicesAvailable() {
+			const inScope = availableDifficulties.filter((d) => {
+				const parts = difficultyParts[d];
+				return parts !== undefined && (selectedSize === null || parts.size === selectedSize);
+			});
+			return [...new Set(inScope.map((d) => difficultyParts[d].heroic))];
+		}
+
+		function renderFilters() {
+			const sizes = sizesAvailable();
+			if (selectedSize !== null && !sizes.includes(selectedSize)) {
+				selectedSize = null;
+			}
+			const $sizeFilter = $("#size-filter").empty();
+			if (sizes.length > 1) {
+				const addBtn = (label, value) => {
+					$('<button type="button" class="difficulty-btn"></button>')
+						.text(label)
+						.toggleClass("is-active", selectedSize === value)
+						.on("click", () => {
+							selectedSize = value;
+							renderFilters();
+							loadLeaderboard();
+						})
+						.appendTo($sizeFilter);
+				};
+				addBtn("All sizes", null);
+				for (const size of sizes) {
+					addBtn(`${size}-man`, size);
+				}
+			}
+
+			const heroicChoices = heroicChoicesAvailable();
+			if (selectedHeroic !== null && !heroicChoices.includes(selectedHeroic)) {
+				selectedHeroic = null;
+			}
+			const $diffFilter = $("#difficulty-filter").empty();
+			if (heroicChoices.length > 1) {
+				const addBtn = (html, value) => {
+					$('<button type="button" class="difficulty-btn"></button>')
+						.html(html)
+						.toggleClass("is-active", selectedHeroic === value)
+						.on("click", () => {
+							selectedHeroic = value;
+							renderFilters();
+							loadLeaderboard();
+						})
+						.appendTo($diffFilter);
+				};
+				addBtn("All difficulties", null);
+				addBtn("Normal", false);
+				addBtn(`${heroicIcon} Heroic`, true);
+			}
+		}
+
+		function selectedFlatDifficulties() {
+			const selected = availableDifficulties.filter((d) => {
+				const parts = difficultyParts[d];
+				if (parts === undefined) {
+					return true;
+				}
+				if (selectedSize !== null && parts.size !== selectedSize) {
+					return false;
+				}
+				if (selectedHeroic !== null && parts.heroic !== selectedHeroic) {
+					return false;
+				}
+				return true;
+			});
+			return selected.length === availableDifficulties.length ? null : selected;
+		}
+
+		function updateHeading() {
+			const instance = currentInstance();
+			if (instance === null) {
+				$("#top-records-heading").text("");
+				return;
+			}
+			let target = "Fastest clears";
+			if (instance.content === "world") {
+				target = "Fastest kills";
+			} else if (Number($("#select-target").val()) !== 0) {
+				const boss = instance.bosses.find((b) => b.id === Number($("#select-target").val()));
+				target = `Fastest kills - ${boss ? boss.name : ""}`;
+			}
+			$("#top-records-heading").text(`${target} - ${instance.name}`);
+		}
+
+		let requestSeq = 0;
+		function loadLeaderboard() {
+			const instance = currentInstance();
+			if (instance === null) {
+				return;
+			}
+			updateHeading();
+
+			const params = { instance: instance.id };
+			const realm = $("#select-realm").val();
+			if (realm) {
+				params.realm = realm;
+			}
+			const bossId = instance.content === "world" ? 0 : Number($("#select-target").val()) || 0;
+			if (bossId !== 0) {
+				params.boss = bossId;
+			}
+			const difficulties = selectedFlatDifficulties();
+			if (difficulties !== null) {
+				params.difficulty = difficulties.join(",");
+			}
+
+			const seq = ++requestSeq;
+			$.getJSON(`{{websiteRoot}}/top-logs/data`, params, (data) => {
+				if (seq !== requestSeq) {
+					return;
+				}
+				availableDifficulties = data.availableDifficulties;
+				renderFilters();
+				renderRows(data.realm, data.rows);
+			});
+		}
+
+		function renderRows(realm, rows) {
+			const $body = $("#top-records-table tbody").empty();
+			$("#top-records-table").toggle(rows.length > 0);
+			$("#top-records-empty").toggle(rows.length === 0);
+			rows.forEach((row, index) => {
+				const $tr = $("<tr></tr>");
+				$tr.append($('<td class="tr-rank"></td>').text(index + 1));
+				$tr.append(
+					$("<td></td>").append(
+						$('<a class="tr-char"></a>')
+							.attr("href", `{{websiteRoot}}/character/${encodeURIComponent(realm)}/${encodeURIComponent(row.name)}`)
+							.text(row.name),
+					),
+				);
+				$tr.append($("<td></td>").text(row.guild ?? ""));
+				$tr.append($("<td></td>").text(classNames[row.class] ?? ""));
+				$tr.append($('<td class="tr-time"></td>').text(formatTime(row.bestTimeMs)));
+				$tr.append($("<td></td>").html(difficultyLabelHtml(row.difficulty)));
+				$tr.append($("<td></td>").text(scopeLabels[row.scope] ?? ""));
+				$tr.append($("<td></td>").text(row.completions));
+				$tr.append($("<td></td>").text(row.lastSeen ? new Date(row.lastSeen * 1000).toLocaleDateString() : ""));
+				$body.append($tr);
+			});
+		}
+
+		function resetAndLoad() {
+			selectedSize = null;
+			selectedHeroic = null;
+			availableDifficulties = [];
+			renderFilters();
+			loadLeaderboard();
+		}
+
+		$("#select-content").on("change", () => {
+			populateInstances();
+			resetAndLoad();
+		});
+		$("#select-instance").on("change", () => {
+			populateTargets();
+			resetAndLoad();
+		});
+		$("#select-target").on("change", resetAndLoad);
+		$("#select-realm").on("change", resetAndLoad);
+
+		populateInstances();
+		resetAndLoad();
+	});
+</script>

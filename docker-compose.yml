@@ -1,0 +1,184 @@
+# Compose project name (otherwise it defaults to the checkout directory name).
+name: azeroth-platform
+
+services:
+  azeroth-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: azeroth-platform:latest
+    container_name: azeroth-platform
+    # Runs as the image's non-root `app` user (no `user: 0:0` override): the manager no longer needs the
+    # raw Docker socket, it reaches the daemon through the allowlisted docker-socket-proxy over TCP. Drop
+    # all Linux capabilities and forbid privilege escalation to shrink the blast radius further.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - docker-socket-proxy
+    # Which host interface the manager API is published on. Defaults to 0.0.0.0 (all interfaces) so a
+    # "local setup" is reachable from other machines on the LAN out of the box - the desktop launcher
+    # (profiles, launcher self-update, per-stack client config) connects here at http://<host-lan-ip>:8080.
+    # For a public / internet-facing deployment set MANAGER_BIND=127.0.0.1 in .env and route external
+    # traffic through the `caddy` reverse proxy instead (TLS + security headers), which reaches the
+    # manager as `azeroth-platform:8080` on the compose network.
+    ports:
+      - "${MANAGER_BIND:-0.0.0.0}:8080:8080"
+    volumes:
+      # NOTE: the raw /var/run/docker.sock mount was removed. The manager talks to the daemon exclusively
+      # through the docker-socket-proxy service (see DOCKER_HOST below), which allowlists the API groups
+      # the manager actually uses. Only the proxy holds the real socket.
+
+      # Manager's data directory (stacks, builds, manager database).
+      # A Docker-managed named volume (not a host bind mount): the manager persists its own state
+      # here, and every per-stack artifact is pushed from here into per-stack named volumes on the
+      # same daemon. Nested AzerothCore containers no longer need host-path translation.
+      - azeroth-platform-data:/app/data
+
+      # Live armory source overlaid on the baked-in copy (Dockerfile COPY frontend-armory/ ./armory-src/).
+      # The backend builds the per-stack armory image on demand from this path, so mounting the working
+      # tree here means "Rebuild & Restart" picks up local edits to frontend-armory/ WITHOUT rebuilding
+      # the manager image. Read-only: the build only ever reads from here (it copies into /app/data).
+      - ./frontend-armory:/app/armory-src:ro
+
+      # Live launcher source overlaid on the baked-in copy (Dockerfile COPY launcher/ ./launcher-src/).
+      # The backend cross-publishes the desktop launcher on demand from this path, so mounting the
+      # working tree here means a launcher "Build" picks up local edits to launcher/ WITHOUT rebuilding
+      # the manager image. Read-only: the build only ever reads from here (it copies into /app/data).
+      - ./launcher:/app/launcher-src:ro
+
+      # Live MPQ + WDBX sidecar sources overlaid on the baked-in copies (Dockerfile COPY mpqtool/,
+      # wdbx/). The backend builds these images on demand from these paths (build-if-missing, cached),
+      # so local edits to the sidecars are picked up WITHOUT rebuilding the manager image. Read-only:
+      # the build only ever reads from here (it copies into /app/data).
+      - ./mpqtool:/app/mpqtool-src:ro
+      - ./wdbx:/app/wdbx-src:ro
+      
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - Docker__BuildsPath=/app/data/stacks
+      # Reach the daemon through the allowlisted socket proxy instead of a raw socket. DOCKER_HOST is used
+      # by the docker CLI / compose plugin; Docker__SocketPath (http://) is used by the Docker.DotNet client.
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      - Docker__SocketPath=http://docker-socket-proxy:2375
+      # Use the classic image builder: BuildKit's session/grpc endpoints are not exposed by the socket
+      # proxy, so disabling BuildKit keeps on-demand image builds working over the restricted API.
+      - DOCKER_BUILDKIT=0
+      # Named volume backing /app/data; enables fast daemon-side seeding of per-stack volumes.
+      - Docker__DataVolumeName=azeroth-platform-data
+      - Docker__ComposeCommand=plugin
+      # Host interface each local stack publishes on.
+      #   - PublishBindAddress: player-facing HTTP (armory + client file server). Defaults to 0.0.0.0 so a
+      #     "local setup" stack's armory + client files are always reachable on the LAN out of the box.
+      #     A single stack can still be narrowed from the UI (Overview → Armory & client web access), or
+      #     set STACK_PUBLISH_BIND=127.0.0.1 to keep every local stack loopback-only.
+      #   - DataPlaneBindAddress: MySQL + SOAP (management only; never expose publicly) - stays on loopback.
+      #     On a Linux host where this manager runs in a container, host.docker.internal resolves to the
+      #     bridge gateway, so set this to that gateway IP (e.g. 172.17.0.1) instead of 127.0.0.1.
+      - Docker__PublishBindAddress=${STACK_PUBLISH_BIND:-0.0.0.0}
+      - Docker__DataPlaneBindAddress=${STACK_DATAPLANE_BIND:-127.0.0.1}
+      # LAN IP of THIS host, used as the default realmlist host so game clients on other machines can
+      # connect out of the box (the container itself cannot see the host's LAN IP on Docker Desktop,
+      # so it must be supplied here). Applies to both per-stack profiles (Migrations:RealmlistHost)
+      # and the global client (Client:Realmlist:Host). Falls back to 127.0.0.1 (localhost-only).
+      - Migrations__RealmlistHost=${HOST_LAN_IP:-127.0.0.1}
+      - Client__Realmlist__Host=${HOST_LAN_IP:-127.0.0.1}
+      - Auth__JwtKey=${AUTH_JWT_KEY:-}
+      - MySQL__Host=host.docker.internal
+      - SOAP__Host=host.docker.internal
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/azeroth-platform.db
+      # Admin panel password. Leave unset to have the server generate one and log it at startup.
+      - Admin__Password=${ADMIN_PASSWORD:-}
+    restart: unless-stopped
+    networks:
+      - azerothcore-network
+
+  # Allowlisted Docker API proxy (Tecnativa docker-socket-proxy). This is the ONLY container that mounts
+  # the real Docker socket; the manager reaches the daemon through it over TCP on the internal network.
+  # Each flag below enables a group of API endpoints - only the ones the manager actually uses are turned
+  # on; everything else (swarm, nodes, services, secrets, configs) stays denied by default. This shrinks
+  # the exposed Docker API surface but is NOT a host-escape boundary: the manager legitimately needs
+  # CONTAINERS + POST + BUILD/EXEC, and the proxy filters only by API group, not request body - so anyone
+  # who can reach this proxy (i.e. a compromised manager) can still create a privileged / bind-mounted
+  # container and pivot to host root. Treat manager RCE as host-root-equivalent; the proxy's value is
+  # keeping the raw socket off the manager and denying the swarm/secrets/config groups entirely.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: azeroth-platform-docker-proxy
+    restart: unless-stopped
+    environment:
+      # Allow write (POST) operations - the manager creates/starts/removes containers, volumes, networks.
+      - POST=1
+      # API groups the manager uses (containers/images/networks/volumes, build, exec, and read-only info).
+      - CONTAINERS=1
+      - IMAGES=1
+      - NETWORKS=1
+      - VOLUMES=1
+      - BUILD=1
+      - EXEC=1
+      - COMMIT=1
+      - DISTRIBUTION=1
+      - INFO=1
+      - VERSION=1
+      - PING=1
+      - AUTH=1
+      # system/df - disk usage breakdown (images, build cache, volume sizes) for the Docker tab.
+      - SYSTEM=1
+      # Explicitly deny the dangerous/unused groups (these are the proxy defaults, pinned for clarity).
+      - SWARM=0
+      - NODES=0
+      - SERVICES=0
+      - TASKS=0
+      - SECRETS=0
+      - CONFIGS=0
+      - PLUGINS=0
+    volumes:
+      # Read-only mount of the host socket: the proxy still forwards writes it allows, but a compromise of
+      # the proxy cannot rewrite the socket file itself.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - azerothcore-network
+
+  # TLS terminator + security-header/HSTS layer in front of the manager. This is the only service that
+  # should be published to an untrusted network. See ./Caddyfile for configuration (internal CA by
+  # default; set SITE_ADDRESS + TLS_EMAIL for automatic Let's Encrypt certificates).
+  caddy:
+    image: caddy:2-alpine
+    container_name: azeroth-platform-caddy
+    depends_on:
+      - azeroth-platform
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Compose always sets these on the container, and Caddy's {$VAR:default} fallback only applies to
+      # UNSET vars (not set-but-empty ones). So default them here to non-empty values that mean "serve
+      # https://localhost with a self-signed cert": an empty SITE_ADDRESS/TLS_EMAIL in .env still yields
+      # a working local TLS setup. Set real values in .env to switch to a public domain + Let's Encrypt.
+      - SITE_ADDRESS=${SITE_ADDRESS:-localhost}
+      - TLS_EMAIL=${TLS_EMAIL:-internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    networks:
+      - azerothcore-network
+
+networks:
+  azerothcore-network:
+    name: azerothcore-network
+    driver: bridge
+
+volumes:
+  # Manager state (stacks, builds, manager database, uploaded client base). Backing store for the
+  # manager's /app/data; per-stack named volumes are seeded from here on the same Docker daemon.
+  azeroth-platform-data:
+    name: azeroth-platform-data
+  # Caddy's certificate store (issued/renewed TLS certs) and runtime config; persisted so certs are
+  # not re-issued on every restart.
+  caddy-data:
+    name: azeroth-platform-caddy-data
+  caddy-config:
+    name: azeroth-platform-caddy-config

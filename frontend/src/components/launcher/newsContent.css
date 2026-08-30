@@ -1,0 +1,63 @@
+/*
+ * Shared styling for rendered launcher news HTML. The website reading-view preview renders the
+ * article inside `.news-content` on a dark panel so it matches the launcher's WebView2 reading view
+ * (which embeds an equivalent stylesheet). Keep the two in sync when editing.
+ */
+.news-content {
+  color: #e5e7eb;
+  line-height: 1.6;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.news-content > :first-child { margin-top: 0; }
+.news-content h1 { font-size: 1.6em; font-weight: 700; margin: 0.6em 0 0.3em; color: #fff; }
+.news-content h2 {
+  font-size: 1.3em; font-weight: 700; margin: 0.7em 0 0.3em; color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12); padding-bottom: 0.2em;
+}
+.news-content h3 { font-size: 1.1em; font-weight: 600; margin: 0.5em 0 0.25em; color: #fff; }
+.news-content p { margin: 0.5em 0; }
+.news-content ul, .news-content ol { margin: 0.5em 0; padding-left: 1.4em; }
+.news-content li { margin: 0.2em 0; }
+.news-content a { color: var(--news-accent, #4fa8d8); text-decoration: none; }
+.news-content a:hover { text-decoration: underline; }
+.news-content blockquote {
+  margin: 0.8em 0; padding: 0.4em 1em; font-style: italic; color: #cbd5e1;
+  border-left: 3px solid var(--news-accent, #4fa8d8); background: rgba(255, 255, 255, 0.05);
+}
+.news-content hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.15); margin: 1em 0; }
+.news-content img { max-width: 100%; height: auto; border-radius: 6px; }
+.news-content .news-inline-image { margin: 1em 0; text-align: center; }
+.news-content .news-inline-image img { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.news-content code {
+  background: rgba(255, 255, 255, 0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em;
+}
+.news-content strong { color: #fff; }
+.news-content table { border-collapse: collapse; width: 100%; margin: 0.6em 0; }
+.news-content th, .news-content td {
+  border: 1px solid rgba(255, 255, 255, 0.15); padding: 4px 8px; text-align: left;
+}
+
+/* Light-theme styling for the TipTap editing surface itself. */
+.tiptap-editor .ProseMirror {
+  min-height: 200px;
+  padding: 12px;
+  outline: none;
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.tiptap-editor .ProseMirror:focus { outline: none; }
+.tiptap-editor .ProseMirror h1 { font-size: 1.6em; font-weight: 700; margin: 0.5em 0 0.3em; }
+.tiptap-editor .ProseMirror h2 { font-size: 1.3em; font-weight: 700; margin: 0.5em 0 0.3em; }
+.tiptap-editor .ProseMirror h3 { font-size: 1.1em; font-weight: 600; margin: 0.4em 0 0.25em; }
+.tiptap-editor .ProseMirror ul, .tiptap-editor .ProseMirror ol { padding-left: 1.4em; margin: 0.4em 0; }
+.tiptap-editor .ProseMirror blockquote {
+  border-left: 3px solid #d1d5db; padding-left: 1em; color: #4b5563; font-style: italic; margin: 0.6em 0;
+}
+.tiptap-editor .ProseMirror hr { border: none; border-top: 1px solid #d1d5db; margin: 1em 0; }
+.tiptap-editor .ProseMirror a { color: #2563eb; text-decoration: underline; }
+.tiptap-editor .ProseMirror img { max-width: 100%; height: auto; border-radius: 6px; }
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder); color: #9ca3af; float: left; height: 0; pointer-events: none;
+}

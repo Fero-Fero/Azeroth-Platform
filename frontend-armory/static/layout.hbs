@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>{{title}}</title>
+
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/bulma.min.css">
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/armory.css">
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/theme.css">
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/azp-theme.css">
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/azp-layout.css">
+	<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/tooltip.css">
+	<link rel="stylesheet" href="{{websiteRoot}}/css/azp-responsive.css">
+</head>
+
+<body>
+	<script type="application/javascript">
+		const handlebarsData = {{{JSONstringify handlebarsData}}};
+	</script>
+	<script type="application/javascript" src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+	<script type="application/javascript" src="https://cdn.jsdelivr.net/npm/js-cookie@3.0.1/dist/js.cookie.min.js"></script>
+	<script type="application/javascript" src="{{websiteRoot}}/js/tooltip.js"></script>
+	<script type="application/javascript" src="{{websiteRoot}}/js/navbar-search.js"></script>
+
+	{{#if iframeMode.enabled}}
+	<script type="application/javascript">
+		if (window === window.parent) {
+			// If not embedded, redirect to the main website with the iframe in it
+			window.location.href = `{{iframeMode.url}}/?${window.location.pathname.trim().replace(handlebarsData.websiteRoot, "").replace(/^\//, "")}`;
+		}
+	</script>
+	<script type="application/javascript" src="{{websiteRoot}}/js/sync-url.js"></script>
+	<script type="application/javascript" data-cfasync="false" src="https://cdn.jsdelivr.net/npm/iframe-resizer@4.3.2/js/iframeResizer.contentWindow.min.js"></script>
+	<script type="application/javascript">
+		$(window).on("load", () => {
+			window.parent.postMessage("contentLoaded", "*");
+		});
+	</script>
+	{{/if}}
+
+	{{> armory-navbar
+		websiteRoot=websiteRoot
+		navbarLinks=navbarLinks
+		navbarShowSearch=navbarShowSearch
+		navbarSearchPlaceholder=navbarSearchPlaceholder
+		accountsEnabled=accountsEnabled
+		currentUser=currentUser
+		allowRegistration=allowRegistration
+		csrfToken=csrfToken
+	}}
+
+	<section class="section">
+		<div class="armory-container">
+			{{{ body }}}
+		</div>
+	</section>
+</body>
+
+</html>

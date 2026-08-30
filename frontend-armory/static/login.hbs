@@ -1,0 +1,31 @@
+<h1 class="title is-size-1">Sign in</h1>
+
+<div class="armory-panel auth-panel">
+	<div class="panel-body">
+		{{#if registrationDisabled}}
+		<div class="auth-error" role="alert">Registration is disabled until email delivery is configured for this realm.</div>
+		{{/if}}
+		{{#if authError}}
+		<div class="auth-error" role="alert">{{authError}}</div>
+		{{/if}}
+		<form class="auth-form" action="{{websiteRoot}}/login" method="post" autocomplete="off">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			<input type="hidden" name="returnTo" value="{{returnTo}}">
+			{{#if emailConfirmationEnabled}}
+			<label class="auth-label" for="email">Email</label>
+			<input class="auth-input" id="email" name="email" type="email" maxlength="255" required autofocus value="{{email}}">
+			{{else}}
+			<label class="auth-label" for="username">Account name</label>
+			<input class="auth-input" id="username" name="username" type="text" maxlength="16" required autofocus value="{{username}}">
+			{{/if}}
+
+			<label class="auth-label" for="password">Password</label>
+			<input class="auth-input" id="password" name="password" type="password" maxlength="16" required>
+
+			<button class="btn-download auth-submit" type="submit">Sign in</button>
+		</form>
+		{{#if allowRegistration}}
+		<p class="auth-alt">No account yet? <a href="{{websiteRoot}}/register">Create one</a>.</p>
+		{{/if}}
+	</div>
+</div>

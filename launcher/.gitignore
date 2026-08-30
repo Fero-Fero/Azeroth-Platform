@@ -1,0 +1,34 @@
+# The launcher is its own solution, built and published independently of the backend, so it carries
+# its own ignore rules rather than relying on the repo root.
+
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+
+# Published launcher payloads uploaded to a stack's launcher-dist volume
+dist/
+*.zip
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+coverage*.xml
+coverage*.json
+
+# User-specific and IDE files
+*.user
+*.suo
+*.rsuser
+*.sln.docstates
+*.DotSettings.user
+.vs/
+.idea/
+_ReSharper*/
+
+# Local run state: a developer pointing the launcher at a real install writes these next to the build
+launcher.state.json
+crash.log

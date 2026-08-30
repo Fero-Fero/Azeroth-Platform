@@ -1,0 +1,289 @@
+.progression-subnav {
+	margin-bottom: 1.5rem;
+}
+
+/* Category panels (Dungeon / Raid / World) */
+.progression-cat {
+	display: none;
+}
+
+.progression-cat.is-active {
+	display: block;
+}
+
+.progression-empty {
+	color: var(--armory-text-muted);
+	font-style: italic;
+	padding: 1.5rem 0;
+}
+
+.progression-section-title {
+	margin-bottom: 1rem;
+	padding-bottom: 0.35rem;
+	border-bottom: 1px solid var(--armory-border);
+	color: var(--armory-heading);
+}
+
+.progression-section-title:not(:first-child) {
+	margin-top: 2rem;
+}
+
+/* Difficulty toggle (WotLK): 10/25 Normal and Heroic */
+.difficulty-switch {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 1rem;
+}
+
+.difficulty-btn {
+	padding: 5px 14px;
+	border: 1px solid var(--armory-border);
+	border-radius: 4px;
+	background: linear-gradient(180deg, var(--armory-panel-highlight), var(--armory-panel));
+	color: var(--armory-text-muted);
+	font-size: 0.82rem;
+	font-weight: bold;
+	cursor: pointer;
+	transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.difficulty-btn:hover {
+	border-color: var(--armory-border-bright);
+	color: var(--armory-heading);
+}
+
+.difficulty-btn.is-active {
+	border-color: var(--armory-accent);
+	color: var(--armory-bg);
+	background: linear-gradient(180deg, var(--armory-heading), var(--armory-accent));
+	box-shadow: 0 0 0 1px var(--armory-accent);
+}
+
+.raid-grid-empty {
+	display: none;
+	color: var(--armory-text-muted);
+	font-style: italic;
+	padding: 0.5rem 0 1rem;
+}
+
+/* Responsive grid of raid cards */
+.raid-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	gap: 1rem;
+	margin-bottom: 1rem;
+}
+
+/* A raid card: image background, name overlaid on top, progress bar below */
+.raid-card {
+	position: relative;
+	height: 130px;
+	border-radius: 6px;
+	overflow: hidden;
+	background-color: var(--armory-panel);
+	background-size: cover;
+	background-position: center;
+	border: 1px solid var(--armory-border);
+	box-shadow: 0 2px 6px var(--armory-shadow);
+	cursor: default;
+	transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.raid-card:hover {
+	border-color: var(--armory-border-bright);
+	box-shadow: 0 0 0 1px var(--armory-border-bright), 0 4px 10px var(--armory-shadow);
+	transform: translateY(-2px);
+}
+
+.diff-heroic-icon {
+	height: 1em;
+	width: auto;
+	vertical-align: -0.16em;
+	margin: 0 1px;
+}
+
+.raid-card.no-image {
+	background-color: var(--armory-panel-highlight);
+	background-image: linear-gradient(135deg, var(--armory-panel-highlight), var(--armory-panel));
+}
+
+.raid-card.is-complete {
+	border-color: var(--armory-accent);
+	box-shadow: 0 0 0 1px var(--armory-accent), 0 4px 10px var(--armory-shadow);
+}
+
+/* Darkening gradient so text stays readable over the artwork */
+.raid-card-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	padding: 8px 10px;
+	background: linear-gradient(180deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.15) 35%, rgba(0, 0, 0, 0.35) 70%, rgba(0, 0, 0, 0.85) 100%);
+}
+
+.raid-card-name {
+	color: var(--armory-heading);
+	font-weight: bold;
+	font-size: 0.95rem;
+	line-height: 1.15;
+	text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+.raid-card-diff {
+	display: block;
+	margin-top: 2px;
+	color: var(--armory-text);
+	font-size: 0.72rem;
+	font-weight: bold;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+.raid-card-bottom {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.raid-card-count {
+	color: var(--armory-text);
+	font-size: 0.78rem;
+	font-weight: bold;
+	white-space: nowrap;
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+/* Green gradient progress bar with a silver beveled frame (matches achievements) */
+.raid-progress {
+	flex: 1;
+	height: 14px;
+	margin: 0;
+	border-radius: 7px;
+	border: 2px solid #9c988c;
+	border-top-color: #d4d1c5;
+	border-bottom-color: #6e6b61;
+	background-color: rgba(0, 0, 0, 0.6);
+	box-shadow: 0 0 0 1px rgba(18, 13, 7, 0.9), 0 1px 3px rgba(0, 0, 0, 0.55);
+	overflow: hidden;
+	color: #5cc23a;
+}
+
+.raid-progress::-webkit-progress-bar {
+	background-color: rgba(0, 0, 0, 0.55);
+	border-radius: 5px;
+}
+
+.raid-progress::-webkit-progress-value {
+	background-color: #4caf25;
+	background-image: linear-gradient(180deg, #9be86a 0%, #5cc23a 45%, #2f8f1e 100%);
+	border-radius: 5px;
+}
+
+.raid-progress::-moz-progress-bar {
+	background-color: #4caf25;
+	background-image: linear-gradient(180deg, #9be86a 0%, #5cc23a 45%, #2f8f1e 100%);
+	border-radius: 5px;
+}
+
+/* Hover tooltip listing each boss */
+#progression-tooltip {
+	position: absolute;
+	z-index: 1000;
+	display: none;
+	min-width: 220px;
+	max-width: 320px;
+	padding: 10px 12px;
+	background: linear-gradient(
+		180deg,
+		color-mix(in srgb, var(--armory-panel) 96%, var(--armory-accent) 4%),
+		color-mix(in srgb, var(--armory-panel) 92%, black 8%)
+	);
+	border: 1px solid var(--armory-border);
+	border-radius: 6px;
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--armory-border) 35%, transparent),
+		0 10px 26px var(--armory-shadow);
+	color: var(--armory-text);
+	pointer-events: none;
+}
+
+#progression-tooltip.is-visible {
+	display: block;
+}
+
+.ptt-title {
+	color: var(--armory-heading);
+	font-weight: bold;
+	font-size: 0.95rem;
+}
+
+.ptt-summary {
+	margin-bottom: 6px;
+	color: var(--armory-text-muted);
+	font-size: 0.78rem;
+}
+
+.ptt-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.ptt-boss {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ptt-boss-name {
+	flex: 1;
+	color: var(--armory-text-muted);
+	font-size: 0.8rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ptt-boss.done .ptt-boss-name {
+	color: var(--armory-text);
+}
+
+.ptt-boss-bar {
+	width: 46px;
+	height: 8px;
+	margin: 0;
+	border-radius: 4px;
+	border: 1px solid #6e6b61;
+	border-top-color: #9c988c;
+	background-color: rgba(0, 0, 0, 0.6);
+	overflow: hidden;
+	color: #5cc23a;
+}
+
+.ptt-boss-bar::-webkit-progress-bar {
+	background-color: rgba(0, 0, 0, 0.6);
+}
+
+.ptt-boss-bar::-webkit-progress-value {
+	background-image: linear-gradient(180deg, #9be86a 0%, #5cc23a 45%, #2f8f1e 100%);
+}
+
+.ptt-boss-bar::-moz-progress-bar {
+	background-image: linear-gradient(180deg, #9be86a 0%, #5cc23a 45%, #2f8f1e 100%);
+}
+
+.ptt-boss-val {
+	width: 28px;
+	color: var(--armory-text-muted);
+	font-size: 0.75rem;
+	font-weight: bold;
+	text-align: right;
+}
+
+.ptt-boss.done .ptt-boss-val {
+	color: var(--armory-accent);
+}

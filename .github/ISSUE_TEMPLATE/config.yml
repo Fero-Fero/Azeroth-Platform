@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/Fero-Fero/AzerothPlatform/blob/main/README.technical.md#7-troubleshooting
+    about: Common fixes (ports, certs, admin password, builds, external hosts) before opening an issue.
+  - name: Contributing guide
+    url: https://github.com/Fero-Fero/AzerothPlatform/blob/main/CONTRIBUTING.md
+    about: Conventions, tests, and how to report bugs.

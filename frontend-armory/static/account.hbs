@@ -1,0 +1,390 @@
+<h1 class="title is-size-1">My account</h1>
+<p class="account-greeting">Signed in as <strong>{{displayName}}</strong></p>
+
+<nav class="char-subnav account-tabs" aria-label="Account sections">
+	<a class="char-subnav-tab{{#if isDetailsTab}} is-active{{/if}}" href="{{websiteRoot}}/account/details">Account details</a>
+	<a class="char-subnav-tab{{#if isCharactersTab}} is-active{{/if}}" href="{{websiteRoot}}/account/characters">Characters</a>
+	{{#if hasGuilds}}
+	<a class="char-subnav-tab{{#if isGuildTab}} is-active{{/if}}" href="{{websiteRoot}}/account/guild">Guild</a>
+	{{/if}}
+</nav>
+
+{{#if isDetailsTab}}
+<div class="armory-panel account-panel">
+	<div class="panel-title">Account details</div>
+	<div class="panel-body">
+		{{#if profileSaved}}
+		<div class="auth-message" role="status">Display name saved.</div>
+		{{/if}}
+		{{#if profileError}}
+		<div class="auth-error" role="alert">{{profileError}}</div>
+		{{/if}}
+
+		<form class="account-profile-form auth-form" action="{{websiteRoot}}/account/profile" method="post">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			<input type="hidden" name="tab" value="details">
+			<label class="auth-label" for="displayName">Display name</label>
+			<input class="auth-input" id="displayName" name="displayName" type="text" maxlength="32" required value="{{displayName}}">
+			<p class="auth-hint">Shown in the navbar and public armory pages instead of your in-game login name. Must be unique across all players.</p>
+			<button class="btn-download auth-submit" type="submit">Save display name</button>
+		</form>
+
+		<dl class="account-details">
+			{{#if emailConfirmationEnabled}}
+			{{#if maskedEmail}}
+			<div class="account-detail-row">
+				<dt>Email</dt>
+				<dd>{{maskedEmail}}</dd>
+			</div>
+			<p class="account-detail-note">Used for sign-in only. Not shown on public armory pages.</p>
+			{{/if}}
+			{{/if}}
+			<div class="account-detail-row">
+				<dt>In-game login name</dt>
+				<dd>{{username}}</dd>
+			</div>
+			{{#if hideUsername}}
+			<p class="account-detail-note">Your in-game login name is not shown publicly on this armory.</p>
+			{{/if}}
+		</dl>
+		<form class="nav-inline-form account-signout" action="{{websiteRoot}}/logout" method="post">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			<button type="submit" class="btn-download">Sign out</button>
+		</form>
+	</div>
+</div>
+{{/if}}
+
+{{#if isCharactersTab}}
+<div class="armory-panel account-panel">
+	<div class="panel-title">Characters</div>
+	<div class="panel-body">
+		{{#if hasCharacters}}
+		{{#each realms}}
+		{{#if characters.length}}
+		<section class="account-realm-section">
+			<h2 class="account-realm-title">{{realm}}</h2>
+			<table class="account-char-table">
+				<thead>
+					<tr>
+						<th scope="col">Character</th>
+						<th scope="col">Level</th>
+						<th scope="col">Class</th>
+						<th scope="col">Race</th>
+						<th scope="col">Guild</th>
+						<th scope="col">Status</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{#each characters}}
+					<tr>
+						<td><a href="{{url}}">{{name}}</a></td>
+						<td>{{level}}</td>
+						<td>
+							<img class="account-icon" src="{{@root.websiteRoot}}/img/icons/class_{{class}}.jpg" alt="{{className}}" title="{{className}}">
+						</td>
+						<td>
+							<img class="account-icon" src="{{@root.websiteRoot}}/img/icons/race_{{race}}.jpg" alt="{{raceName}}" title="{{raceName}}">
+						</td>
+						<td>
+							{{#if guildUrl}}
+							<a href="{{guildUrl}}">{{guildName}}</a>
+							{{else}}
+							<span class="account-muted">-</span>
+							{{/if}}
+						</td>
+						<td>{{#if online}}<span class="account-online" title="Online">Online</span>{{else}}<span class="account-offline" title="Offline">Offline</span>{{/if}}</td>
+					</tr>
+					{{/each}}
+				</tbody>
+			</table>
+		</section>
+		{{/if}}
+		{{/each}}
+		{{else}}
+		<p class="account-empty">No characters on this account yet. Log in to the game to create one.</p>
+		{{/if}}
+	</div>
+</div>
+{{/if}}
+
+{{#if isGuildTab}}
+{{#if selectedGuild}}
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/account.css">
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/guild.css">
+<style>
+	.account-guild-header-block .guild-emblem {
+		background: url("{{websiteRoot}}/img/guild-emblems/circle.png") no-repeat center;
+	}
+</style>
+{{> datatables}}
+{{> emblems}}
+
+<div class="armory-panel account-panel account-guild-window">
+	<div class="panel-title">Guild</div>
+	<div class="panel-body">
+		{{#if hasGuilds}}
+		{{#if guilds.length}}
+		<form class="account-guild-picker" method="get" action="{{websiteRoot}}/account/guild">
+			<input type="hidden" name="guildTab" value="{{guildSubTab}}">
+			{{#if isGuildBankTab}}
+			{{#if bankView.activeTabId}}
+			<input type="hidden" name="bankTab" value="{{bankView.activeTabId}}">
+			{{/if}}
+			{{/if}}
+			<label class="account-guild-picker-label" for="guild-select">Your guilds</label>
+			<select class="account-guild-select" id="guild-select" name="guild" onchange="this.form.submit()">
+				{{#each guilds}}
+				<option value="{{key}}"{{#if (eq key ../selectedGuild.key)}} selected{{/if}}>{{realm}} - {{name}}</option>
+				{{/each}}
+			</select>
+		</form>
+		{{/if}}
+		{{/if}}
+
+		<div id="guild-header" class="account-guild-header-block">
+			<div class="emblem-container account-guild-emblem">
+				<div class="guild-emblem circle">
+					<div class="images"></div>
+					<canvas class="circle" width="128" height="96"></canvas>
+				</div>
+			</div>
+			<div class="info">
+				<div class="char-name title is-size-3">&lt;<a href="{{selectedGuild.guildPageUrl}}">{{selectedGuild.name}}</a>&gt;</div>
+				<div class="is-size-5">
+					<div>{{selectedGuild.realm}}</div>
+					<div>
+						Guild Master: <a href="{{selectedGuild.leaderUrl}}">{{selectedGuild.leader}}</a>
+					</div>
+					<div>{{selectedGuild.membersCount}} members</div>
+					{{#if isGuildBankTab}}
+					{{#if bankView}}
+					{{#if bankView.enabled}}
+					<div class="account-bank-money">
+						Bank:
+						{{bankView.money.gold}}<span class="coin gold"></span>
+						{{bankView.money.silver}}<span class="coin silver"></span>
+						{{bankView.money.copperRemainder}}<span class="coin copper"></span>
+					</div>
+					{{/if}}
+					{{/if}}
+					{{/if}}
+					{{#eq selectedGuild.faction 1}}
+					<div class="faction">
+						<img class="logo" src="{{websiteRoot}}/img/PlusManz-Alliance.png" alt="">
+						<span>Alliance</span>
+					</div>
+					{{else}}
+					<div class="faction">
+						<img class="logo" src="{{websiteRoot}}/img/PlusManz-Horde.png" alt="">
+						<span>Horde</span>
+					</div>
+					{{/eq}}
+				</div>
+			</div>
+		</div>
+
+		<nav class="account-guild-subtabs" aria-label="Guild sections">
+			<a class="account-guild-subtab{{#if isGuildMembersTab}} is-active{{/if}}" href="{{websiteRoot}}/account/guild?guild={{selectedGuild.key}}&guildTab=members">Members</a>
+			<a class="account-guild-subtab{{#if isGuildInfoTab}} is-active{{/if}}" href="{{websiteRoot}}/account/guild?guild={{selectedGuild.key}}&guildTab=info">Info</a>
+			<a class="account-guild-subtab{{#if isGuildBankTab}} is-active{{/if}}" href="{{websiteRoot}}/account/guild?guild={{selectedGuild.key}}&guildTab=bank">Bank</a>
+		</nav>
+
+		{{#if isGuildInfoTab}}
+		<div class="account-guild-info">
+			<section class="account-guild-info-block">
+				<h3 class="account-guild-info-title">Message of the Day</h3>
+				{{#if selectedGuild.motd}}
+				<p class="account-guild-info-text">{{selectedGuild.motd}}</p>
+				{{else}}
+				<p class="account-muted">No guild MOTD set.</p>
+				{{/if}}
+			</section>
+			<section class="account-guild-info-block">
+				<h3 class="account-guild-info-title">Guild information</h3>
+				{{#if selectedGuild.info}}
+				<p class="account-guild-info-text">{{selectedGuild.info}}</p>
+				{{else}}
+				<p class="account-muted">No guild information set.</p>
+				{{/if}}
+			</section>
+		</div>
+		{{/if}}
+
+		{{#if isGuildMembersTab}}
+		<div class="account-guild-roster">
+			<table id="account-guild-members" class="stripe hover row-border">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Rank</th>
+						<th>Level</th>
+						<th>Class</th>
+						<th>Race</th>
+						<th>Online</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
+		{{/if}}
+
+		{{#if isGuildBankTab}}
+		{{#if bankView}}
+		{{> icons}}
+		{{#if bankView.enabled}}
+		<nav class="account-bank-tabs" aria-label="Guild bank tabs" id="account-bank-tabs">
+			{{#each bankView.tabs}}
+			<a class="account-bank-tab{{#if (eq tabId ../bankView.activeTabId)}} is-active{{/if}}" href="{{@root.websiteRoot}}/account/guild?guild={{../selectedGuild.key}}&guildTab=bank&bankTab={{tabId}}" data-bank-tab="{{tabId}}" title="{{name}}">
+				<img src="{{@root.websiteRoot}}/img/wow-icons/small/{{icon}}.jpg" alt="{{name}}">
+			</a>
+			{{/each}}
+		</nav>
+
+		<div class="account-bank-grid" id="account-bank-grid" data-realm="{{selectedGuild.realm}}" data-guild-id="{{selectedGuild.id}}">
+			{{#each bankView.activeTab.slots}}
+			{{#if this}}
+			<div class="account-bank-slot item-slot iconmedium no-link-text">
+				<div class="icon" style="background-image: url('{{@root.websiteRoot}}/img/wow-icons/medium/{{icon}}.jpg')"></div>
+				<div class="border" style="background-image: url('{{@root.websiteRoot}}/img/icon-border/medium/q{{quality}}.png')"></div>
+				<span data-tooltip="{{name}}" data-tooltip-quality="{{quality}}" data-tooltip-sub="Item Level {{itemLevel}}"></span>
+			</div>
+			{{else}}
+			<div class="account-bank-slot account-bank-slot--empty"></div>
+			{{/if}}
+			{{/each}}
+		</div>
+
+		{{#if bankView.activeTab.text}}
+		<p class="account-bank-tab-text" id="account-bank-tab-text"><strong>{{bankView.activeTab.name}}</strong> - {{bankView.activeTab.text}}</p>
+		{{else}}
+		<p class="account-bank-tab-text" id="account-bank-tab-text"><strong>{{bankView.activeTab.name}}</strong></p>
+		{{/if}}
+		{{else}}
+		<div class="account-guild-bank-placeholder">
+			<p>{{bankView.disabledReason}}</p>
+		</div>
+		{{/if}}
+		{{else}}
+		<div class="account-guild-bank-placeholder">
+			<p class="account-muted">Loading guild bank…</p>
+		</div>
+		{{/if}}
+		{{/if}}
+
+		<div class="account-guild-footer">
+			<a class="btn-download" href="{{selectedGuild.guildPageUrl}}">Open full guild page</a>
+		</div>
+	</div>
+</div>
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		createGuildEmblem({{{ JSONstringify selectedGuild.emblem }}}, $(".account-guild-emblem .guild-emblem")[0]);
+
+		const $members = $("#account-guild-members");
+		if ($members.length) {
+			$members.DataTable({
+			processing: true,
+			serverSide: true,
+			searchDelay: 800,
+			ajax: {
+				url: `{{websiteRoot}}/guild/{{selectedGuild.realm}}/{{selectedGuild.id}}/members`,
+			},
+			columnDefs: [
+				{
+					targets: 0,
+					render: (name) => `<a href="{{websiteRoot}}/character/{{selectedGuild.realm}}/${name}">${name}</a>`,
+				},
+				{
+					targets: 1,
+					render: (rank, type, row, meta) => meta.settings.json.ranks[rank],
+				},
+				{
+					searchable: false,
+					targets: 3,
+					render: data => `<img src="{{websiteRoot}}/img/icons/class_${data}.jpg" alt="">`,
+				},
+				{
+					searchable: false,
+					targets: 4,
+					render: data => `<img src="{{websiteRoot}}/img/icons/race_${data}.jpg" alt="">`,
+				},
+				{
+					searchable: false,
+					targets: 5,
+					render: online => online ? "🟢" : "🔴",
+				},
+			],
+			responsive: {
+				details: true,
+			},
+			order: [[1, "asc"]],
+			});
+		}
+
+		const $bankGrid = $("#account-bank-grid");
+		const websiteRoot = "{{websiteRoot}}";
+		if ($bankGrid.length) {
+			const realm = $bankGrid.data("realm");
+			const guildId = $bankGrid.data("guildId");
+
+			const escapeHtml = (text) => String(text ?? "").replace(/[&<>"']/g, (c) => ({
+				"&": "&amp;",
+				"<": "&lt;",
+				">": "&gt;",
+				'"': "&quot;",
+				"'": "&#39;",
+			}[c]));
+
+			const renderBankSlot = (slot) => {
+				if (!slot) {
+					return `<div class="account-bank-slot account-bank-slot--empty"></div>`;
+				}
+				const name = escapeHtml(slot.name);
+				return `
+					<div class="account-bank-slot item-slot iconmedium no-link-text">
+						<div class="icon" style="background-image: url('${websiteRoot}/img/wow-icons/medium/${slot.icon}.jpg')"></div>
+						<div class="border" style="background-image: url('${websiteRoot}/img/icon-border/medium/q${slot.quality}.png')"></div>
+						<span data-tooltip="${name}" data-tooltip-quality="${slot.quality}" data-tooltip-sub="Item Level ${slot.itemLevel}"></span>
+					</div>`;
+			};
+
+			const renderBankTab = (data) => {
+				$bankGrid.html((data.slots || []).map(renderBankSlot).join(""));
+				const $text = $("#account-bank-tab-text");
+				if ($text.length) {
+					const name = escapeHtml(data.name);
+					const body = data.text ? ` - ${escapeHtml(data.text)}` : "";
+					$text.html(`<strong>${name}</strong>${body}`);
+				}
+				if (data.money) {
+					const $money = $(".account-bank-money");
+					if ($money.length) {
+						$money.html(`Bank: ${data.money.gold}<span class="coin gold"></span> ${data.money.silver}<span class="coin silver"></span> ${data.money.copperRemainder}<span class="coin copper"></span>`);
+					}
+				}
+			};
+
+			$("#account-bank-tabs").on("click", ".account-bank-tab", function (event) {
+				const tabId = $(this).data("bankTab");
+				if (tabId === undefined) {
+					return;
+				}
+				event.preventDefault();
+				$("#account-bank-tabs .account-bank-tab").removeClass("is-active");
+				$(this).addClass("is-active");
+				fetch(`${websiteRoot}/account/guild/bank?realm=${encodeURIComponent(realm)}&guildId=${guildId}&tabId=${tabId}`)
+					.then((response) => response.json())
+					.then((data) => {
+						if (data.error) {
+							return;
+						}
+						renderBankTab(data);
+					});
+			});
+		}
+	});
+</script>
+{{/if}}
+{{/if}}

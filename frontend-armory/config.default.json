@@ -1,0 +1,58 @@
+{
+    "websiteUrl": "https://azerotharmory.com",
+	"websiteName": "Armory",
+	"websiteRoot": "",
+	"iframeMode": {
+		"enabled": false,
+		"url": "https://azerotharmory.com/armory"
+	},
+	"loadDbcs": true,
+	"hideGameMasters": false,
+	"transmogModule": false,
+	"useZamCdn": false,
+	"worldMapModule": true,
+	"assetProxyUrl": "",
+	"realms": [
+		{
+			"name": "AzerothCore",
+			"realmId": 1,
+			"authDatabase": "acore_auth",
+			"charactersDatabase": {
+				"host": "localhost",
+				"port": 3306,
+				"user": "acore",
+				"password": "acore",
+				"database": "acore_characters"
+			}
+		}
+	],
+	"worldDatabase": {
+		"host": "localhost",
+		"port": 3306,
+		"user": "acore",
+		"password": "acore",
+		"database": "acore_world"
+	},
+	"dbQueryTimeout": 10000,
+	"accounts": {
+		"enabled": false,
+		"allowRegistration": true,
+		"minPasswordLength": 8,
+		"maxPasswordLength": 16,
+		"sessionSecret": "",
+		"sessionHours": 24,
+		"emailConfirmationEnabled": false,
+		"emailConfigured": false
+	},
+	"email": {
+		"smtpHost": "",
+		"smtpPort": 587,
+		"smtpSecurity": "starttls",
+		"smtpUsername": "",
+		"smtpPassword": "",
+		"fromAddress": "",
+		"fromName": "",
+		"verificationSubject": "",
+		"verificationBodyHtml": ""
+	}
+}

@@ -1,0 +1,27 @@
+<div class="news-search">
+	<input type="text" id="newsSearch" placeholder="Search news..." autocomplete="off">
+</div>
+
+{{#if newsItems.length}}
+<div class="news-list" id="newsList">
+	{{#each newsItems}}
+	<a class="news-card{{#if this.tag}} news-card--{{this.tag}}{{/if}}" href="{{this.url}}" data-search="{{this.title}} {{this.excerpt}} {{this.tag}}">
+		{{#if this.imageUrl}}
+		<div class="news-cover"><img src="{{this.imageUrl}}" alt="{{this.title}}"></div>
+		{{/if}}
+		<div class="news-body">
+			{{#if this.tag}}<span class="news-eyebrow">{{this.tag}}</span>{{/if}}
+			<div class="news-head">
+				<span class="news-title">{{this.title}}</span>
+				{{#if this.date}}<span class="news-date">{{this.date}}</span>{{/if}}
+			</div>
+			{{#if this.excerpt}}<div class="news-excerpt">{{this.excerpt}}</div>{{/if}}
+			<span class="news-readmore">Read more</span>
+		</div>
+	</a>
+	{{/each}}
+</div>
+<div id="newsEmpty" class="news-empty" style="display:none;">No articles match your search.</div>
+{{else}}
+<div class="news-empty">No news articles have been published yet.</div>
+{{/if}}

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.*" />
+    <!-- Pin the patched Microsoft.OpenApi. Swashbuckle / AspNetCore.OpenApi pull in 2.4.1 transitively,
+         which is affected by GHSA-v5pm-xwqc-g5wc (CVE-2026-49451: stack overflow on circular schema refs).
+         2.7.5 is the smallest patched release on the 2.x line. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.7">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AzerothPlatform.Core\AzerothPlatform.Core.csproj" />
+    <ProjectReference Include="..\AzerothPlatform.Infrastructure\AzerothPlatform.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <!-- Ship hard-coded launcher style-template assets (background/logo per expansion) next to the
+       app so they are served in both dev (bin output) and Docker (publish output). -->
+  <ItemGroup>
+    <Content Include="LauncherTemplates\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AzerothPlatform.Core\AzerothPlatform.Core.csproj" />
+    <ProjectReference Include="..\AzerothPlatform.ClientManifest\AzerothPlatform.ClientManifest.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.EC2" Version="3.7.*" />
+    <PackageReference Include="AWSSDK.SecurityToken" Version="3.7.*" />
+    <PackageReference Include="AWSSDK.SimpleSystemsManagement" Version="3.7.*" />
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Azure.ResourceManager" Version="1.13.1" />
+    <PackageReference Include="Azure.ResourceManager.Compute" Version="1.6.0" />
+    <PackageReference Include="Azure.ResourceManager.Network" Version="1.9.0" />
+    <PackageReference Include="Google.Cloud.Compute.V1" Version="3.7.*" />
+    <PackageReference Include="Dapper" Version="2.1.44" />
+    <PackageReference Include="Docker.DotNet" Version="3.125.15" />
+    <PackageReference Include="HtmlSanitizer" Version="9.2.995" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.*">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.*" />
+    <PackageReference Include="MySql.Data" Version="9.2.0" />
+    <PackageReference Include="SharpCompress" Version="0.48.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.*" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AzerothPlatform.Tests" />
+  </ItemGroup>
+
+</Project>

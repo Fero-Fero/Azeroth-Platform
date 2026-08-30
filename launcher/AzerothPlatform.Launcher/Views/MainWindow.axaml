@@ -1,0 +1,557 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:AzerothPlatform.Launcher.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="880" d:DesignHeight="600"
+        x:Class="AzerothPlatform.Launcher.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="880" Height="600"
+        MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        Title="{Binding BrandingTitle}">
+
+  <Window.Styles>
+    <!-- ===== Brown/gold armory-style palette ===== -->
+
+    <!-- Top-left navigation entries: flat, compact, with an accent underline when active. -->
+    <Style Selector="Button.nav">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="#B3A384" />
+    </Style>
+    <Style Selector="Button.nav /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.nav:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#26F0C869" />
+      <Setter Property="Foreground" Value="#FFD980" />
+    </Style>
+
+    <!-- Primary action buttons (Play / Update / Save): warm gold gradient with dark text. -->
+    <Style Selector="Button.accent">
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="16,8" />
+      <Setter Property="Foreground" Value="#1A1208" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="#1A1208" />
+      <Setter Property="BorderBrush" Value="#8A6D3B" />
+      <Setter Property="Background">
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="#FFD980" />
+          <GradientStop Offset="1" Color="#F0C869" />
+        </LinearGradientBrush>
+      </Setter>
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="#1A1208" />
+      <Setter Property="BorderBrush" Value="#B08A45" />
+      <Setter Property="Background">
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="#FFE7A6" />
+          <GradientStop Offset="1" Color="#FFD980" />
+        </LinearGradientBrush>
+      </Setter>
+    </Style>
+    <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="#1A1208" />
+      <Setter Property="Background" Value="#D9AE4F" />
+    </Style>
+    <Style Selector="Button.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="#8C7A50" />
+      <Setter Property="Background" Value="#40352084" />
+      <Setter Property="BorderBrush" Value="#5A4628" />
+    </Style>
+
+    <!-- Secondary / chrome buttons (Cancel, Browse, Back, burger): dark brown panels. -->
+    <Style Selector="Button.tool">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Foreground" Value="#E8DCC4" />
+      <Setter Property="Padding" Value="12,7" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Button.tool /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#2B2114" />
+      <Setter Property="BorderBrush" Value="#5A4628" />
+      <Setter Property="Foreground" Value="#E8DCC4" />
+    </Style>
+    <Style Selector="Button.tool:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#342817" />
+      <Setter Property="BorderBrush" Value="#8A6D3B" />
+      <Setter Property="Foreground" Value="#FFD980" />
+    </Style>
+    <Style Selector="Button.tool:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#20180F" />
+    </Style>
+
+    <!-- Section headings render in gold. -->
+    <Style Selector="TextBlock.heading">
+      <Setter Property="Foreground" Value="#F0C869" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+
+    <!-- Server picker below the primary action. -->
+    <Style Selector="ComboBox">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Foreground" Value="#E8DCC4" />
+      <Setter Property="Background" Value="#20180F" />
+      <Setter Property="BorderBrush" Value="#5A4628" />
+    </Style>
+    <Style Selector="ComboBox:pointerover /template/ Border#Background">
+      <Setter Property="BorderBrush" Value="#8A6D3B" />
+    </Style>
+
+    <!-- Text inputs on the Settings tab. -->
+    <Style Selector="TextBox">
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Background" Value="#20180F" />
+      <Setter Property="Foreground" Value="#E8DCC4" />
+      <Setter Property="BorderBrush" Value="#5A4628" />
+    </Style>
+  </Window.Styles>
+
+  <Window.Resources>
+    <!-- A single news article rendered as a fixed-size clickable card for the horizontal strip. -->
+    <DataTemplate x:Key="NewsCardTemplate" x:DataType="vm:NewsItem">
+      <Button Padding="0" Margin="0" Width="156" Height="210"
+              HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+              Background="#332B2114" BorderBrush="#5A4628" BorderThickness="1" CornerRadius="8"
+              Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).OpenNewsCommand}"
+              CommandParameter="{Binding}">
+        <Border CornerRadius="7" ClipToBounds="True">
+          <StackPanel>
+            <Panel Height="120">
+              <Image Source="{Binding Cover}" Stretch="UniformToFill" IsVisible="{Binding HasCover}" />
+              <Border Background="#33000000" IsVisible="{Binding !HasCover}" />
+            </Panel>
+            <StackPanel Margin="12,10,12,12" Spacing="4">
+              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" Foreground="#FFD980"
+                         TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding Date}" Foreground="#B3A384" FontSize="12" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Button>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Panel>
+    <!-- Solid brown base so the UI reads warm even before/without a wallpaper. -->
+    <Border Background="#15100A" />
+    <!-- Per-profile animated background (behind everything). -->
+    <Image Source="{Binding BackgroundImage}" Stretch="UniformToFill" Opacity="0.7" />
+    <!-- Brown scrim for text legibility over the wallpaper (lighter at top, a touch darker toward the footer). -->
+    <Border>
+      <Border.Background>
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Offset="0" Color="#2615100A" />
+          <GradientStop Offset="1" Color="#99120D07" />
+        </LinearGradientBrush>
+      </Border.Background>
+    </Border>
+
+    <!-- Scale the whole UI proportionally with the window so maximizing/fullscreen zooms the
+         content to fill instead of leaving large empty gaps. The background layers above stay
+         full-bleed; any leftover area from the uniform aspect fit simply shows the wallpaper. -->
+    <Viewbox Stretch="Uniform" StretchDirection="Both">
+    <Grid Width="880" Height="600" RowDefinitions="Auto,*,Auto" Margin="22,18,22,18">
+
+      <!-- ===================== TOP BAR ===================== -->
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+
+        <!-- Left: navbar at the very top -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+          <StackPanel>
+            <Button Classes="nav" Content="Play"
+                    Command="{Binding SelectTabCommand}" CommandParameter="0" />
+            <Border Height="2" CornerRadius="1" Margin="6,2,6,0"
+                    Background="{Binding AccentBrush}" IsVisible="{Binding IsPlayTab}" />
+          </StackPanel>
+          <StackPanel>
+            <Button Classes="nav" Content="Addons"
+                    Command="{Binding SelectTabCommand}" CommandParameter="1" />
+            <Border Height="2" CornerRadius="1" Margin="6,2,6,0"
+                    Background="{Binding AccentBrush}" IsVisible="{Binding IsAddonsTab}" />
+          </StackPanel>
+          <StackPanel>
+            <Button Classes="nav" Content="Settings"
+                    Command="{Binding SelectTabCommand}" CommandParameter="2" />
+            <Border Height="2" CornerRadius="1" Margin="6,2,6,0"
+                    Background="{Binding AccentBrush}" IsVisible="{Binding IsSettingsTab}" />
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Right: logo (top-right) -->
+        <Image Grid.Column="1" Source="{Binding LogoImage}" MaxHeight="78" MaxWidth="392"
+               HorizontalAlignment="Right" VerticalAlignment="Top" />
+      </Grid>
+
+      <!-- ===================== MIDDLE (switches by nav) ===================== -->
+      <Panel Grid.Row="1">
+
+        <!-- PLAY: news cards fill the middle; a reading overlay sits on top when open -->
+        <Panel IsVisible="{Binding IsPlayTab}">
+          <Grid IsVisible="{Binding !IsNewsReading}" RowDefinitions="Auto,*" Margin="0,24,0,0">
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12"
+                        VerticalAlignment="Center" Margin="2,0,0,10">
+              <TextBlock Text="Latest News" FontSize="16" Classes="heading"
+                         VerticalAlignment="Center" />
+              <Button Classes="link" Content="View all"
+                      VerticalAlignment="Center"
+                      IsVisible="{Binding CanOpenArmory}"
+                      Command="{Binding OpenArmoryNewsCommand}" />
+            </StackPanel>
+            <TextBlock Grid.Row="1" Text="No news to show yet." Foreground="#B3A384"
+                       IsVisible="{Binding !HasNews}" VerticalAlignment="Top" Margin="2,0,0,0" />
+            <!-- Horizontal row of up to 4 latest articles + a 5th "Armory" card. Cards are sized to
+                 fit the design width so no ScrollViewer is needed - a ScrollViewer misbehaves inside
+                 the scaling Viewbox (it snapped to center and wouldn't scroll when maximized). -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12"
+                        IsVisible="{Binding HasNews}" VerticalAlignment="Top">
+              <ItemsControl ItemsSource="{Binding TopNews}"
+                            ItemTemplate="{StaticResource NewsCardTemplate}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="12" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
+
+              <!-- 5th card: Armory - opens the selected server's armory in the default browser. -->
+              <Button Width="156" Height="210" Padding="0" CornerRadius="8"
+                      Background="#26F0C869" BorderBrush="#8A6D3B" BorderThickness="1"
+                      HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                      IsVisible="{Binding CanOpenArmory}"
+                      Command="{Binding OpenArmoryCommand}"
+                      ToolTip.Tip="Open the armory">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+                  <TextBlock Text="&#8594;" FontSize="30" Foreground="#F0C869"
+                             HorizontalAlignment="Center" />
+                  <TextBlock Text="Armory" FontWeight="Bold" FontSize="15" Foreground="#FFD980"
+                             HorizontalAlignment="Center" />
+                  <TextBlock Text="Browse the armory" FontSize="11" Foreground="#B3A384"
+                             HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Grid>
+
+          <!-- Reading overlay: full-article WebView -->
+          <Border IsVisible="{Binding IsNewsReading}" Background="#1B140B" CornerRadius="8"
+                  BorderBrush="#5A4628" BorderThickness="1">
+            <Grid RowDefinitions="Auto,*" Margin="8">
+              <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+                <Button Classes="tool" Content="← Back" Command="{Binding BackFromNewsCommand}" />
+                <TextBlock Text="{Binding ReadingTitle}" FontWeight="SemiBold" Foreground="#FFD980"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+              <!-- Host for the news WebView. The NativeWebView is created lazily in code-behind the
+                   first time an article is opened, so a missing/broken platform web runtime (e.g. the
+                   Windows WebView2 runtime) degrades gracefully instead of crashing the launcher at
+                   startup. -->
+              <Border Grid.Row="1" x:Name="NewsWebViewHost" CornerRadius="6" ClipToBounds="True"
+                      Background="#1B140B" />
+            </Grid>
+          </Border>
+        </Panel>
+
+        <!-- ADDONS -->
+        <Panel IsVisible="{Binding IsAddonsTab}">
+          <TextBlock Text="This server has no addons." Foreground="#B3A384"
+                     IsVisible="{Binding !HasAddons}" VerticalAlignment="Top" />
+          <ScrollViewer IsVisible="{Binding HasAddons}" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding Addons}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" Margin="0,2" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Panel>
+
+        <!-- SETTINGS -->
+        <ScrollViewer IsVisible="{Binding IsSettingsTab}" VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Server URL" Classes="heading" />
+              <TextBlock Text="The Azeroth Platform address the client and profiles are downloaded from."
+                         Foreground="#B3A384" TextWrapping="Wrap" />
+              <TextBox Text="{Binding ServerUrl}" PlaceholderText="https://play.myrealm.example" />
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+              <TextBlock Text="Install folder" Classes="heading" />
+              <TextBlock Text="Where the shared WoW client is installed and kept up to date."
+                         Foreground="#B3A384" TextWrapping="Wrap" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding InstallDirectory}"
+                         PlaceholderText="Choose where to install the client" />
+                <Button Grid.Column="1" Classes="tool" Content="Browse..."
+                        Command="{Binding BrowseCommand}"
+                        IsEnabled="{Binding CanInteract}" />
+              </Grid>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+              <TextBlock Text="Realmlist" Classes="heading" />
+              <TextBlock Text="The realm address (host:port) written into Config.wtf. This is set automatically to the selected server; change it only if you need to connect somewhere else."
+                         Foreground="#B3A384" TextWrapping="Wrap" />
+              <TextBox Text="{Binding RealmlistOverride}" PlaceholderText="logon.myrealm.example:3724" />
+            </StackPanel>
+
+            <StackPanel Spacing="4" IsVisible="{Binding ShowElevationSetting}">
+              <TextBlock Text="Administrator rights" Classes="heading" />
+              <TextBlock Text="Only needed when the install folder cannot be written without them. Turn this off to try again without elevating; the game itself always starts normally."
+                         Foreground="#B3A384" TextWrapping="Wrap" />
+              <CheckBox Content="Start the launcher as administrator"
+                        IsChecked="{Binding ElevateOnStart}" />
+            </StackPanel>
+
+            <Button Content="Save"
+                    HorizontalAlignment="Right"
+                    Classes="accent"
+                    Command="{Binding SaveSettingsCommand}"
+                    IsEnabled="{Binding CanSaveSettings}" />
+
+            <Border BorderThickness="0,1,0,0" BorderBrush="#3A2C18" Padding="0,12,0,0">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Settings file" Foreground="#B3A384" FontSize="12" />
+                <SelectableTextBlock Text="{Binding StateFilePath}" Foreground="#B3A384" FontSize="12" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Panel>
+
+      <!-- ===================== FOOTER ===================== -->
+      <StackPanel Grid.Row="2" Spacing="10" Margin="0,14,0,0">
+
+        <!-- Launcher self-update banner -->
+        <Border IsVisible="{Binding LauncherUpdateAvailable}"
+                Background="#332F80ED" CornerRadius="6" Padding="12,8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                       Text="A newer launcher is available." />
+            <Button Grid.Column="1" Classes="tool" Content="Update launcher"
+                    Command="{Binding UpdateLauncherCommand}"
+                    IsEnabled="{Binding CanInteract}" />
+          </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Bottom">
+          <!-- Left: status text + full-width progress bar -->
+          <StackPanel Grid.Column="0" Spacing="6" VerticalAlignment="Center" Margin="0,0,16,0">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontWeight="SemiBold"
+                         Foreground="#E8DCC4"
+                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding DetailText}" Foreground="#B3A384" FontSize="12"
+                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </Grid>
+            <ProgressBar Minimum="0" Maximum="100"
+                         Value="{Binding ProgressValue}"
+                         IsIndeterminate="{Binding ProgressIndeterminate}"
+                         Foreground="#F0C869"
+                         Height="8" />
+            <TextBlock Text="{Binding SyncWarning}" IsVisible="{Binding HasSyncWarning}"
+                       Foreground="#E0A050" FontSize="12" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <!-- Right: primary action with the burger to its right, server picker beneath. -->
+          <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">
+              <Button Classes="tool" Content="Cancel"
+                      Command="{Binding CancelCommand}"
+                      IsVisible="{Binding CancelVisible}" />
+              <Button Content="{Binding PrimaryActionLabel}"
+                      Classes="accent" MinWidth="130"
+                      Command="{Binding UpdateCommand}"
+                      IsEnabled="{Binding UpdateEnabled}"
+                      IsVisible="{Binding ShowUpdate}" />
+              <Button Content="Play"
+                      Classes="accent" MinWidth="130"
+                      Command="{Binding PlayCommand}"
+                      IsEnabled="{Binding PlayEnabled}"
+                      IsVisible="{Binding ShowPlay}" />
+              <Button Classes="tool" Content="☰" FontSize="16" Width="42" ToolTip.Tip="More options">
+                <Button.Flyout>
+                  <MenuFlyout>
+                    <MenuItem Header="Open launcher settings location"
+                              Command="{Binding OpenSettingsLocationCommand}" />
+                    <MenuItem Header="Open installation location"
+                              Command="{Binding OpenInstallLocationCommand}"
+                              IsEnabled="{Binding CanInteract}" />
+                    <Separator />
+                    <MenuItem Header="Check for updates"
+                              Command="{Binding CheckForUpdatesCommand}"
+                              IsEnabled="{Binding CanInteract}" />
+                    <MenuItem Header="Verify files"
+                              Command="{Binding VerifyFilesCommand}"
+                              IsEnabled="{Binding CanInteract}" />
+                    <MenuItem Header="Invalidate cache and re-verify"
+                              Command="{Binding InvalidateCacheCommand}"
+                              IsEnabled="{Binding CanInteract}" />
+                    <Separator IsVisible="{Binding IsLoggedIn}" />
+                    <MenuItem Header="Log out"
+                              Command="{Binding LogoutCommand}"
+                              IsVisible="{Binding IsLoggedIn}" />
+                  </MenuFlyout>
+                </Button.Flyout>
+              </Button>
+            </StackPanel>
+
+            <!-- Server picker moved below the Play button. -->
+            <ComboBox ItemsSource="{Binding Profiles}"
+                      SelectedItem="{Binding SelectedProfile}"
+                      IsEnabled="{Binding CanInteract}"
+                      HorizontalAlignment="Stretch"
+                      IsVisible="{Binding HasProfiles}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <!-- Realmlist info, small, bottom-right. -->
+            <TextBlock Text="{Binding RealmlistInfo}" Foreground="#B3A384" FontSize="11"
+                       HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+
+    </Grid>
+    </Viewbox>
+
+    <!-- ===================== LOGIN OVERLAY ===================== -->
+    <!-- Shown only when the build was compiled with "require login". A full-window layer that blocks
+         all interaction with the launcher until the player authenticates with a game account. -->
+    <Border IsVisible="{Binding ShowLoginScreen}" Background="#E6120D07">
+      <Border Width="380" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Background="#1B140B" BorderBrush="#5A4628" BorderThickness="1" CornerRadius="10"
+              Padding="28,26">
+        <StackPanel Spacing="14">
+          <Image Source="{Binding LogoImage}" MaxHeight="52" MaxWidth="240"
+                 HorizontalAlignment="Center" IsVisible="{Binding LogoImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+          <StackPanel Spacing="2">
+            <TextBlock Text="Sign in" FontSize="20" Classes="heading" HorizontalAlignment="Center"
+                       IsVisible="{Binding HasProfiles}" />
+            <TextBlock Text="Log in with your game account to continue."
+                       Foreground="#B3A384" FontSize="12" HorizontalAlignment="Center"
+                       TextWrapping="Wrap" TextAlignment="Center"
+                       IsVisible="{Binding HasProfiles}" />
+            <!-- Initial connect in progress: show a loading state, not the error, until we know the
+                 outcome (avoids the "server not available" flash before the first /portal response). -->
+            <TextBlock Text="Connecting…" FontSize="20" Classes="heading"
+                       HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"
+                       IsVisible="{Binding ShowConnectingMessage}" />
+            <TextBlock Text="Contacting the server, one moment…"
+                       Foreground="#B3A384" FontSize="12" HorizontalAlignment="Center"
+                       TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,0"
+                       IsVisible="{Binding ShowConnectingMessage}" />
+            <!-- No published server (only after connecting finished): clear message instead of an
+                 unusable login form. -->
+            <TextBlock Text="Server not available at the moment" FontSize="20" Classes="heading"
+                       HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"
+                       IsVisible="{Binding ShowNoServerMessage}" />
+            <TextBlock Text="No servers are published yet, or the server address in Settings is incorrect. Please try again later."
+                       Foreground="#B3A384" FontSize="12" HorizontalAlignment="Center"
+                       TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,0"
+                       IsVisible="{Binding ShowNoServerMessage}" />
+          </StackPanel>
+
+          <!-- Server picker: accounts are per-server, so make it clear which realm you're logging into. -->
+          <StackPanel Spacing="4" IsVisible="{Binding HasProfiles}">
+            <TextBlock Text="Server" Foreground="#B3A384" FontSize="12" />
+            <ComboBox ItemsSource="{Binding Profiles}"
+                      SelectedItem="{Binding SelectedProfile}"
+                      IsEnabled="{Binding !IsLoggingIn}"
+                      HorizontalAlignment="Stretch">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+
+          <StackPanel Spacing="4" IsVisible="{Binding HasProfiles}">
+            <TextBlock Text="Username" Foreground="#B3A384" FontSize="12" />
+            <TextBox Text="{Binding LoginUsername}" IsEnabled="{Binding !IsLoggingIn}"
+                     PlaceholderText="Account name" />
+          </StackPanel>
+
+          <StackPanel Spacing="4" IsVisible="{Binding HasProfiles}">
+            <TextBlock Text="Password" Foreground="#B3A384" FontSize="12" />
+            <TextBox Text="{Binding LoginPassword}" IsEnabled="{Binding !IsLoggingIn}"
+                     PasswordChar="•" PlaceholderText="Password" />
+          </StackPanel>
+
+          <TextBlock Text="{Binding LoginError}" Foreground="#F0A6A6" FontSize="12"
+                     TextWrapping="Wrap" IsVisible="{Binding HasLoginError}" />
+
+          <Button Content="Log in" Classes="accent" HorizontalAlignment="Stretch"
+                  Command="{Binding LoginCommand}" IsEnabled="{Binding LoginEnabled}"
+                  IsVisible="{Binding HasProfiles}" />
+
+          <!-- Always offer a way to reach Settings and a way out, so the player is never trapped here:
+               if the backend IP changed (e.g. on LAN) they can correct the server URL and reconnect,
+               and Quit is available when the selected server simply can't be logged into. -->
+          <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+            <Button Content="Server settings" Classes="tool"
+                    Command="{Binding SelectTabCommand}" CommandParameter="2"
+                    ToolTip.Tip="Change the server address or install folder" />
+            <Button Content="Quit launcher" Classes="tool"
+                    Command="{Binding QuitCommand}" />
+          </StackPanel>
+
+          <!-- Register: always present so players can always find "create account". It opens the
+               selected server's armory register page (falling back to any published armory); when no
+               armory is reachable it shows a short hint rather than being hidden. -->
+          <StackPanel Spacing="6" HorizontalAlignment="Center" IsVisible="{Binding HasProfiles}">
+            <TextBlock Text="Don't have an account?" Foreground="#B3A384" FontSize="12"
+                       HorizontalAlignment="Center" />
+            <Button Content="Create an account" Classes="tool" HorizontalAlignment="Center"
+                    Command="{Binding RegisterCommand}"
+                    ToolTip.Tip="Opens the armory registration page in your browser" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <!-- ===================== MAINTENANCE OVERLAY ===================== -->
+    <!-- Shown when the backend can't be reached at all. Replaces the greyed-out main page with a clear
+         "Undergoing Maintenance" notice and a Retry action so the user isn't left stuck. -->
+    <Border IsVisible="{Binding IsServerUnavailable}" Background="#F2120D07">
+      <Border Width="420" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Background="#1B140B" BorderBrush="#5A4628" BorderThickness="1" CornerRadius="10"
+              Padding="30,28">
+        <StackPanel Spacing="16" HorizontalAlignment="Center">
+          <TextBlock Text="&#128295;" FontSize="40" HorizontalAlignment="Center" />
+          <TextBlock Text="Undergoing Maintenance" FontSize="20" Classes="heading"
+                     HorizontalAlignment="Center" />
+          <TextBlock Text="We couldn't reach the server. It may be offline or undergoing maintenance. Please try again in a little while."
+                     Foreground="#C9B89A" FontSize="13" TextWrapping="Wrap" TextAlignment="Center"
+                     MaxWidth="340" />
+          <TextBlock Text="{Binding ServerUnavailableDetail}" Foreground="#7C6F53" FontSize="11"
+                     TextWrapping="Wrap" TextAlignment="Center" MaxWidth="340"
+                     IsVisible="{Binding ServerUnavailableDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Button Content="Retry" Classes="accent" MinWidth="140" HorizontalAlignment="Center"
+                  Command="{Binding RetryConnectionCommand}" IsEnabled="{Binding CanInteract}" />
+          <Button Content="Open settings" Classes="tool" HorizontalAlignment="Center"
+                  Command="{Binding OpenSettingsFromMaintenanceCommand}" />
+        </StackPanel>
+      </Border>
+    </Border>
+  </Panel>
+</Window>

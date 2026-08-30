@@ -1,0 +1,15 @@
+<article class="news-article">
+	<a class="news-back" href="{{websiteRoot}}/">← Back to news</a>
+
+	{{#if article.imageUrl}}
+	<div class="news-article-cover"><img src="{{article.imageUrl}}" alt="{{article.title}}"></div>
+	{{/if}}
+
+	<h1 class="news-article-title">{{article.title}}</h1>
+	<div class="news-article-meta">
+		{{#if article.tag}}<span class="news-tag news-tag--{{article.tag}}">{{article.tag}}</span>{{/if}}
+		{{#if article.date}}<span class="news-article-date">{{article.date}}</span>{{/if}}
+	</div>
+
+	<div class="news-article-body">{{{article.html}}}</div>
+</article>

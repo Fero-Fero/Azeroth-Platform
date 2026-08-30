@@ -1,0 +1,148 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-quests.css">
+{{> icons }}
+
+{{> character-header }}
+
+<div class="quest-compare-section" style="margin-bottom: 20px;">
+    <div class="field is-horizontal">
+        <div class="field-label is-normal">
+            <label class="label">Compare with:</label>
+        </div>
+        <div class="field-body">
+            <div class="field has-addons">
+                <div class="control is-expanded">
+                    <div class="select is-fullwidth">
+                        <select id="compareCharacter">
+                            <option value="">Select a character...</option>
+                            {{#each data.otherCharacters}}
+                                <option value="{{this.realmName}}/{{this.name}}">{{this.name}}</option>
+                            {{/each}}
+                        </select>
+                    </div>
+                </div>
+                <div class="control">
+                    <button class="button is-info" id="compareButton" disabled>
+                        Compare Quests
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="quests-controls" style="margin-bottom: 15px; display: flex; gap: 8px; max-width: 500px;">
+    <button type="button" class="button is-small" id="expandAll">Expand all</button>
+    <button type="button" class="button is-small" id="collapseAll">Collapse all</button>
+</div>
+
+{{#each data.categories as |quests category|}}
+    <div class="quests-table" style="margin-bottom: 20px;">
+        <h2 class="is-size-4 category-header collapsible expanded">
+    {{category}}
+        <span class="collapse-icon">▼</span>
+    </h2>
+
+        <div class="category-content expanded">
+        <!-- In Progress Quests -->
+        <h3 class="is-size-5 collapsible">
+            In Progress
+            <span class="collapse-icon">▼</span>
+        </h3>
+        <div class="collapsible-content expanded">
+            <table class="table is-striped is-hoverable is-fullwidth">
+                <thead>
+                    <tr>
+                        <th>Quest</th>
+                        <th>Level</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each quests}}
+                        {{#if (eq this.status "In Progress")}}
+                            <tr>
+                                <td class="quest-name"><span>{{this.title}}</span></td>
+                                <td class="quest-level">{{this.questLevel}}</td>
+                                <td class="quest-status {{this.status}}">{{this.status}}</td>
+                            </tr>
+                        {{/if}}
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Completed Quests -->
+        <h3 class="is-size-5 collapsible">
+            Completed
+            <span class="collapse-icon">▼</span>
+        </h3>
+        <div class="collapsible-content">
+            <table class="table is-striped is-hoverable is-fullwidth">
+                <thead>
+                    <tr>
+                        <th>Quest</th>
+                        <th>Level</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each quests}}
+                        {{#if (eq this.status "Completed")}}
+                            <tr>
+                                <td class="quest-name"><span>{{this.title}}</span></td>
+                                <td class="quest-level">{{this.questLevel}}</td>
+                                <td class="quest-status {{this.status}}">{{this.status}}</td>
+                            </tr>
+                        {{/if}}
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    </div>
+{{/each}}
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.collapsible').forEach(header => {
+            header.addEventListener('click', function(e) {
+                // Stop event from bubbling to parent collapsible elements
+                e.stopPropagation();
+
+                const content = this.nextElementSibling;
+                content.classList.toggle('expanded');
+                this.classList.toggle('expanded');
+            });
+        });
+
+        // Expand all / collapse all applies to the top-level quest categories.
+        const setAllCategories = (expanded) => {
+            document.querySelectorAll('.category-header').forEach(header => {
+                header.classList.toggle('expanded', expanded);
+                const content = header.nextElementSibling;
+                if (content && content.classList.contains('category-content')) {
+                    content.classList.toggle('expanded', expanded);
+                }
+            });
+        };
+        document.getElementById('expandAll')?.addEventListener('click', () => setAllCategories(true));
+        document.getElementById('collapseAll')?.addEventListener('click', () => setAllCategories(false));
+
+        const compareSelect = document.getElementById('compareCharacter');
+        const compareButton = document.getElementById('compareButton');
+
+        compareSelect.addEventListener('change', function() {
+            compareButton.disabled = !this.value;
+        });
+
+        compareButton.addEventListener('click', function() {
+            const selected = compareSelect.value;
+            if (selected) {
+                const [realm, name] = selected.split('/');
+                const sanitizedRealm = encodeURIComponent(realm);
+                const sanitizedName = encodeURIComponent(name);
+                window.location.href = `${window.location.pathname}/compare/${sanitizedRealm}/${sanitizedName}`;
+            }
+        });
+    });
+</script>

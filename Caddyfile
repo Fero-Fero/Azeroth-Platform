@@ -1,0 +1,41 @@
+# Reverse proxy / TLS terminator for the Azeroth Platform manager API + SPA.
+#
+# Zero-config by default: with SITE_ADDRESS and TLS_EMAIL unset it listens on :443 with an internal
+# self-signed CA, which is fine for a private/LAN deployment (browsers show a warning you can accept).
+# For a public, internet-facing deployment set SITE_ADDRESS to your domain and TLS_EMAIL to a contact
+# address; Caddy will then obtain and renew a real Let's Encrypt cert automatically. Example .env:
+#     SITE_ADDRESS=play.example.com
+#     TLS_EMAIL=admin@example.com
+#
+# The manager itself is bound to 127.0.0.1:8080 on the host (and reachable as azeroth-platform:8080
+# on the compose network); it is never published to the internet directly. All external traffic
+# terminates TLS here and is forwarded to the manager over the internal network.
+
+# Default site is `localhost` (not a bare :443) so Caddy has a concrete hostname to issue a certificate
+# for - Caddy automatically uses its internal self-signed CA for `localhost`. Set SITE_ADDRESS to a real
+# domain (or LAN hostname/IP) to serve that instead.
+{$SITE_ADDRESS:localhost} {
+	# TLS issuer is driven by TLS_EMAIL:
+	#   - unset/empty -> "tls internal"        -> Caddy's internal self-signed CA (local, no email needed)
+	#   - set         -> "tls you@example.com" -> ACME / Let's Encrypt for the SITE_ADDRESS domain
+	tls {$TLS_EMAIL:internal}
+
+	encode gzip zstd
+
+	# Security headers applied to every response.
+	header {
+		# Force HTTPS for a year, including subdomains. Only safe once TLS is confirmed working.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# Conservative CSP: same-origin assets + connections (covers the SPA and its SignalR hub).
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'"
+		# Do not leak the upstream server banner.
+		-Server
+	}
+
+	# Forward everything (REST API, SPA, and the SignalR websocket hub) to the manager. Caddy proxies
+	# websockets transparently, so real-time build/apply logs keep working through TLS.
+	reverse_proxy azeroth-platform:8080
+}

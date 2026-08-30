@@ -1,0 +1,58 @@
+#top-records-selectors {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 1rem 1.5rem;
+	margin-bottom: 1rem;
+}
+
+.tr-selector {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.tr-label {
+	color: var(--armory-text-muted);
+	font-weight: bold;
+	font-size: 0.85rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.tr-filter {
+	margin-bottom: 0.75rem;
+}
+
+#top-records-heading {
+	margin-top: 1rem;
+}
+
+#top-records-table {
+	width: 100%;
+}
+
+#top-records-table .tr-rank {
+	width: 3rem;
+	text-align: right;
+	color: var(--armory-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+#top-records-table tbody tr:nth-child(1) .tr-rank,
+#top-records-table tbody tr:nth-child(2) .tr-rank,
+#top-records-table tbody tr:nth-child(3) .tr-rank {
+	color: var(--armory-heading);
+	font-weight: bold;
+}
+
+#top-records-table .tr-time {
+	color: var(--armory-heading);
+	font-weight: bold;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+#top-records-table .tr-char {
+	font-weight: bold;
+}

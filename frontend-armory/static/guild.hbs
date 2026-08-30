@@ -1,0 +1,54 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/guild.css">
+<style>
+	.guild-emblem {
+		background: url("{{websiteRoot}}/img/guild-emblems/circle.png") no-repeat center;
+	}
+</style>
+{{> datatables}}
+{{> emblems}}
+
+{{> layout-grid}}
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		createGuildEmblem({{{ JSONstringify emblem }}}, $(".emblem-container .guild-emblem")[0]);
+
+		dt = $("#members").DataTable({
+			processing: true,
+			serverSide: true,
+			searchDelay: 800,
+			ajax: {
+				url: `{{websiteRoot}}/guild/{{{realm}}}/{{id}}/members`,
+			},
+			columnDefs: [
+				{
+					targets: 0,
+					render: (name) => `<a href="{{websiteRoot}}/character/{{realm}}/${name}">${name}</a>`,
+				},
+				{
+					targets: 1,
+					render: (rank, type, row, meta) => meta.settings.json.ranks[rank],
+				},
+				{
+					searchable: false,
+					targets: 3,
+					render: data => `<img src="{{websiteRoot}}/img/icons/class_${data}.jpg">`,
+				},
+				{
+					searchable: false,
+					targets: 4,
+					render: data => `<img src="{{websiteRoot}}/img/icons/race_${data}.jpg">`,
+				},
+				{
+					searchable: false,
+					targets: 5,
+					render: online => online ? "🟢" : "🔴",
+				},
+			],
+			responsive: {
+				details: true,
+			},
+			order: [[1, "asc"]],
+		});
+	});
+</script>

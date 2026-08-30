@@ -1,0 +1,38 @@
+name: CI Build and Test (.NET Framework 4.8)
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup MSBuild and .NET Framework 4.8
+      uses: microsoft/setup-msbuild@v2 
+
+    - name: Restore NuGet Packages
+      run: nuget restore WDBXEditor.sln 
+
+    - name: Build Solution
+      run: msbuild WDBXEditor.sln /p:Configuration=Release
+
+    - name: Run Tests (VSTest)
+      run: |
+        $testDll = (Get-ChildItem -Path ".\**\bin\Release\WDBXEditor.Tests.dll" -Recurse | Select-Object -First 1).FullName
+        if ($testDll) {
+          # Ruta predeterminada del ejecutable VSTest en el runner de Windows 
+          $vstest = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
+          & $vstest $testDll /Logger:trx
+        } else {
+          Write-Host "WARNING: Could not find the test DLL. Proceeding with build check only."
+        }
+      shell: powershell

@@ -1,0 +1,26 @@
+#guild-header {
+	display: flex;
+}
+
+#guild-header .emblem-container {
+	margin-right: 1em;
+}
+
+#guild-header .info {
+	text-align: center;
+}
+
+.faction {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.faction .logo {
+	height: 32px;
+	margin-right: 4px;
+}
+
+#members_processing {
+	height: 70px;
+}

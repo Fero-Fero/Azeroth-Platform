@@ -1,0 +1,15 @@
+# Dependency directories
+node_modules/
+
+# Build directory
+build/
+
+# Configuration
+config.json
+.env
+
+# Log files
+*.log
+
+# IDEs
+.vscode/

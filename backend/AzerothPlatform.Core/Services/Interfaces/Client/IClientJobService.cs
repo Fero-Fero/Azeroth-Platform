@@ -1,0 +1,19 @@
+using AzerothPlatform.Core.Contracts;
+
+namespace AzerothPlatform.Core.Services.Interfaces;
+
+/// <summary>
+/// Runs client file-server start/stop/restart/recreate as detached background jobs keyed by stack id.
+/// </summary>
+public interface IClientJobService
+{
+    ClientJobStatusDto Enqueue(
+        string stackId,
+        ClientJobAction action,
+        string? downloadUrl = null,
+        string? stagingArchivePath = null);
+
+    ClientJobStatusDto? GetStatus(string stackId);
+
+    void ReportProgress(string stackId, string message, long? bytesCompleted = null, long? bytesTotal = null);
+}

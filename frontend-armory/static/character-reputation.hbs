@@ -1,0 +1,117 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character-reputation.css">
+{{> icons }}
+
+{{> character-header }}
+
+<div class="rep-search-bar">
+    <input type="text" id="rep-search" placeholder="Search reputations..." autocomplete="off">
+</div>
+
+<div id="rep-no-results" class="rep-no-results" style="display: none;">No reputations match your search.</div>
+
+<div class="reputation-table" style="margin-bottom: 20px;{{#unless data.classic.length}}display:none;{{/unless}}">
+    <h2 class="is-size-4">Classic Reputations</h2>
+    <table class="table is-striped is-hoverable is-fullwidth">
+        <tbody>
+            {{#each data.classic}}
+                <tr>
+                    <!-- Faction ID: {{this.id}} -->
+                    <td>
+                        <div class="reputation-row">
+                            <span class="faction-name">{{this.name}}</span>
+                            <div class="progress-section">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar {{this.standing}}" style="width: {{multiply (divide this.valueInGrade this.max) 100}}%;"></div>
+                                    <span class="standing-text">{{this.standing}}</span>
+                                    <span class="value-text">{{this.valueInGrade}} / {{this.max}}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</div>
+
+<div class="reputation-table" style="margin-bottom: 20px;{{#unless data.tbc.length}}display:none;{{/unless}}">
+    <h2 class="is-size-4">The Burning Crusade</h2>
+    <table class="table is-striped is-hoverable is-fullwidth">
+        <tbody>
+            {{#each data.tbc}}
+                <tr>
+                    <!-- Faction ID: {{this.id}} -->
+                    <td>
+                        <div class="reputation-row">
+                            <span class="faction-name">{{this.name}}</span>
+                            <div class="progress-section">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar {{this.standing}}" style="width: {{multiply (divide this.valueInGrade this.max) 100}}%;"></div>
+                                    <span class="standing-text">{{this.standing}}</span>
+                                    <span class="value-text">{{this.valueInGrade}} / {{this.max}}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</div>
+
+<div class="reputation-table" id="rep-wotlk" style="margin-bottom: 20px;{{#unless data.wotlk.length}}display:none;{{/unless}}">
+    <h2 class="is-size-4">Wrath of the Lich King</h2>
+    <table class="table is-striped is-hoverable is-fullwidth">
+        <tbody>
+            {{#each data.wotlk}}
+                <tr>
+                    <!-- Faction ID: {{this.id}} -->
+                    <td>
+                        <div class="reputation-row">
+                            <span class="faction-name">{{this.name}}</span>
+                            <div class="progress-section">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar {{this.standing}}" style="width: {{multiply (divide this.valueInGrade this.max) 100}}%;"></div>
+                                    <span class="standing-text">{{this.standing}}</span>
+                                    <span class="value-text">{{this.valueInGrade}} / {{this.max}}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</div>
+
+<script type="application/javascript">
+    $(window).on("load", () => {
+        const $search = $("#rep-search");
+        const $noResults = $("#rep-no-results");
+
+        $search.on("input", function () {
+            const query = $(this).val().trim().toLowerCase();
+            let totalVisible = 0;
+
+            $(".reputation-table").each(function () {
+                const $table = $(this);
+                let sectionVisible = 0;
+
+                $table.find("tbody tr").each(function () {
+                    const name = $(this).find(".faction-name").text().toLowerCase();
+                    const match = query === "" || name.indexOf(query) !== -1;
+                    $(this).toggle(match);
+                    if (match) {
+                        sectionVisible++;
+                    }
+                });
+
+                // Hide section headers that have no matching factions
+                $table.toggle(sectionVisible > 0);
+                totalVisible += sectionVisible;
+            });
+
+            $noResults.toggle(totalVisible === 0 && query !== "");
+        });
+    });
+</script>

@@ -1,0 +1,418 @@
+import { useEffect, useState, useRef } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { CheckCircle2, XCircle, Loader2, Terminal, AlertCircle, Ban, Hammer } from 'lucide-react'
+import { useBuildProgress } from '@/hooks/useBuildProgress'
+import { apiErrorMessage } from '@/lib/utils'
+import { buildApi } from '@/services/api'
+import { BuildPhase } from '@/types/stack.types'
+
+const PHASE_LABELS: Record<BuildPhase, string> = {
+  [BuildPhase.Cloning]: 'Cloning Repository',
+  [BuildPhase.PreparingModules]: 'Preparing Modules',
+  [BuildPhase.CheckingModules]: 'Checking Modules',
+  [BuildPhase.ModuleCheckPassed]: 'Modules Compiled',
+  [BuildPhase.Building]: 'Building',
+  [BuildPhase.CreatingImages]: 'Creating Images',
+  [BuildPhase.Completed]: 'Completed',
+  [BuildPhase.Failed]: 'Failed',
+}
+
+function isCancelledMessage(message: string | null): boolean {
+  return message?.toLowerCase().includes('cancelled') ?? false
+}
+
+export default function BuildProgressPage() {
+  const { stackId } = useParams<{ stackId: string }>()
+  const navigate = useNavigate()
+  const { progress, isComplete, error, beginNewJob } = useBuildProgress(stackId ?? null)
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true)
+  const [isCancelling, setIsCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [isStartingBuild, setIsStartingBuild] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  const logsContainerRef = useRef<HTMLDivElement>(null)
+  const checkPassed = progress.phase === BuildPhase.ModuleCheckPassed
+
+  useEffect(() => {
+    if (!autoScrollLogs) return
+    const el = logsContainerRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [progress.logs, autoScrollLogs])
+
+  const handleLogsScroll = () => {
+    const el = logsContainerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    const atBottom = distanceFromBottom < 48
+    if (!atBottom && autoScrollLogs) {
+      setAutoScrollLogs(false)
+    } else if (atBottom && !autoScrollLogs) {
+      setAutoScrollLogs(true)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!stackId || isCancelling || isComplete) return
+
+    setCancelError(null)
+    setIsCancelling(true)
+    try {
+      await buildApi.cancel(stackId)
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      setCancelError(
+        status === 404
+          ? 'No active build found to cancel.'
+          : 'Failed to cancel build. Try again or refresh the page.',
+      )
+      console.error('Failed to cancel build:', err)
+    } finally {
+      setIsCancelling(false)
+    }
+  }
+
+  const handleViewStack = () => {
+    if (stackId) {
+      navigate(`/stacks/${stackId}`)
+    }
+  }
+
+  const handleBackToList = () => {
+    navigate('/stacks')
+  }
+
+  const handleBuildServer = async (skipModuleCheck = false) => {
+    if (!stackId || isStartingBuild) return
+
+    setStartError(null)
+    setIsStartingBuild(true)
+    try {
+      await buildApi.start(stackId, undefined, undefined, skipModuleCheck)
+      beginNewJob()
+    } catch (err) {
+      setStartError(apiErrorMessage(err, 'Could not start the Docker image build.'))
+    } finally {
+      setIsStartingBuild(false)
+    }
+  }
+
+  if (!stackId) {
+    return (
+      <div className="text-center">
+        <p className="text-gray-500">No stack ID provided</p>
+      </div>
+    )
+  }
+
+  const isCancelled = isCancelledMessage(error)
+  const isFailed = !isCancelled && (error !== null || progress.phase === BuildPhase.Failed)
+  const isSuccess = isComplete && !isFailed && !isCancelled
+  const isBuilding = !isComplete
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Build Progress</h1>
+          <p className="mt-1 text-gray-500">
+            {progress.phase === BuildPhase.CheckingModules
+              ? 'Compiling selected modules, then linking worldserver so missing symbols between modules are caught.'
+              : progress.phase === BuildPhase.ModuleCheckPassed
+                ? 'Modules compiled. Start the server image build from this page.'
+                : 'Building your AzerothCore stack…'}
+          </p>
+        </div>
+        {isBuilding && (
+          <button
+            type="button"
+            onClick={() => void handleCancel()}
+            disabled={isCancelling}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+          >
+            {isCancelling ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Cancelling…
+              </>
+            ) : (
+              <>
+                <Ban className="h-4 w-4" />
+                Cancel build
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {(cancelError || startError) && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {startError ?? cancelError}
+        </div>
+      )}
+
+      <div className="space-y-6">
+        {/* Status Card */}
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {isBuilding && (
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                )}
+                {isSuccess && (
+                  <CheckCircle2 className="h-6 w-6 text-green-600" />
+                )}
+                {isCancelled && (
+                  <Ban className="h-6 w-6 text-amber-600" />
+                )}
+                {isFailed && (
+                  <XCircle className="h-6 w-6 text-red-600" />
+                )}
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    {isCancelled ? 'Build Cancelled' : PHASE_LABELS[progress.phase]}
+                  </h2>
+                  <p className="text-sm text-gray-500">{progress.step}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-gray-900">
+                  {progress.percent}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-4">
+            {/* Progress Bar */}
+            <div className="mb-4">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    isFailed ? 'bg-red-600' : isCancelled ? 'bg-amber-500' : isSuccess ? 'bg-green-600' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+            </div>
+
+            {progress.moduleResults.length > 0 && (
+              <ul className="mb-4 divide-y divide-gray-100 rounded-lg border border-gray-200">
+                {progress.moduleResults.map((item) => (
+                  <li key={item.moduleId} className="px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="font-medium text-gray-800">{item.name}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 text-xs font-medium ${
+                          item.status === 'passed'
+                            ? 'text-green-700'
+                            : item.status === 'failed'
+                              ? 'text-red-700'
+                              : item.status === 'compiling'
+                                ? 'text-blue-700'
+                                : 'text-gray-500'
+                        }`}
+                      >
+                        {item.status === 'compiling' && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {item.status === 'pending'
+                          ? 'Waiting'
+                          : item.status === 'compiling'
+                            ? 'Compiling'
+                            : item.status === 'passed'
+                              ? 'Passed'
+                              : item.status === 'failed'
+                                ? 'Failed'
+                                : item.status === 'skipped'
+                                  ? 'Skipped'
+                                  : item.status}
+                      </span>
+                    </div>
+                    {item.error && (
+                      <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-red-50 px-2 py-1 font-mono text-[11px] text-red-700">
+                        {item.error}
+                      </pre>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {progress.phase === BuildPhase.CheckingModules
+              && progress.moduleResults.some((item) => item.status === 'pending')
+              && (
+                <p className="mb-4 text-xs text-gray-500">
+                  Core libraries compile first. Each module row switches to Compiling when ninja reaches that folder.
+                </p>
+              )}
+
+            {/* Cancelled Message */}
+            {isCancelled && error && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="flex gap-3">
+                  <Ban className="h-5 w-5 shrink-0 text-amber-600" />
+                  <div>
+                    <h3 className="font-semibold text-amber-900">Build Cancelled</h3>
+                    <p className="mt-1 text-sm text-amber-800">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Error Message — skip when per-module rows already show the compiler excerpt. */}
+            {!isCancelled && error && !progress.moduleResults.some((item) => item.error) && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4">
+                <div className="flex gap-3">
+                  <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-red-900">Build Failed</h3>
+                    <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-red-700">
+                      {error}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Success Message */}
+            {isSuccess && (
+              <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4">
+                <div className="flex gap-3">
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+                  <div>
+                    <h3 className="font-semibold text-green-900">
+                      {progress.phase === BuildPhase.ModuleCheckPassed
+                        ? 'Module check passed'
+                        : 'Build Completed'}
+                    </h3>
+                    <p className="mt-1 text-sm text-green-700">
+                      {checkPassed
+                        ? 'Every selected module compiled against this core. Build the server images next — that is the long Docker compile.'
+                        : 'Your AzerothCore stack has been built successfully and is ready to start.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-3">
+              {(isFailed || isCancelled) && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/stacks/${stackId}`)}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    Back to Stack
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleBuildServer(true)}
+                    disabled={isStartingBuild}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    {isStartingBuild ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Starting build…
+                      </>
+                    ) : (
+                      <>
+                        <Hammer className="h-4 w-4" />
+                        Skip check and build images
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+              {isSuccess && checkPassed && (
+                <button
+                  type="button"
+                  onClick={() => void handleBuildServer()}
+                  disabled={isStartingBuild}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {isStartingBuild ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Starting build…
+                    </>
+                  ) : (
+                    <>
+                      <Hammer className="h-4 w-4" />
+                      Build server
+                    </>
+                  )}
+                </button>
+              )}
+              {isSuccess && (
+                <button
+                  type="button"
+                  onClick={handleViewStack}
+                  className={
+                    checkPassed
+                      ? 'rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500'
+                      : 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  }
+                >
+                  View Stack
+                </button>
+              )}
+              {isComplete && !isFailed && !isCancelled && (
+                <button
+                  type="button"
+                  onClick={handleBackToList}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  Back to Stacks
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Build Logs */}
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Terminal className="h-5 w-5 text-gray-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Build Logs</h2>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={autoScrollLogs}
+                  onChange={(e) => setAutoScrollLogs(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                Auto-scroll
+              </label>
+            </div>
+          </div>
+
+          <div className="bg-gray-900 p-6">
+            <div
+              ref={logsContainerRef}
+              onScroll={handleLogsScroll}
+              className="h-96 overflow-y-auto font-mono text-sm"
+            >
+              {progress.logs.length === 0 ? (
+                <p className="text-gray-500">Waiting for build logs…</p>
+              ) : (
+                <div className="space-y-1">
+                  {progress.logs.map((log, index) => (
+                    <div key={index} className="text-green-400">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

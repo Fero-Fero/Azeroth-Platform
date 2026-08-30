@@ -1,0 +1,34 @@
+<h1 class="title is-size-1">Create account</h1>
+
+<div class="armory-panel auth-panel">
+	<div class="panel-body">
+		{{#if registrationDisabled}}
+		<div class="auth-error" role="alert">Registration is disabled until email delivery is configured for this realm.</div>
+		{{/if}}
+		{{#if authError}}
+		<div class="auth-error" role="alert">{{authError}}</div>
+		{{/if}}
+		<form class="auth-form" action="{{websiteRoot}}/register" method="post" autocomplete="off">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			{{#if emailConfirmationEnabled}}
+			<label class="auth-label" for="email">Email</label>
+			<input class="auth-input" id="email" name="email" type="email" maxlength="255" required autofocus value="{{email}}">
+			<p class="auth-hint">You will verify this address before choosing your in-game account name.</p>
+			{{else}}
+			<label class="auth-label" for="username">Account name</label>
+			<input class="auth-input" id="username" name="username" type="text" minlength="3" maxlength="16" required autofocus value="{{username}}">
+			<p class="auth-hint">3-16 characters: letters, numbers, dashes or underscores.</p>
+			{{/if}}
+
+			<label class="auth-label" for="password">Password</label>
+			<input class="auth-input" id="password" name="password" type="password" minlength="{{minPasswordLength}}" maxlength="{{maxPasswordLength}}" required>
+			<p class="auth-hint">{{minPasswordLength}}-{{maxPasswordLength}} characters. Use this same password in-game.</p>
+
+			<label class="auth-label" for="confirmPassword">Confirm password</label>
+			<input class="auth-input" id="confirmPassword" name="confirmPassword" type="password" minlength="{{minPasswordLength}}" maxlength="{{maxPasswordLength}}" required>
+
+			<button class="btn-download auth-submit" type="submit" {{#if registrationDisabled}}disabled{{/if}}>Create account</button>
+		</form>
+		<p class="auth-alt">Already have an account? <a href="{{websiteRoot}}/login">Sign in</a>.</p>
+	</div>
+</div>

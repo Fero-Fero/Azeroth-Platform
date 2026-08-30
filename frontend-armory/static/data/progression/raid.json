@@ -1,0 +1,417 @@
+{
+	"classic": [
+		{
+			"key": "moltencore",
+			"name": "Molten Core",
+			"difficultyLabel": null,
+			"mapId": 409,
+			"difficulty": null,
+			"image": "/data/progression/raid/classic/molten_core.png",
+			"bosses": [
+				{ "name": "Lucifron", "npcIds": [12118] },
+				{ "name": "Magmadar", "npcIds": [11982] },
+				{ "name": "Gehennas", "npcIds": [12259] },
+				{ "name": "Garr", "npcIds": [12057] },
+				{ "name": "Shazzrah", "npcIds": [12264] },
+				{ "name": "Baron Geddon", "npcIds": [12056] },
+				{ "name": "Golemagg the Incinerator", "npcIds": [11988] },
+				{ "name": "Sulfuron Harbinger", "npcIds": [12098] },
+				{ "name": "Majordomo Executus", "npcIds": [12018] },
+				{ "name": "Ragnaros", "npcIds": [11502] }
+			]
+		},
+		{
+			"key": "onyxia",
+			"name": "Onyxia's Lair",
+			"difficultyLabel": null,
+			"mapId": 249,
+			"difficulty": null,
+			"matchDifficulty": 5,
+			"image": "/data/progression/raid/classic/onyxia.png",
+			"bosses": [
+				{ "name": "Onyxia", "npcIds": [10184] }
+			]
+		},
+		{
+			"key": "blackwinglair",
+			"name": "Blackwing Lair",
+			"difficultyLabel": null,
+			"mapId": 469,
+			"difficulty": null,
+			"image": "/data/progression/raid/classic/blackwing_lair.png",
+			"bosses": [
+				{ "name": "Razorgore the Untamed", "npcIds": [12435] },
+				{ "name": "Vaelastrasz the Corrupt", "npcIds": [13020] },
+				{ "name": "Broodlord Lashlayer", "npcIds": [12017] },
+				{ "name": "Firemaw", "npcIds": [11983] },
+				{ "name": "Ebonroc", "npcIds": [14601] },
+				{ "name": "Flamegor", "npcIds": [11981] },
+				{ "name": "Chromaggus", "npcIds": [14020] },
+				{ "name": "Nefarian", "npcIds": [11583] }
+			]
+		},
+		{
+			"key": "zulgurub",
+			"name": "Zul'Gurub",
+			"difficultyLabel": null,
+			"mapId": 309,
+			"difficulty": null,
+			"image": "/data/progression/raid/classic/zul_gurub.png",
+			"bosses": [
+				{ "name": "High Priest Venoxis", "npcIds": [14507] },
+				{ "name": "High Priestess Jeklik", "npcIds": [14517] },
+				{ "name": "High Priestess Mar'li", "npcIds": [14510] },
+				{ "name": "High Priest Thekal", "npcIds": [14509] },
+				{ "name": "High Priestess Arlokk", "npcIds": [14515] },
+				{ "name": "Bloodlord Mandokir", "npcIds": [11382] },
+				{ "name": "Jin'do the Hexxer", "npcIds": [11380] },
+				{ "name": "Gahz'ranka", "npcIds": [15114] },
+				{ "name": "Gri'lek (Edge of Madness)", "npcIds": [15082] },
+				{ "name": "Hazza'rah (Edge of Madness)", "npcIds": [15083] },
+				{ "name": "Renataki (Edge of Madness)", "npcIds": [15084] },
+				{ "name": "Wushoolay (Edge of Madness)", "npcIds": [15085] },
+				{ "name": "Hakkar the Soulflayer", "npcIds": [14834] }
+			]
+		},
+		{
+			"key": "ruinsofahnqiraj",
+			"name": "Ruins of Ahn'Qiraj",
+			"difficultyLabel": null,
+			"mapId": 509,
+			"difficulty": null,
+			"image": "/data/progression/raid/classic/ruins_of_ahn_qiraj.png",
+			"bosses": [
+				{ "name": "Kurinnaxx", "npcIds": [15348] },
+				{ "name": "General Rajaxx", "npcIds": [15341] },
+				{ "name": "Moam", "npcIds": [15340] },
+				{ "name": "Buru the Gorger", "npcIds": [15370] },
+				{ "name": "Ayamiss the Hunter", "npcIds": [15369] },
+				{ "name": "Ossirian the Unscarred", "npcIds": [15339] }
+			]
+		},
+		{
+			"key": "templeofahnqiraj",
+			"name": "Temple of Ahn'Qiraj",
+			"difficultyLabel": null,
+			"mapId": 531,
+			"difficulty": null,
+			"image": "/data/progression/raid/classic/temple_of_ahn_qiraj.png",
+			"bosses": [
+				{ "name": "The Prophet Skeram", "npcIds": [15263] },
+				{ "name": "Silithid Royalty (The Bug Trio)", "npcIds": [15544, 15543, 15511] },
+				{ "name": "Battleguard Sartura", "npcIds": [15516] },
+				{ "name": "Fankriss the Unyielding", "npcIds": [15510] },
+				{ "name": "Viscidus", "npcIds": [15299] },
+				{ "name": "Princess Huhuran", "npcIds": [15509] },
+				{ "name": "The Twin Emperors", "npcIds": [15276, 15275] },
+				{ "name": "Ouro", "npcIds": [15517] },
+				{ "name": "C'Thun", "npcIds": [15727] }
+			]
+		},
+		{
+			"key": "naxxramas",
+			"name": "Naxxramas",
+			"difficultyLabel": null,
+			"mapId": 533,
+			"difficulty": null,
+			"matchDifficulty": 5,
+			"image": "/data/progression/raid/classic/naxxramas.png",
+			"bosses": [
+				{ "name": "Anub'Rekhan", "npcIds": [15956] },
+				{ "name": "Grand Widow Faerlina", "npcIds": [15953] },
+				{ "name": "Maexxna", "npcIds": [15952] },
+				{ "name": "Noth the Plaguebringer", "npcIds": [15954] },
+				{ "name": "Heigan the Unclean", "npcIds": [15936] },
+				{ "name": "Loatheb", "npcIds": [16011] },
+				{ "name": "Instructor Razuvious", "npcIds": [16061] },
+				{ "name": "Gothik the Harvester", "npcIds": [16060] },
+				{ "name": "The Four Horsemen", "npcIds": [16062, 16064, 16065, 16063] },
+				{ "name": "Patchwerk", "npcIds": [16028] },
+				{ "name": "Grobbulus", "npcIds": [15931] },
+				{ "name": "Gluth", "npcIds": [15932] },
+				{ "name": "Thaddius", "npcIds": [15928] },
+				{ "name": "Sapphiron", "npcIds": [15989] },
+				{ "name": "Kel'Thuzad", "npcIds": [15990] }
+			]
+		}
+	],
+	"tbc": [
+		{
+			"key": "karazhan",
+			"name": "Karazhan",
+			"difficultyLabel": null,
+			"mapId": 532,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/karazhan.png",
+			"bosses": [
+				{ "name": "Attumen the Huntsman", "npcIds": [16151, 16152] },
+				{ "name": "Moroes", "npcIds": [16153] },
+				{ "name": "Maiden of Virtue", "npcIds": [16457] },
+				{ "name": "Opera Hall Event", "npcIds": [17533, 17534, 17521, 18168] },
+				{ "name": "The Curator", "npcIds": [15691] },
+				{ "name": "Terestian Illhoof", "npcIds": [15688] },
+				{ "name": "Shade of Aran", "npcIds": [16524] },
+				{ "name": "Netherspite", "npcIds": [15689] },
+				{ "name": "Chess Event", "npcIds": [17211, 17216] },
+				{ "name": "Prince Malchezaar", "npcIds": [15690] },
+				{ "name": "Nightbane", "npcIds": [17225] }
+			]
+		},
+		{
+			"key": "gruulslair",
+			"name": "Gruul's Lair",
+			"difficultyLabel": null,
+			"mapId": 565,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/gruuls_lair.png",
+			"bosses": [
+				{ "name": "High King Maulgar", "npcIds": [18831] },
+				{ "name": "Gruul the Dragonkiller", "npcIds": [19044] }
+			]
+		},
+		{
+			"key": "magtheridonslair",
+			"name": "Magtheridon's Lair",
+			"difficultyLabel": null,
+			"mapId": 544,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/magtheridons_lair.png",
+			"bosses": [
+				{ "name": "Magtheridon", "npcIds": [17257] }
+			]
+		},
+		{
+			"key": "serpentshrinecavern",
+			"name": "Serpentshrine Cavern",
+			"difficultyLabel": null,
+			"mapId": 548,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/serpentshrine_cavern.png",
+			"bosses": [
+				{ "name": "Hydross the Unstable", "npcIds": [21216] },
+				{ "name": "The Lurker Below", "npcIds": [21217] },
+				{ "name": "Leotheras the Blind", "npcIds": [21215] },
+				{ "name": "Fathom-Lord Karathress", "npcIds": [21212] },
+				{ "name": "Morogrim Tidewalker", "npcIds": [21213] },
+				{ "name": "Lady Vashj", "npcIds": [21214] }
+			]
+		},
+		{
+			"key": "tempestkeep",
+			"name": "Tempest Keep",
+			"difficultyLabel": null,
+			"mapId": 550,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/tempest_keep.png",
+			"bosses": [
+				{ "name": "Al'ar", "npcIds": [19514] },
+				{ "name": "Void Reaver", "npcIds": [19516] },
+				{ "name": "High Astromancer Solarian", "npcIds": [18805] },
+				{ "name": "Kael'thas Sunstrider", "npcIds": [19622] }
+			]
+		},
+		{
+			"key": "thebattleformounthyjal",
+			"name": "Battle for Mount Hyjal",
+			"difficultyLabel": null,
+			"mapId": 534,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/the_battle_for_mount_hyjal.png",
+			"bosses": [
+				{ "name": "Rage Winterchill", "npcIds": [17767] },
+				{ "name": "Anetheron", "npcIds": [17808] },
+				{ "name": "Kaz'rogal", "npcIds": [17888] },
+				{ "name": "Azgalor", "npcIds": [17942] },
+				{ "name": "Archimonde", "npcIds": [17968] }
+			]
+		},
+		{
+			"key": "blacktemple",
+			"name": "Black Temple",
+			"difficultyLabel": null,
+			"mapId": 564,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/black_temple.png",
+			"bosses": [
+				{ "name": "High Warlord Naj'entus", "npcIds": [22887] },
+				{ "name": "Supremus", "npcIds": [22898] },
+				{ "name": "Shade of Akama", "npcIds": [22841] },
+				{ "name": "Teron Gorefiend", "npcIds": [22871] },
+				{ "name": "Gurtogg Bloodboil", "npcIds": [22948] },
+				{ "name": "Reliquary of Souls", "npcIds": [23418] },
+				{ "name": "Mother Shahraz", "npcIds": [22947] },
+				{ "name": "The Illidari Council", "npcIds": [22949, 22950, 22951, 22952] },
+				{ "name": "Illidan Stormrage", "npcIds": [22917] }
+			]
+		},
+		{
+			"key": "zulaman",
+			"name": "Zul'Aman",
+			"difficultyLabel": null,
+			"mapId": 568,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/zul_aman.png",
+			"bosses": [
+				{ "name": "Nalorakk", "npcIds": [23574] },
+				{ "name": "Akil'zon", "npcIds": [23576] },
+				{ "name": "Jan'alai", "npcIds": [23578] },
+				{ "name": "Halazzi", "npcIds": [23577] },
+				{ "name": "Hex Lord Malacrass", "npcIds": [24239] },
+				{ "name": "Zul'jin", "npcIds": [23863] }
+			]
+		},
+		{
+			"key": "sunwellplateau",
+			"name": "Sunwell Plateau",
+			"difficultyLabel": null,
+			"mapId": 580,
+			"difficulty": null,
+			"image": "/data/progression/raid/tbc/sunwell_plateau.png",
+			"bosses": [
+				{ "name": "Kalecgos", "npcIds": [24850, 24892] },
+				{ "name": "Brutallus", "npcIds": [24882] },
+				{ "name": "Felmyst", "npcIds": [25038] },
+				{ "name": "The Eredar Twins", "npcIds": [25165, 25166] },
+				{ "name": "M'uru", "npcIds": [25741, 25840] },
+				{ "name": "Kil'jaeden", "npcIds": [25315] }
+			]
+		}
+	],
+	"wotlk": [
+		{
+			"key": "naxxramas",
+			"name": "Naxxramas",
+			"mapId": 533,
+			"image": "/data/progression/raid/wotlk/naxxramas.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Anub'Rekhan", "npcIds": [15956] },
+				{ "name": "Grand Widow Faerlina", "npcIds": [15953] },
+				{ "name": "Maexxna", "npcIds": [15952] },
+				{ "name": "Noth the Plaguebringer", "npcIds": [15954] },
+				{ "name": "Heigan the Unclean", "npcIds": [15936] },
+				{ "name": "Loatheb", "npcIds": [16011] },
+				{ "name": "Patchwerk", "npcIds": [16028] },
+				{ "name": "Grobbulus", "npcIds": [15931] },
+				{ "name": "Gluth", "npcIds": [15932] },
+				{ "name": "Thaddius", "npcIds": [15928] },
+				{ "name": "Instructor Razuvious", "npcIds": [16061] },
+				{ "name": "Gothik the Harvester", "npcIds": [16060] },
+				{ "name": "The Four Horsemen", "npcIds": [16064, 16065, 30549, 16063] },
+				{ "name": "Sapphiron", "npcIds": [15989] },
+				{ "name": "Kel'Thuzad", "npcIds": [15990] }
+			]
+		},
+		{
+			"key": "obsidiansanctum",
+			"name": "The Obsidian Sanctum",
+			"mapId": 615,
+			"image": "/data/progression/raid/wotlk/obsidian_sanctum.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Sartharion", "npcIds": [28860] }
+			]
+		},
+		{
+			"key": "theeyeofeternity",
+			"name": "The Eye of Eternity",
+			"mapId": 616,
+			"image": "/data/progression/raid/wotlk/the_eye_of_eternity.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Malygos", "npcIds": [28859] }
+			]
+		},
+		{
+			"key": "vaultofarchavon",
+			"name": "Vault of Archavon",
+			"mapId": 624,
+			"image": "/data/progression/raid/wotlk/vault_of_archavon.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Archavon the Stone Watcher", "npcIds": [31125] },
+				{ "name": "Emalon the Storm Watcher", "npcIds": [33993] },
+				{ "name": "Koralon the Flame Watcher", "npcIds": [35013] },
+				{ "name": "Toravon the Ice Watcher", "npcIds": [38433] }
+			]
+		},
+		{
+			"key": "ulduar",
+			"name": "Ulduar",
+			"mapId": 603,
+			"image": "/data/progression/raid/wotlk/ulduar.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Flame Leviathan", "npcIds": [33113] },
+				{ "name": "Ignis the Furnace Master", "npcIds": [33118] },
+				{ "name": "Razorscale", "npcIds": [33186] },
+				{ "name": "XT-002 Deconstructor", "npcIds": [33293] },
+				{ "name": "The Iron Council", "npcIds": [32867, 32927, 32857] },
+				{ "name": "Kologarn", "npcIds": [32930] },
+				{ "name": "Auriaya", "npcIds": [33515] },
+				{ "name": "Hodir", "npcIds": [32845] },
+				{ "name": "Thorim", "npcIds": [32865] },
+				{ "name": "Freya", "npcIds": [32906] },
+				{ "name": "Mimiron", "npcIds": [33350] },
+				{ "name": "General Vezax", "npcIds": [33271] },
+				{ "name": "Yogg-Saron", "npcIds": [33288] },
+				{ "name": "Algalon the Observer", "npcIds": [32871] }
+			]
+		},
+		{
+			"key": "trialofthecrusader",
+			"name": "Trial of the Crusader",
+			"mapId": 649,
+			"image": "/data/progression/raid/wotlk/trial_of_the_crusader.png",
+			"difficulties": [2, 4, 6, 7],
+			"bosses": [
+				{ "name": "The Northrend Beasts", "npcIds": [34796, 34799, 34797, 34798] },
+				{ "name": "Lord Jaraxxus", "npcIds": [34780] },
+				{ "name": "Faction Champions", "npcIds": [34441, 34442, 34443, 34444, 34445, 34446, 34447, 34448, 34449, 34450, 34451, 34452, 34453, 34454, 34455, 34461, 34462, 34463, 34464, 34465, 34466, 34467, 34468, 34469, 34470, 34471, 34472, 34473, 34474, 34475] },
+				{ "name": "Twin Val'kyr", "npcIds": [34497, 34496] },
+				{ "name": "Anub'arak", "npcIds": [34564] }
+			]
+		},
+		{
+			"key": "onyxia",
+			"name": "Onyxia's Lair",
+			"mapId": 249,
+			"image": "/data/progression/raid/wotlk/onyxia.png",
+			"difficulties": [2, 4],
+			"bosses": [
+				{ "name": "Onyxia", "npcIds": [10184] }
+			]
+		},
+		{
+			"key": "icecrowncitadel",
+			"name": "Icecrown Citadel",
+			"mapId": 631,
+			"image": "/data/progression/raid/wotlk/icecrown_citadel.png",
+			"difficulties": [2, 4, 6, 7],
+			"bosses": [
+				{ "name": "Lord Marrowgar", "npcIds": [36612] },
+				{ "name": "Lady Deathwhisper", "npcIds": [36855] },
+				{ "name": "Icecrown Gunship Battle", "npcIds": [37188, 37200] },
+				{ "name": "Deathbringer Saurfang", "npcIds": [37813] },
+				{ "name": "Festergut", "npcIds": [36626] },
+				{ "name": "Rotface", "npcIds": [36627] },
+				{ "name": "Professor Putricide", "npcIds": [36678] },
+				{ "name": "Blood Prince Council", "npcIds": [37970, 37972, 37973] },
+				{ "name": "Blood-Queen Lana'thel", "npcIds": [37955] },
+				{ "name": "Valithria Dreamwalker", "npcIds": [36789] },
+				{ "name": "Sindragosa", "npcIds": [36853] },
+				{ "name": "The Lich King", "npcIds": [36597] }
+			]
+		},
+		{
+			"key": "therubysanctum",
+			"name": "The Ruby Sanctum",
+			"mapId": 724,
+			"image": "/data/progression/raid/wotlk/the_ruby_sanctum.png",
+			"difficulties": [2, 4, 6, 7],
+			"bosses": [
+				{ "name": "Halion", "npcIds": [39863] }
+			]
+		}
+	]
+}

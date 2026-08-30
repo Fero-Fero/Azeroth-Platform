@@ -1,0 +1,78 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character.css">
+{{> icons }}
+<script type="application/javascript" src="{{websiteRoot}}/js/viewer.min.js?v=2"></script>
+
+{{> character-header }}
+
+<div class="armory-panel">
+	<div class="panel-title">Mounts <span class="panel-more">{{mountCount}} collected</span></div>
+	<div class="panel-body">
+		{{#if mounts.length}}
+		<div id="mount-viewer-container" class="model-bg-{{#eq faction 1}}alliance{{else}}horde{{/eq}}">
+			<div id="mount-viewer"></div>
+		</div>
+
+		<div class="mount-search-bar">
+			<input id="mount-search" type="text" placeholder="Search mounts...">
+		</div>
+
+		<div id="mounts-grid" class="icon-grid mounts-grid">
+			{{#each mounts}}
+			<span class="icon-tile mount-tile" data-tooltip="{{this.name}}" data-name="{{this.name}}" data-display-id="{{this.creatureDisplayId}}" style="background-image:url('{{../websiteRoot}}/img/wow-icons/large/{{this.icon}}.jpg')"></span>
+			{{/each}}
+		</div>
+		{{else}}
+		<div class="empty-hint">This character has not collected any mounts.</div>
+		{{/if}}
+	</div>
+</div>
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		window.WH = {
+			debug: () => { },
+		};
+
+		const $tiles = $(".mount-tile");
+		if ($tiles.length === 0) {
+			return;
+		}
+
+		const $viewer = $("#mount-viewer");
+		let viewer;
+		function showMount(displayId) {
+			viewer?.destroy();
+			viewer = new ZamModelViewer({
+				type: ZamModelViewer.WOW,
+				contentPath: "{{ contentPath }}",
+				container: $viewer,
+				hd: true,
+				transparent: true,
+				aspect: $viewer.outerWidth() / Math.max(1, $viewer.outerHeight()),
+				models: {
+					type: ZamModelViewer.Wow.Types.NPC,
+					id: displayId,
+				},
+			});
+		}
+
+		$tiles.on("click", function () {
+			$tiles.removeClass("selected");
+			$(this).addClass("selected");
+			showMount(parseInt($(this).data("display-id"), 10));
+		});
+
+		// Show the first mount by default.
+		const $first = $tiles.first();
+		$first.addClass("selected");
+		showMount(parseInt($first.data("display-id"), 10));
+
+		$("#mount-search").on("input", function () {
+			const query = ($(this).val() || "").toString().toLowerCase().trim();
+			$tiles.each(function () {
+				const name = ($(this).data("name") || "").toString().toLowerCase();
+				$(this).toggle(name.indexOf(query) !== -1);
+			});
+		});
+	});
+</script>

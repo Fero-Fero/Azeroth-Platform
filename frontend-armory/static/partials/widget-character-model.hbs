@@ -1,0 +1,46 @@
+<div class="azp-character-model-widget">
+	<div id="model-container" class="model-bg-{{#eq faction 1}}alliance{{else}}horde{{/eq}}">
+		<div id="equipment-col-left"></div>
+		<div id="model"></div>
+		<div id="equipment-col-right"></div>
+	</div>
+	<div id="equipment-bottom">
+		<div id="bottom-left">
+			<label class="checkbox">
+				<input id="cb-enable-3d-viewer" type="checkbox">
+				Enable 3D viewer
+			</label>
+			<div id="3d-viewer-options">
+				<label class="checkbox">
+					<input id="cb-hide-helmet" type="checkbox">
+					Hide helmet
+				</label>
+				<label class="checkbox">
+					<input id="cb-hide-cloak" type="checkbox">
+					Hide cloak
+				</label>
+				<label class="checkbox">
+					<input id="cb-hide-tabard" type="checkbox">
+					Hide tabard
+				</label>
+				<label id="lbl-hide-transmogs" class="checkbox">
+					<input id="cb-hide-transmogs" type="checkbox">
+					Hide transmogrifications
+				</label>
+				<div id="list-transmogs-container">
+					<button id="btn-transmogs" class="button is-primary">Transmogrifications</button>
+					<div id="list-transmogs" class="box" style="display: none;">
+						<ul></ul>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div id="equipment-weapons"></div>
+		<div id="bottom-right">
+			<div class="corner-panel">
+				<div class="stat-row"><span class="stat-label">Money</span><span class="stat-value money">{{overview.money.gold}}<span class="coin gold"></span> {{overview.money.silver}}<span class="coin silver"></span> {{overview.money.copper}}<span class="coin copper"></span></span></div>
+				<div class="stat-row"><span class="stat-label">Time Played</span><span class="stat-value">{{overview.playedHours}} h</span></div>
+			</div>
+		</div>
+	</div>
+</div>

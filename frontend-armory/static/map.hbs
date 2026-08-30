@@ -1,0 +1,275 @@
+<style type="text/css">
+	/* Full-screen map frame: the visible window that the (scaled) stage pans inside. */
+	#map-frame {
+		position: relative;
+		width: 100vw;
+		margin-left: calc(50% - 50vw);
+		overflow: hidden;
+		background-color: #000000;
+		color: #EABA28;
+		font-family: verdana, arial, sans-serif, helvetica;
+		cursor: grab;
+		user-select: none;
+	}
+	#map-frame.is-dragging {
+		cursor: grabbing;
+	}
+	/* The 966x732 stage holds the map layers + player dots and is scaled/panned as a unit. */
+	#map-stage {
+		position: absolute;
+		top: 0;
+		left: 0;
+		height: 732px;
+		width: 966px;
+		transform-origin: 0 0;
+	}
+	#map-stage #world,
+	#map-stage #outland,
+	#map-stage #northrend {
+		position: absolute;
+		height: 732px;
+		width: 966px;
+		left: 0;
+		top: 0;
+		background-size: 100% 100%;
+		background-repeat: no-repeat;
+		image-rendering: auto;
+	}
+	#map-stage #world {
+		background-image: url("{{websiteRoot}}/img/playermap/map/azeroth.jpg");
+		z-index: 10;
+	}
+	#map-stage #outland {
+		visibility: hidden;
+		background-image: url("{{websiteRoot}}/img/playermap/map/outland.jpg");
+		z-index: 9;
+	}
+	#map-stage #northrend {
+		visibility: hidden;
+		background-image: url("{{websiteRoot}}/img/playermap/map/northrend.jpg");
+		z-index: 8;
+	}
+	#map-stage #pointsOldworld {
+		position: absolute;
+		height: 732px;
+		width: 966px;
+		left: 0;
+		top: 0;
+		z-index: 100;
+	}
+	#map-stage #pointsOutland {
+		visibility: hidden;
+		position: absolute;
+		height: 732px;
+		width: 966px;
+		left: 0;
+		top: 0;
+		z-index: 99;
+	}
+	#map-stage #pointsNorthrend {
+		visibility: hidden;
+		position: absolute;
+		height: 732px;
+		width: 966px;
+		left: 0;
+		top: 0;
+		z-index: 98;
+	}
+
+	/* Fixed overlays (not scaled with the stage) */
+	#map-title {
+		position: absolute;
+		top: 12px;
+		left: 18px;
+		z-index: 130;
+		pointer-events: none;
+		text-shadow: 0 1px 3px #000, 0 0 10px #000;
+	}
+	/* World switcher sub navbar */
+	#map-worlds {
+		position: absolute;
+		top: 12px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 131;
+		display: flex;
+		gap: 4px;
+		padding: 4px;
+		background: rgba(20, 15, 9, 0.82);
+		border: none;
+		border-radius: 6px;
+	}
+	#map-worlds button {
+		font-family: verdana, arial, sans-serif;
+		font-size: 13px;
+		font-weight: bold;
+		color: var(--armory-gold-bright);
+		background: rgba(0, 0, 0, 0.35);
+		border: 1px solid transparent;
+		border-radius: 4px;
+		padding: 6px 16px;
+		cursor: pointer;
+		transition: background 0.12s ease, color 0.12s ease;
+	}
+	#map-worlds button:hover {
+		background: rgba(240, 200, 105, 0.15);
+	}
+	#map-worlds button.is-active {
+		background: rgba(240, 200, 105, 0.28);
+		border-color: var(--armory-border-bright);
+		color: #fff;
+	}
+	#map-status {
+		position: absolute;
+		top: 12px;
+		right: 18px;
+		z-index: 130;
+		text-align: right;
+		min-width: 160px;
+		padding: 6px 12px;
+		background: rgba(20, 15, 9, 0.78);
+		border: none;
+		border-radius: 5px;
+		cursor: pointer;
+	}
+	#map-status #status {
+		font-family: verdana, arial, sans-serif;
+		font-size: 13px;
+		font-weight: bold;
+		color: #E7CF07;
+		text-shadow: 0 1px 2px #000;
+	}
+	#map-status #timer {
+		font-family: arial;
+		font-size: 11px;
+		color: var(--armory-text-muted);
+	}
+	#map-info {
+		position: absolute;
+		bottom: 12px;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 130;
+		max-width: 96vw;
+		padding: 6px 14px;
+		background: rgba(20, 15, 9, 0.78);
+		border: none;
+		border-radius: 5px;
+		text-align: center;
+	}
+	#map-info #server_info {
+		font-family: arial, helvetica, sans-serif;
+		font-size: 14px;
+	}
+	#map-zoom {
+		position: absolute;
+		bottom: 12px;
+		right: 18px;
+		z-index: 130;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	#map-zoom button {
+		width: 36px;
+		height: 36px;
+		font-size: 20px;
+		font-weight: bold;
+		line-height: 1;
+		color: var(--armory-gold-bright);
+		background: rgba(20, 15, 9, 0.85);
+		border: 1px solid var(--armory-border-bright);
+		border-radius: 5px;
+		cursor: pointer;
+	}
+	#map-zoom button:hover {
+		background: rgba(240, 200, 105, 0.2);
+	}
+
+	#tip {
+		border: 0px solid #aaaaaa;
+		left: -1000px;
+		padding: 0px;
+		position: fixed;
+		top: -1000px;
+		z-index: 150;
+	}
+	.tip_header {
+		background: #bb0000;
+		font-weight: bold;
+		color: #FFFFFF;
+		font-family: arial, helvetica, sans-serif;
+		font-size: 12px;
+		text-align: center;
+	}
+	.tip_head_text {
+		background: rgb(50, 50, 50);
+		font-weight: bold;
+		color: #DDDD33;
+		font-family: arial, helvetica, sans-serif;
+		font-size: 12px;
+		text-align: left;
+	}
+	.tip_text {
+		background: #000000;
+		font-weight: normal;
+		color: #ffffff;
+		font-family: arial, helvetica, sans-serif;
+		font-size: 12px;
+		text-align: center;
+	}
+	.tip_worldinfo {
+		font-weight: normal;
+		color: #FFFF99;
+		font-family: Georgia, arial, helvetica, sans-serif;
+		font-size: 12px;
+		text-align: left;
+	}
+</style>
+
+<div id="map-frame">
+	<div id="map-stage">
+		<div id="pointsOldworld"></div>
+		<div id="pointsOutland"></div>
+		<div id="pointsNorthrend"></div>
+		<div id="world"></div>
+		<div id="outland"></div>
+		<div id="northrend"></div>
+	</div>
+
+	<div id="map-worlds">
+		<button type="button" class="map-world-btn is-active" data-world="0">Azeroth</button>
+		<button type="button" class="map-world-btn" data-world="1">Outland</button>
+		<button type="button" class="map-world-btn" data-world="2">Northrend</button>
+	</div>
+
+	<div id="map-status" onMouseDown="PMmap.showNextStatusText();">
+		<div id="status"></div>
+		<div id="timer"></div>
+	</div>
+
+	<div id="map-info">
+		<span id="server_info"></span>
+	</div>
+
+	<div id="map-zoom">
+		<button type="button" id="map-zoom-in" title="Zoom in">+</button>
+		<button type="button" id="map-zoom-out" title="Zoom out">&minus;</button>
+	</div>
+</div>
+
+<div id="tip"></div>
+
+<script type="application/javascript">
+	window.PM = {
+		mapBase: "{{websiteRoot}}/img/playermap/map/",
+		iconBase: "{{websiteRoot}}/img/playermap/c_icons/",
+		dataUrl: "{{websiteRoot}}/map/data",
+		showStatus: true,
+		showTime: true,
+		time: 30,
+		timeToShowUptime: 6000,
+		timeToShowMaxonline: 3000,
+	};
+</script>
+<script type="application/javascript" src="{{websiteRoot}}/js/playermap.js"></script>

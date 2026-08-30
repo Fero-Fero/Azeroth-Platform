@@ -1,0 +1,94 @@
+name: Feature request
+description: A new capability or a change to existing behaviour.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first, then the change you want. If this is stack-specific, say which server type and deployment you have in mind.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched [existing issues](https://github.com/Fero-Fero/AzerothPlatform/issues) and this is not a duplicate.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Manager UI / dashboard
+        - Stack create / wizard
+        - Stack build / compile
+        - Stack start / stop / runtime
+        - Modules
+        - Patches / migrations / server-wide progression
+        - Client upload / download / sync
+        - Addons
+        - Launcher
+        - Armory
+        - Accounts / characters
+        - Cloud / external host
+        - Install / update of the platform itself
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or missing today? Who hits this?
+      placeholder: As an operator I cannot … because …
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the platform do instead? Mockups or examples help.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: server_type
+    attributes:
+      label: Server type this matters for
+      options:
+        - All / any
+        - Express Setup
+        - Standard
+        - Playerbots
+        - NPCBots
+        - Individual Progression
+        - Custom Fork
+        - N/A (not stack-specific)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Local / external
+      options:
+        - All / any
+        - Local (this machine)
+        - External SSH
+        - Cloud
+        - N/A (not stack-specific)
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds, other tools, or a simpler version of the same idea.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Screenshots, related issues, or links.

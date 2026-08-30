@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AssemblyName>AzerothPlatformLauncher</AssemblyName>
+    <RootNamespace>AzerothPlatform.Launcher</RootNamespace>
+    <AZP_ENABLE_ARMORY Condition="'$(AZP_ENABLE_ARMORY)' == ''">true</AZP_ENABLE_ARMORY>
+    <DefineConstants Condition="'$(AZP_ENABLE_ARMORY)' == 'true'">$(DefineConstants);AZP_ENABLE_ARMORY</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Global app icon: the build pipeline drops AppIcon.ico here when one is uploaded on the
+       website. When present it becomes the Windows exe icon and is bundled next to the exe so the
+       running launcher can use it as the window/taskbar icon. Absent → default icon, no error. -->
+  <PropertyGroup Condition="Exists('AppIcon.ico')">
+    <ApplicationIcon>AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('AppIcon.ico')">
+    <None Include="AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Distributable single-file build. Enabled automatically when publishing with
+       -p:PublishSingleFile=true so the produced .exe is a standalone, self-contained
+       binary (no .NET install required on a friend's machine). -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <!-- Keep the distributable to a single .exe: strip the loose native symbol files
+       (libSkiaSharp.pdb / libHarfBuzzSharp.pdb) that the Skia/HarfBuzz packages copy out.
+       Our own symbols are embedded (DebugType=embedded), so nothing else needs a .pdb. -->
+  <Target Name="StripLoosePdbsFromPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <_LoosePublishPdbs Include="$(PublishDir)**\*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_LoosePublishPdbs)" />
+  </Target>
+
+  <ItemGroup>
+    <!-- Ship distributor defaults next to the executable when present. -->
+    <None Include="launcher.settings.json" Condition="Exists('launcher.settings.json')" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AzerothPlatform.Launcher.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.0.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+</Project>

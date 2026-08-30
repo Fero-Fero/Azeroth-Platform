@@ -1,0 +1,31 @@
+/* Records page: reuses the progression card layout, with a best clear time as the
+   headline stat instead of a boss progress bar. */
+
+.raid-card-time {
+	flex: 1;
+	color: var(--armory-heading);
+	font-size: 1.05rem;
+	font-weight: bold;
+	font-variant-numeric: tabular-nums;
+	text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+.raid-card-time.no-record {
+	color: var(--armory-text-muted);
+	font-size: 0.82rem;
+	font-weight: normal;
+	font-style: italic;
+}
+
+/* Boss rows in the hover tooltip: best kill time right-aligned instead of a bar. */
+.ptt-boss-time {
+	color: var(--armory-text-muted);
+	font-size: 0.78rem;
+	font-weight: bold;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.ptt-boss.done .ptt-boss-time {
+	color: var(--armory-accent);
+}

@@ -1,0 +1,87 @@
+{
+	"classic": [
+		{
+			"key": "azuregos",
+			"name": "Azuregos",
+			"mapId": 1,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/azuregos.png",
+			"bosses": [
+				{ "name": "Azuregos", "npcIds": [6109] }
+			]
+		},
+		{
+			"key": "lordkazzak",
+			"name": "Lord Kazzak",
+			"mapId": 0,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/lord_kazzak.png",
+			"bosses": [
+				{ "name": "Lord Kazzak", "npcIds": [12397] }
+			]
+		},
+		{
+			"key": "ysondre",
+			"name": "Ysondre",
+			"mapId": 1,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/ysondre.png",
+			"bosses": [
+				{ "name": "Ysondre", "npcIds": [14887] }
+			]
+		},
+		{
+			"key": "taerar",
+			"name": "Taerar",
+			"mapId": 1,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/taerar.png",
+			"bosses": [
+				{ "name": "Taerar", "npcIds": [14890] }
+			]
+		},
+		{
+			"key": "lethon",
+			"name": "Lethon",
+			"mapId": 0,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/lethon.png",
+			"bosses": [
+				{ "name": "Lethon", "npcIds": [14888] }
+			]
+		},
+		{
+			"key": "emeriss",
+			"name": "Emeriss",
+			"mapId": 0,
+			"difficulty": null,
+			"image": "/data/progression/world/classic/emeriss.png",
+			"bosses": [
+				{ "name": "Emeriss", "npcIds": [14889] }
+			]
+		}
+	],
+	"tbc": [
+		{
+			"key": "doomlordkazzak",
+			"name": "Doom Lord Kazzak",
+			"mapId": 530,
+			"difficulty": null,
+			"image": "/data/progression/world/tbc/doom_lord_kazzak.png",
+			"bosses": [
+				{ "name": "Doom Lord Kazzak", "npcIds": [18728] }
+			]
+		},
+		{
+			"key": "doomwalker",
+			"name": "Doomwalker",
+			"mapId": 530,
+			"difficulty": null,
+			"image": "/data/progression/world/tbc/doomwalker.png",
+			"bosses": [
+				{ "name": "Doomwalker", "npcIds": [17711] }
+			]
+		}
+	],
+	"wotlk": []
+}

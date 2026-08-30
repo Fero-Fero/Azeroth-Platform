@@ -1,0 +1,36 @@
+<link rel="stylesheet" type="text/css" href="{{websiteRoot}}/css/character.css">
+{{> icons }}
+
+{{> character-header }}
+
+<div class="armory-panel">
+	<div class="panel-title">Companions <span class="panel-more">{{companionCount}} collected</span></div>
+	<div class="panel-body">
+		{{#if companions.length}}
+		<div class="mount-search-bar">
+			<input id="companion-search" type="text" placeholder="Search companions...">
+		</div>
+
+		<div id="companions-grid" class="icon-grid mounts-grid">
+			{{#each companions}}
+			<span class="icon-tile companion-tile" data-tooltip="{{this.name}}" data-name="{{this.name}}" style="background-image:url('{{../websiteRoot}}/img/wow-icons/large/{{this.icon}}.jpg')"></span>
+			{{/each}}
+		</div>
+		{{else}}
+		<div class="empty-hint">This character has not collected any companions.</div>
+		{{/if}}
+	</div>
+</div>
+
+<script type="application/javascript">
+	$(window).on("load", () => {
+		const $tiles = $(".companion-tile");
+		$("#companion-search").on("input", function () {
+			const query = ($(this).val() || "").toString().toLowerCase().trim();
+			$tiles.each(function () {
+				const name = ($(this).data("name") || "").toString().toLowerCase();
+				$(this).toggle(name.indexOf(query) !== -1);
+			});
+		});
+	});
+</script>

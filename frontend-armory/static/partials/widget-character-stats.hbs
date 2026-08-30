@@ -1,0 +1,10 @@
+<div class="stat-column">
+	{{#with overview.stats}}
+	{{> stat-panel title="Base Stats" rows=base}}
+	{{> stat-panel title="Melee" rows=melee}}
+	{{> stat-panel title="Ranged" rows=ranged}}
+	{{> stat-panel title="Spell" rows=spell}}
+	{{> stat-panel title="Defense" rows=defense}}
+	{{> stat-panel title="Resistances" rows=resistances}}
+	{{/with}}
+</div>

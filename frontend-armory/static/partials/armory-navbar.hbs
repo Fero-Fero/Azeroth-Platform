@@ -1,0 +1,38 @@
+<nav class="armory-navbar">
+	{{#each navbarLinks}}
+	<a class="armory-brand" href="{{this.href}}"{{#if this.openInNewTab}} target="_blank" rel="noopener noreferrer"{{/if}}>{{this.label}}</a>
+	{{/each}}
+	<span class="nav-spacer"></span>
+	{{#if navbarShowSearch}}
+	<form class="navbar-search" action="{{websiteRoot}}/" method="get" autocomplete="off">
+		<input id="nav-search-input" type="text" name="q" placeholder="{{navbarSearchPlaceholder}}" autocomplete="off">
+		<div id="nav-search-results" class="nav-search-results" role="listbox"></div>
+	</form>
+	{{/if}}
+	{{#if accountsEnabled}}
+	<span class="nav-account">
+		{{#if currentUser}}
+		{{#unless currentUser.isPending}}
+		<a class="armory-nav-link nav-account-link" href="{{websiteRoot}}/account" title="My account">
+			<span class="nav-account-avatar" aria-hidden="true">{{currentUser.initials}}</span>
+			<span class="nav-account-name">{{currentUser.displayName}}</span>
+		</a>
+		{{else}}
+		<a class="nav-account-link" href="{{websiteRoot}}/verify-email-pending" title="Verify email">
+			<span class="nav-account-avatar nav-account-avatar--pending" aria-hidden="true">!</span>
+			<span class="nav-account-name">{{currentUser.displayName}}</span>
+		</a>
+		{{/unless}}
+		<form class="nav-inline-form" action="{{websiteRoot}}/logout" method="post">
+			<input type="hidden" name="_csrf" value="{{csrfToken}}">
+			<button type="submit" class="nav-link-button">Sign out</button>
+		</form>
+		{{else}}
+		<a class="armory-brand" href="{{websiteRoot}}/login">Sign in</a>
+		{{#if allowRegistration}}
+		<a class="armory-brand" href="{{websiteRoot}}/register">Register</a>
+		{{/if}}
+		{{/if}}
+	</span>
+	{{/if}}
+</nav>

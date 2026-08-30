@@ -1,0 +1,53 @@
+---
+description: How to write comments in this repository
+alwaysApply: true
+---
+
+# Comment convention
+
+A comment states a constraint, invariant, or consequence that the code cannot express. Nothing else.
+
+If a reader could learn the same thing by reading the line below it, delete the comment.
+
+## Write comments for
+
+- **Constraints imposed from outside the code**: a protocol requirement, an OS behaviour, a WoW client
+  quirk, a Docker or SSH limitation. Say what breaks if the constraint is violated.
+- **Invariants a future edit could quietly break**: why an order matters, why a value is capped, why a
+  failure is swallowed, why a set is exactly this set.
+- **Consequences that are not local**: this write reaches every player's install; this path runs
+  elevated; this list is mirrored in another project.
+- **Non-obvious choices between two reasonable options**: why the slower call, why the shell-out
+  instead of the library.
+
+## Never write
+
+- **History.** No `used to`, `no longer`, `previously`, `before this`, `that broke`, `the exact
+  scenario`, `the bug this fixes`. History belongs in the commit message and the pull request, where it
+  stays attached to the change instead of following the code around forever.
+
+  The test is tense, not vocabulary. "The details payload no longer returns the root password" narrates
+  a change and rots; "MapAsync withholds the root password" states the same constraint and stays true.
+  A present-tense counterfactual is fine — "`up -d` on a running container would otherwise be a no-op"
+  describes what this code prevents, not what someone once fixed.
+- **Notes to the reviewer.** No `NOTE:`, `IMPORTANT:`, `Deliberately`, `On purpose`, `Careful!`. If it
+  matters, state the constraint plainly; if it does not, drop it.
+- **Restatements of the next line.** `// Increment the counter`, `// Import the module`,
+  `// Return the result`.
+- **Commented-out code.** Delete it. Git remembers.
+- **Section banners and decoration** beyond what the file already uses consistently.
+
+## Doc comments
+
+XML `<summary>` on a public or internal API stays. It says what the member is for and what a caller has
+to know, in at most three lines. Longer explanations go in the body of the type's summary, not on every
+member.
+
+TSDoc on exported frontend functions and hooks follows the same rule.
+
+## Applying this to existing code
+
+This is a judgement pass, file by file. Phrase matching produces false positives — plenty of legitimate
+API docs contain "used to" or "instead of" — so read the comment and the code before deleting.
+
+`wdbx/WDBXEditor/` is vendored third-party code. Leave its comments alone.

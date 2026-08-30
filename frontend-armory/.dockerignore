@@ -1,0 +1,23 @@
+# Dependency directories
+node_modules/
+
+# Build directory
+build/
+
+# Model-viewer dataset now lives under static/data. Keep the small, server-side parts (DBC CSVs,
+# progression, backgrounds) baked into the image, but drop the multi-GB heavy assets - those are
+# served by the per-stack armory-assets sidecar, not the image.
+static/data/mo3/
+static/data/meta/
+static/data/bone/
+static/data/textures/
+
+# Configuration
+config.json
+.env
+
+# Log files
+logs/
+
+# Git folder
+.git/

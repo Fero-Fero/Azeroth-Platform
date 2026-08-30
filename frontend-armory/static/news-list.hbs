@@ -1,0 +1,27 @@
+{{> layout-grid}}
+
+<script>
+	document.addEventListener('DOMContentLoaded', function () {
+		const input = document.getElementById('newsSearch');
+		const empty = document.getElementById('newsEmpty');
+		const cards = Array.prototype.slice.call(document.querySelectorAll('#newsList .news-card'));
+		if (!input) {
+			return;
+		}
+		input.addEventListener('input', function () {
+			const query = this.value.trim().toLowerCase();
+			let visible = 0;
+			cards.forEach(function (card) {
+				const haystack = (card.getAttribute('data-search') || '').toLowerCase();
+				const show = query === '' || haystack.indexOf(query) !== -1;
+				card.style.display = show ? '' : 'none';
+				if (show) {
+					visible++;
+				}
+			});
+			if (empty) {
+				empty.style.display = visible === 0 ? '' : 'none';
+			}
+		});
+	});
+</script>

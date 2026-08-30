@@ -1,0 +1,31 @@
+<div id="guild-header">
+	<div class="emblem-container">
+		<div class="guild-emblem circle">
+			<div class="images"></div>
+			<canvas class="circle" width="128" height="96"></canvas>
+		</div>
+	</div>
+
+	<div class="info">
+		<div class="char-name title is-size-3">&lt;{{name}}&gt;</div>
+		<div class="is-size-5">
+			<div>
+				Guild Master: <a href="{{websiteRoot}}/character/{{realm}}/{{leader}}">{{leader}}</a>
+			</div>
+			<div>
+				{{membersCount}} members
+			</div>
+			{{#eq faction 1}}
+			<div class="faction">
+				<img class="logo" src="{{websiteRoot}}/img/PlusManz-Alliance.png">
+				<span>Alliance</span>
+			</div>
+			{{else}}
+			<div class="faction">
+				<img class="logo" src="{{websiteRoot}}/img/PlusManz-Horde.png">
+				<span>Horde</span>
+			</div>
+			{{/eq}}
+		</div>
+	</div>
+</div>

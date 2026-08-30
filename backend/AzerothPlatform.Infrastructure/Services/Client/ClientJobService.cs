@@ -1,0 +1,221 @@
+using System.Collections.Concurrent;
+using AzerothPlatform.Core.Contracts;
+using AzerothPlatform.Core.Services.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace AzerothPlatform.Infrastructure.Services;
+
+/// <summary>
+/// Runs client file-server start/stop/restart/recreate as detached background jobs. Mirrors
+/// <see cref="ArmoryJobService"/>.
+/// </summary>
+public sealed class ClientJobService : IClientJobService
+{
+    private static readonly ConcurrentDictionary<string, ClientJobStatusDto> Jobs =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly ConcurrentDictionary<string, string> DownloadUrls =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, string> StagingArchives =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IClientEventPublisher _publisher;
+    private readonly ILogger<ClientJobService> _logger;
+
+    public ClientJobService(
+        IServiceScopeFactory scopeFactory,
+        IClientEventPublisher publisher,
+        ILogger<ClientJobService> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _publisher = publisher;
+        _logger = logger;
+    }
+
+    public ClientJobStatusDto? GetStatus(string stackId) =>
+        Jobs.TryGetValue(stackId, out var status) ? status : null;
+
+    public void ReportProgress(string stackId, string message, long? bytesCompleted = null, long? bytesTotal = null)
+    {
+        if (!Jobs.TryGetValue(stackId, out var status) || !status.IsRunning)
+        {
+            return;
+        }
+
+        status.Message = message;
+        status.BytesCompleted = bytesCompleted;
+        status.BytesTotal = bytesTotal;
+        Publish(status);
+    }
+
+    public ClientJobStatusDto Enqueue(
+        string stackId,
+        ClientJobAction action,
+        string? downloadUrl = null,
+        string? stagingArchivePath = null)
+    {
+        if (Jobs.TryGetValue(stackId, out var existing) && existing.IsRunning)
+        {
+            if (action == ClientJobAction.InstallBase && !string.IsNullOrWhiteSpace(stagingArchivePath))
+            {
+                throw new InvalidOperationException("A client operation is already running for this stack.");
+            }
+
+            return existing;
+        }
+
+        var status = new ClientJobStatusDto
+        {
+            StackId = stackId,
+            JobId = Guid.NewGuid().ToString("N"),
+            Action = action,
+            Phase = InProgressPhase(action),
+            Message = InProgressMessage(action),
+            StartedAt = DateTime.UtcNow,
+        };
+        Jobs[stackId] = status;
+        if (action == ClientJobAction.DownloadBase && !string.IsNullOrWhiteSpace(downloadUrl))
+        {
+            DownloadUrls[stackId] = downloadUrl.Trim();
+        }
+        else
+        {
+            DownloadUrls.TryRemove(stackId, out _);
+        }
+
+        if (action == ClientJobAction.InstallBase && !string.IsNullOrWhiteSpace(stagingArchivePath))
+        {
+            StagingArchives[stackId] = stagingArchivePath;
+        }
+        else
+        {
+            StagingArchives.TryRemove(stackId, out _);
+        }
+
+        Publish(status);
+
+        _ = Task.Run(() => RunAsync(stackId, action), CancellationToken.None);
+        return status;
+    }
+
+    private async Task RunAsync(string stackId, ClientJobAction action)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var stacks = scope.ServiceProvider.GetRequiredService<IStackService>();
+
+            var ok = action switch
+            {
+                ClientJobAction.Start => await stacks.StartClientAsync(stackId),
+                ClientJobAction.Stop => await stacks.StopClientAsync(stackId),
+                ClientJobAction.Restart => await stacks.RestartClientAsync(stackId),
+                ClientJobAction.Recreate => await stacks.StartClientAsync(stackId, forceRecreate: true),
+                ClientJobAction.DownloadBase => await DownloadBaseAsync(scope, stackId),
+                ClientJobAction.InstallBase => await InstallBaseAsync(scope, stackId),
+                ClientJobAction.PurgeContent => await PurgeContentAsync(scope, stackId),
+                _ => false,
+            };
+
+            if (ok)
+            {
+                Complete(stackId, success: true, message: CompletedMessage(action), error: null);
+            }
+            else
+            {
+                Complete(
+                    stackId,
+                    success: false,
+                    message: "Client operation did not complete.",
+                    error: "Stack not found or the operation returned no result.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Client {Action} job failed for stack {StackId}", action, stackId);
+            Complete(stackId, success: false, message: "Client operation failed.", error: ex.Message);
+        }
+    }
+
+    private void Complete(string stackId, bool success, string message, string? error)
+    {
+        if (!Jobs.TryGetValue(stackId, out var status))
+        {
+            return;
+        }
+
+        status.Phase = success ? ClientJobPhase.Completed : ClientJobPhase.Failed;
+        status.Message = message;
+        status.Error = error;
+        status.Success = success;
+        status.FinishedAt = DateTime.UtcNow;
+        Publish(status);
+    }
+
+    private static async Task<bool> DownloadBaseAsync(IServiceScope scope, string stackId)
+    {
+        DownloadUrls.TryRemove(stackId, out var url);
+        var client = scope.ServiceProvider.GetRequiredService<IClientService>();
+        await client.DownloadBaseClientAsync(stackId, url, CancellationToken.None);
+        return true;
+    }
+
+    private static async Task<bool> InstallBaseAsync(IServiceScope scope, string stackId)
+    {
+        if (!StagingArchives.TryRemove(stackId, out var stagingToken) || string.IsNullOrWhiteSpace(stagingToken))
+        {
+            throw new InvalidOperationException("The uploaded client archive is no longer available.");
+        }
+
+        var client = scope.ServiceProvider.GetRequiredService<IClientService>();
+        await client.InstallStagedBaseClientAsync(stackId, stagingToken, CancellationToken.None);
+        return true;
+    }
+
+    private static async Task<bool> PurgeContentAsync(IServiceScope scope, string stackId)
+    {
+        var client = scope.ServiceProvider.GetRequiredService<IClientService>();
+        await client.PurgeClientContentAsync(stackId, CancellationToken.None);
+        return true;
+    }
+
+    private void Publish(ClientJobStatusDto status) => _ = _publisher.PublishStatusAsync(status);
+
+    private static ClientJobPhase InProgressPhase(ClientJobAction action) => action switch
+    {
+        ClientJobAction.Start => ClientJobPhase.Starting,
+        ClientJobAction.Stop => ClientJobPhase.Stopping,
+        ClientJobAction.Restart => ClientJobPhase.Restarting,
+        ClientJobAction.Recreate => ClientJobPhase.Recreating,
+        ClientJobAction.DownloadBase => ClientJobPhase.Downloading,
+        ClientJobAction.InstallBase => ClientJobPhase.Installing,
+        ClientJobAction.PurgeContent => ClientJobPhase.Purging,
+        _ => ClientJobPhase.Starting,
+    };
+
+    private static string InProgressMessage(ClientJobAction action) => action switch
+    {
+        ClientJobAction.Start => "Building (if needed) and starting the client file server…",
+        ClientJobAction.Stop => "Stopping the client file server…",
+        ClientJobAction.Restart => "Restarting the client file server…",
+        ClientJobAction.Recreate => "Rebuilding the client image and restarting…",
+        ClientJobAction.DownloadBase => "Downloading the base client…",
+        ClientJobAction.InstallBase => "Extracting the client archive and copying it into the volume…",
+        ClientJobAction.PurgeContent => "Deleting all client data for this stack…",
+        _ => "Working…",
+    };
+
+    private static string CompletedMessage(ClientJobAction action) => action switch
+    {
+        ClientJobAction.Start => "Client file server started.",
+        ClientJobAction.Stop => "Client file server stopped.",
+        ClientJobAction.Restart => "Client file server restarted.",
+        ClientJobAction.Recreate => "Client rebuilt and restarted.",
+        ClientJobAction.DownloadBase => "Base client downloaded and installed.",
+        ClientJobAction.InstallBase => "Base client installed into the volume.",
+        ClientJobAction.PurgeContent => "Client data purged. Upload a base client, then reapply patches.",
+        _ => "Done.",
+    };
+}

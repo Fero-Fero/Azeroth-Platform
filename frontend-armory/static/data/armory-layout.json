@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "mode": "Template",
+  "templateId": "Default",
+  "grid": {
+    "columns": 12,
+    "rowHeight": 48,
+    "gap": 12
+  },
+  "navbar": {
+    "showSearch": true,
+    "searchPlaceholder": "Search character...",
+    "links": [
+      { "id": "nav-home", "kind": "Home", "visible": true },
+      { "id": "nav-top-logs", "kind": "TopLogs", "visible": true },
+      { "id": "nav-map", "kind": "Map", "visible": true },
+      { "id": "nav-connect", "kind": "Connect", "visible": true }
+    ]
+  },
+  "widgets": [
+    {
+      "id": "default-pt",
+      "type": "PageTitle",
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 1,
+      "visible": true
+    },
+    {
+      "id": "default-news",
+      "type": "News",
+      "x": 0,
+      "y": 1,
+      "w": 12,
+      "h": 4,
+      "visible": true,
+      "settings": {
+        "limit": 3,
+        "title": "Latest News",
+        "showViewAll": true
+      }
+    },
+    {
+      "id": "default-recent",
+      "type": "RecentCharacters",
+      "x": 0,
+      "y": 5,
+      "w": 12,
+      "h": 3,
+      "visible": true,
+      "settings": {
+        "limit": 5,
+        "title": "Recently Active"
+      }
+    },
+    {
+      "id": "default-realm",
+      "type": "RealmSelector",
+      "x": 0,
+      "y": 8,
+      "w": 12,
+      "h": 1,
+      "visible": true
+    },
+    {
+      "id": "default-search",
+      "type": "CharacterSearch",
+      "x": 0,
+      "y": 9,
+      "w": 12,
+      "h": 5,
+      "visible": true,
+      "settings": {
+        "pageLength": 50
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+---
+description: Creating temporary files and directories
+alwaysApply: true
+---
+
+# Temporary files always get cleaned up
+
+Scratch this project writes runs to gigabytes - client archives, MPQ extracts, DBC exports, armory
+image staging. Nothing may be left behind for the operating system to deal with.
+
+## Production code
+
+Create scratch with `TempWorkspace` (`backend/AzerothPlatform.Infrastructure/Services/Shared/`) and
+bind it with `using`, so the compiler owns the cleanup:
+
+```csharp
+using var scratch = TempWorkspace.CreateDirectory("patch-import");
+using var upload = TempWorkspace.CreateFile("addon-upload", ".zip");
+```
+
+Do not call `Path.GetTempPath()` or `Path.GetTempFileName()` directly. Scratch created outside
+`TempWorkspace.Root` is invisible to `TempWorkspaceSweeper`, so a process killed mid-run leaks it
+permanently rather than for at most six hours.
+
+Scratch that must live next to the data it works on (a stack root, a Docker mount) stays where it is,
+but its removal still belongs in a `finally`, never on the happy path alone.
+
+## Tests
+
+Use `TempDir` (`backend/AzerothPlatform.Tests/TestSupport/`) with `using`, or hold one in a field on an
+`IDisposable` test class. A `Directory.Delete` at the end of a test body does not run when an assertion
+fails, and the suite creates hundreds of these per run.
+
+## Agent scratch
+
+Files written to explore, reproduce, or measure something - probe scripts, sample projects, dumps -
+are deleted before the turn that created them ends, whether or not the experiment worked.

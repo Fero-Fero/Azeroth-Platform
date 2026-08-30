@@ -1,0 +1,112 @@
+#local-tooltip {
+	position: fixed;
+	z-index: 10000;
+	max-width: 320px;
+	padding: 8px 10px;
+	border: 1px solid #4a4a4a;
+	border-radius: 4px;
+	background: rgba(0, 0, 0, 0.92);
+	color: #ffd100;
+	font-size: 13px;
+	line-height: 1.4;
+	pointer-events: none;
+	display: none;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+#local-tooltip .tt-title {
+	font-weight: bold;
+	color: #ffffff;
+}
+
+#local-tooltip .tt-sub {
+	color: #ffd100;
+}
+
+#local-tooltip .tt-white {
+	color: #ffffff;
+}
+
+#local-tooltip .tt-stat {
+	color: #1eff00;
+}
+
+#local-tooltip .tt-socket {
+	color: #cccccc;
+	display: flex;
+	align-items: center;
+	margin-top: 2px;
+}
+
+#local-tooltip .tt-socket::before {
+	content: "";
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	margin-right: 6px;
+	border: 1px solid #000;
+	border-radius: 2px;
+	background: #555;
+}
+
+#local-tooltip .tt-socket-red::before { background: #c0392b; }
+#local-tooltip .tt-socket-yellow::before { background: #d4ac0d; }
+#local-tooltip .tt-socket-blue::before { background: #2e6fd6; }
+#local-tooltip .tt-socket-meta::before { background: #9b9b9b; }
+#local-tooltip .tt-socket-prismatic::before {
+	background: linear-gradient(135deg, #c0392b, #d4ac0d, #2e6fd6);
+}
+
+#local-tooltip .tt-type {
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	color: #ffffff;
+}
+
+#local-tooltip .tt-set-name {
+	color: #ffd100;
+	margin-top: 6px;
+}
+
+#local-tooltip .tt-set-member {
+	color: #9d9d9d;
+	padding-left: 8px;
+}
+
+#local-tooltip .tt-set-member.owned {
+	color: #ffffff;
+}
+
+#local-tooltip .tt-set-spacer {
+	height: 6px;
+}
+
+#local-tooltip .tt-set-bonus {
+	color: #555555;
+	padding-left: 8px;
+}
+
+#local-tooltip .tt-set-bonus.active {
+	color: #1eff00;
+}
+
+#local-tooltip .tt-desc {
+	color: #bbbbbb;
+	white-space: pre-line;
+	margin-top: 4px;
+}
+
+/* WoW item quality colors */
+#local-tooltip .tt-q0 { color: #9d9d9d; }
+#local-tooltip .tt-q1 { color: #ffffff; }
+#local-tooltip .tt-q2 { color: #1eff00; }
+#local-tooltip .tt-q3 { color: #0070dd; }
+#local-tooltip .tt-q4 { color: #a335ee; }
+#local-tooltip .tt-q5 { color: #ff8000; }
+#local-tooltip .tt-q6 { color: #e6cc80; }
+#local-tooltip .tt-q7 { color: #00ccff; }
+
+[data-tooltip] {
+	cursor: help;
+}

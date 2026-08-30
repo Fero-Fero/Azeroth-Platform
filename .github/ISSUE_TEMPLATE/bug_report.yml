@@ -1,0 +1,249 @@
+name: Bug report
+description: Something is broken in the manager, a stack, the launcher, client sync, or a related feature.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        Fill in as much of the environment section as you can. Server type, where the stack runs, modules, and addons are usually what we need to reproduce a failure.
+
+        **Do not paste passwords, SSH keys, cloud tokens, `.env` files, or account credentials.** Redact them from logs.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched [existing issues](https://github.com/Fero-Fero/AzerothPlatform/issues) and this is not a duplicate.
+          required: true
+        - label: I checked [Troubleshooting](https://github.com/Fero-Fero/AzerothPlatform/blob/main/README.technical.md#7-troubleshooting) and this is not a known setup problem.
+          required: true
+        - label: This report does not contain secrets (passwords, keys, tokens).
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where the problem shows up.
+      options:
+        - Manager UI / dashboard
+        - Stack create / wizard
+        - Stack build / compile
+        - Stack start / stop / runtime
+        - Modules
+        - Patches / migrations / server-wide progression
+        - Client upload / download / sync
+        - Addons
+        - Launcher
+        - Armory
+        - Accounts / characters
+        - Cloud / external host
+        - Install / update of the platform itself
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you saw, including the exact error text if the UI showed one.
+      placeholder: e.g. Applying patch 1.1 failed with "MPQ build failed for Patch-W.MPQ"…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: e.g. The patch should apply and clients should receive Patch-W.MPQ.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from a known starting point (fresh stack, existing stack, after an update, …).
+      placeholder: |
+        1. Create a stack with Express Setup (local)
+        2. Wait until Overview shows Setup and Launch
+        3. …
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: "## Environment"
+
+  - type: dropdown
+    id: host_os
+    attributes:
+      label: Manager host OS
+      description: The machine that runs the Azeroth Platform containers (`azeroth-platform`), not the game client.
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: docker_version
+    attributes:
+      label: Docker
+      description: "Output of `docker version` (Engine / Desktop) and whether this is Docker Desktop or Docker Engine."
+      placeholder: Docker Desktop 4.x / Engine 27.x
+
+  - type: input
+    id: platform_version
+    attributes:
+      label: Platform version
+      description: Image tag, git commit, or how you installed (e.g. `install-platform.bat` from main, a release tag, a local build).
+      placeholder: main @ abc1234 / azeroth-platform:latest / vX.Y
+
+  - type: dropdown
+    id: server_type
+    attributes:
+      label: Server type
+      description: The type chosen when the stack was created. Use N/A if this is only about the manager, launcher, or install.
+      options:
+        - Express Setup
+        - Standard
+        - Playerbots
+        - NPCBots
+        - Individual Progression
+        - Custom Fork
+        - N/A (not stack-specific)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Local / external
+      description: Where the game stack runs. Cloud stacks are external hosts the platform provisioned.
+      options:
+        - Local (this machine)
+        - External SSH (self-managed remote)
+        - Cloud — DigitalOcean
+        - Cloud — Hetzner
+        - Cloud — Vultr
+        - Cloud — AWS
+        - Cloud — GCP
+        - Cloud — Azure
+        - N/A (not stack-specific)
+    validations:
+      required: true
+
+  - type: input
+    id: remote_os
+    attributes:
+      label: Remote host OS (external / cloud only)
+      description: Distro and version of the machine that runs auth/world/db, if not local.
+      placeholder: Ubuntu 24.04 / Debian 12 / …
+
+  - type: input
+    id: custom_fork
+    attributes:
+      label: Custom fork (Custom Fork server type only)
+      description: Repository URL and branch the stack builds from.
+      placeholder: https://github.com/org/azerothcore-wotlk.git @ my-branch
+
+  - type: textarea
+    id: modules
+    attributes:
+      label: Modules
+      description: Extra modules enabled on this stack (beyond what the server type already requires). One per line is fine.
+      placeholder: |
+        mod-ah-bot
+        mod-ale
+        …
+
+  - type: textarea
+    id: addons
+    attributes:
+      label: Addons
+      description: Server-pushed or curated addons enabled for this stack. Leave blank if none.
+      placeholder: |
+        DBM
+        Questie
+        …
+
+  - type: dropdown
+    id: progression
+    attributes:
+      label: Server-wide progression
+      options:
+        - Not used
+        - Enabled
+        - Unsure
+        - N/A
+
+  - type: textarea
+    id: patches
+    attributes:
+      label: Patches
+      description: Custom patches applied (name / index), or "none". Mention MPQ / DBC / SQL / map if you know which part failed.
+      placeholder: patch 1.1, patch 1.2 my_content, none
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client / launcher
+      description: Whether a client base is uploaded and whether players use the platform launcher.
+      options:
+        - No client uploaded
+        - Client uploaded, no launcher
+        - Client uploaded, platform launcher
+        - Unsure
+        - N/A
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Logs
+
+        Paste the **error line** and ~50 lines of context. Prefer the manager log for UI/build/apply failures, and the worldserver/authserver log for in-game or boot failures.
+
+        ```bash
+        docker compose logs --tail 200 azeroth-platform
+        ```
+
+        Stack container logs are also on the stack **Logs** tab.
+
+  - type: textarea
+    id: error_message
+    attributes:
+      label: Error / log message
+      description: The exact message from the UI, job, or log. Paste even if you also attach a screenshot.
+      render: shell
+      placeholder: |
+        fail: … MPQ build failed for Patch-W.MPQ …
+    validations:
+      required: true
+
+  - type: textarea
+    id: manager_logs
+    attributes:
+      label: Manager logs
+      description: "`docker compose logs --tail 200 azeroth-platform` (or `docker logs azeroth-platform`). Redact secrets."
+      render: shell
+
+  - type: textarea
+    id: extra_logs
+    attributes:
+      label: Other logs
+      description: worldserver, authserver, browser console (F12), or launcher output if they are relevant.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots (drag and drop), first time vs after an update, disk/RAM notes, or a guess at the cause.

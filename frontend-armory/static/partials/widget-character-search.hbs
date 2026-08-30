@@ -1,0 +1,122 @@
+{{> widget-search-realm-picker realms=realms}}
+
+<br>
+<table id="results" class="stripe hover row-border">
+	<thead>
+		<tr>
+			<th>Name</th>
+			<th>Online</th>
+			<th>Level</th>
+			<th>Class</th>
+			<th>Race</th>
+			<th>Guild</th>
+			<th>Money</th>
+			<th>Time</th>
+			<th>Zone</th>
+			<th>Areas</th>
+		</tr>
+	</thead>
+	<tbody></tbody>
+</table>
+
+<script type="application/javascript">
+	$(window).on("load", async () => {
+		let dt;
+
+		$("#select-realm").on("change", () => {
+			dt.draw();
+		});
+
+        let zoneNamesMap = {};
+        try {
+            const response = await fetch('/data/meta/zone_names.json');
+            if (response.ok) {
+                zoneNamesMap = await response.json();
+            }
+        } catch {
+            zoneNamesMap = {};
+        }
+
+		const formatMoney = (money) => {
+            const gold = Math.floor(money / (100 * 100));
+            const silver = Math.floor((money / 100) % 100);
+            const bronze = Math.floor(money % 100);
+            return `${gold} 🟡 ${silver} ⚪ ${bronze} 🟠`;
+		};
+        const formatTime = (time) => {
+            const hours = Math.floor(time / (60 * 60));
+            const minutes = Math.floor((time / 60) % 60);
+            const seconds = Math.floor(time % 60);
+            if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+            if (minutes > 0) return `${minutes}m ${seconds}s`;
+            return `${seconds}s`;
+        };
+
+		const initialSearch = new URLSearchParams(location.search).get("q") || "";
+		const pageLength = {{pageLength}};
+
+		dt = $("#results").DataTable({
+			processing: true,
+			serverSide: true,
+			searchDelay: 800,
+            lengthMenu: [50, 100],
+			pageLength: pageLength,
+			search: { search: initialSearch },
+			ajax: {
+				url: `{{websiteRoot}}/search`,
+				data: d => {
+					const selected = $("#select-realm").val();
+					d.realm = selected || {{#if defaultRealm}}"{{defaultRealm}}"{{else}}""{{/if}};
+				},
+			},
+			columnDefs: [
+				{
+					targets: 0,
+					render: (name, type, row, meta) => `<a href="{{websiteRoot}}/character/${meta.settings.json.realm}/${name}">${name}</a>`,
+				},
+                {
+                    searchable: false,
+                    targets: 1,
+                    render: online => online ? "🟢" : "🔴",
+                },
+				{
+					searchable: false,
+					targets: 3,
+					render: data => `<img src="{{websiteRoot}}/img/icons/class_${data}.jpg">`,
+				},
+				{
+					searchable: false,
+					targets: 4,
+					render: data => `<img src="{{websiteRoot}}/img/icons/race_${data}.jpg">`,
+				},
+                {
+                    targets: 5,
+                    render: (guild, type, row, meta) => guild === null ? "" : `<a href="{{websiteRoot}}/guild/${meta.settings.json.realm}/${guild}">${guild}</a>`,
+                },
+				{
+					searchable: false,
+					targets: 6,
+					render: money => formatMoney(money),
+				},
+                {
+                    searchable: false,
+                    targets: 7,
+                    render: totaltime => formatTime(totaltime),
+                },
+                {
+                    searchable: false,
+                    targets: 8,
+                    render: zone => zoneNamesMap[`${zone}`] ?? '',
+                },
+                {
+                    searchable: false,
+                    targets: 9,
+                    render: exploredZones => exploredZones,
+                },
+			],
+			responsive: {
+				details: true,
+			},
+		});
+	});
+</script>

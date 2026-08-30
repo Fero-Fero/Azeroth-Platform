@@ -1,0 +1,12 @@
+{{#if (not (equalsLength realms 1))}}
+<div id="select-realm-container" class="search-realm-picker">
+	<span class="realm-label">Realm:</span>
+	<div class="select">
+		<select id="select-realm">
+			{{#each realms}}
+			<option>{{this}}</option>
+			{{/each}}
+		</select>
+	</div>
+</div>
+{{/if}}

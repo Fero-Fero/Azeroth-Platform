@@ -1,0 +1,18 @@
+{{#if recentCharacters.length}}
+<div class="armory-panel">
+	<div class="panel-title">{{widgetTitle}}</div>
+	<div class="panel-body">
+		<div class="recent-characters">
+			{{#each recentCharacters}}
+			<a class="recent-card" href="{{../websiteRoot}}/character/{{this.realm}}/{{this.name}}">
+				<img src="{{../websiteRoot}}/img/icons/class_{{this.classIcon}}.jpg" alt="{{this.classIcon}}">
+				<span>
+					<span class="recent-name">{{this.name}}</span><br>
+					<span class="recent-sub">Level {{this.level}}{{#if this.guild}} &middot; &lt;{{this.guild}}&gt;{{/if}}</span>
+				</span>
+			</a>
+			{{/each}}
+		</div>
+	</div>
+</div>
+{{/if}}
