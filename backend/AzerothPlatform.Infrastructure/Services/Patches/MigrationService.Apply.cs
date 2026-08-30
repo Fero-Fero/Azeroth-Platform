@@ -453,7 +453,8 @@ public sealed partial class MigrationService
                 var metadata = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
                 if (metadata is not null)
                 {
-                    await _serverWideProgression.OnPatchAppliedAsync(stackId, metadata, result.Log, cancellationToken);
+                    await _serverWideProgression.OnPatchAppliedAsync(
+                        stackId, patch.Key, metadata, result.Log, cancellationToken);
                 }
             }, cancellationToken);
 

@@ -23,6 +23,7 @@ public interface IServerWideProgressionService
 
     Task OnPatchAppliedAsync(
         string stackId,
+        string patchKey,
         PatchProgressionMetadataDto metadata,
         IList<string> applyLog,
         CancellationToken cancellationToken = default);

@@ -173,6 +173,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
     public async Task OnPatchAppliedAsync(
         string stackId,
+        string patchKey,
         PatchProgressionMetadataDto metadata,
         IList<string> applyLog,
         CancellationToken cancellationToken = default)
@@ -211,7 +212,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             applyLog.Add("Individual Progression: START patch applied - progression counters unchanged.");
         }
 
-        var expansion = ResolveExpansionForPatch(metadata);
+        var expansion = ResolveExpansionForPatch(metadata, patchKey);
         if (expansion is not null)
         {
             await SetConfigValueAsync(stackId, settings.WorldserverConfPath, settings.ExpansionKey, expansion, cancellationToken);
@@ -448,13 +449,68 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             "Individual Progression patch validation is required. Run progression sync, rebuild the server if needed, then click Validate patches.");
     }
 
-    private static string? ResolveExpansionForPatch(PatchProgressionMetadataDto metadata) => metadata.Expansion switch
+    /// <summary>
+    /// 1.9 / 2.9 pre-patches raise worldserver Expansion so TBC/WotLK races and content can
+    /// unlock before the 2.0 / 3.0 raid openers. Those content patches must not change it again.
+    /// Express has no pre-patches, so catalog 2.0 PRE_TBC / 3.0 WOTLK_TIER_1 still raise it.
+    /// </summary>
+    internal static string? ResolveExpansionForPatch(
+        PatchProgressionMetadataDto metadata,
+        string? patchKey = null)
     {
-        "classic" when metadata.State == 0 => "0",
-        "tbc" when metadata.State == 8 => "1",
-        "wotlk" when metadata.State == 14 => "2",
-        _ => null,
-    };
+        if (PatchFolderNames.TryParse(patchKey, out var index, out var label))
+        {
+            if (IsPrePatch(index, label))
+            {
+                return index.ExpansionRoot switch
+                {
+                    1 => "1",
+                    2 => "2",
+                    _ => null,
+                };
+            }
+
+            if (index.IsExpansionBaseline && index.ExpansionRoot is 2 or 3 && !IsExpressCatalogOpener(label))
+            {
+                return null;
+            }
+        }
+
+        return metadata.Expansion switch
+        {
+            "classic" when metadata.State == 0 => "0",
+            "tbc" when metadata.State == 8 => "1",
+            "wotlk" when metadata.State == 14 => "2",
+            _ => null,
+        };
+    }
+
+    private static bool IsPrePatch(PatchIndex index, string? label)
+    {
+        if (index.Sub1 == 9 && index.Sub2 == 0 && index.ComponentCount == 2)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return false;
+        }
+
+        return label.Replace('-', ' ').Contains("pre patch", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsExpressCatalogOpener(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return true;
+        }
+
+        var normalized = label.Trim().Replace(' ', '_').Replace('-', '_');
+        return normalized.Equals("PRE_TBC", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("WOTLK_TIER_1", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string IncrementConfigValue(ServerWideProgressionSettingsDto settings, string key)
     {

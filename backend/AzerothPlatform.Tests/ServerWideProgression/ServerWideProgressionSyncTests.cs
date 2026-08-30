@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Configuration;
@@ -68,21 +69,33 @@ public sealed class ServerWideProgressionSyncLogicTests
     }
 
     [Theory]
-    [InlineData(0, "classic", false, "0")]
-    [InlineData(1, "classic", true, null)]
-    [InlineData(8, "tbc", true, "1")]
-    [InlineData(14, "wotlk", true, "2")]
-    public void ResolveExpansionForPatch_sets_boundaries(int state, string expansion, bool increments, string? expectedExpansion)
+    [InlineData(0, "classic", "START", false, null, "0")]
+    [InlineData(1, "classic", "MOLTEN_CORE", true, null, null)]
+    [InlineData(8, "tbc", "PRE_TBC", true, null, "1")]
+    [InlineData(14, "wotlk", "WOTLK_TIER_1", true, null, "2")]
+    [InlineData(8, "tbc", "PRE_TBC", true, "patch 2.0 PRE_TBC", "1")]
+    [InlineData(8, "tbc", "PRE_TBC", true, "patch 2.0 Karazhan, Gruul's Lair, Magtheridon's Lair", null)]
+    [InlineData(0, "classic", "PRE_PATCH", true, "patch 1.9 Pre Patch", "1")]
+    [InlineData(12, "tbc", "PRE_PATCH", true, "patch 2.9 Pre Patch", "2")]
+    [InlineData(14, "wotlk", "WOTLK_TIER_1", true, "patch 3.0 WOTLK_TIER_1", "2")]
+    [InlineData(14, "wotlk", "WOTLK_TIER_1", true, "patch 3.0 Naxxramas, Eye of Eternity, Obsidian Sanctum", null)]
+    public void ResolveExpansionForPatch_sets_boundaries(
+        int state,
+        string expansion,
+        string slug,
+        bool increments,
+        string? patchKey,
+        string? expectedExpansion)
     {
         var metadata = new PatchProgressionMetadataDto
         {
             State = state,
-            Slug = "TEST",
+            Slug = slug,
             Expansion = expansion,
             IncrementsProgression = increments,
         };
 
-        var result = InvokeResolveExpansion(metadata);
+        var result = InvokeResolveExpansion(metadata, patchKey);
         result.Should().Be(expectedExpansion);
     }
 
@@ -98,11 +111,11 @@ public sealed class ServerWideProgressionSyncLogicTests
         result.Should().Be("4");
     }
 
-    private static string? InvokeResolveExpansion(PatchProgressionMetadataDto metadata)
+    private static string? InvokeResolveExpansion(PatchProgressionMetadataDto metadata, string? patchKey = null)
     {
         var method = typeof(ServerWideProgressionService)
             .GetMethod("ResolveExpansionForPatch", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (string?)method!.Invoke(null, [metadata]);
+        return (string?)method!.Invoke(null, [metadata, patchKey]);
     }
 
     private static string InvokeResolveProgressionRepoDirectory(ServerWideProgressionService service, string stackRoot)
@@ -659,6 +672,34 @@ public sealed class ProgressionRepoPatchSeederTests
         Directory.Exists(stackPatchDir).Should().BeTrue();
         File.Exists(Path.Combine(stackPatchDir, "description.md")).Should().BeTrue();
         File.Exists(Path.Combine(stackPatchDir, "progression.json")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Seed_does_not_tag_karazhan_as_express_pre_tbc()
+    {
+        using var repo = new TempDirectoryWrapper();
+        using var stack = new TempDirectoryWrapper();
+
+        EnsureExpansionRoots(repo.Path);
+        CreateReferencePatch(repo.Path, "Tbc", "2.0 Karazhan, Gruul's Lair, Magtheridon's Lair");
+        CreateReferencePatch(repo.Path, "Classic", "1.9 Pre Patch");
+
+        ProgressionRepoPatchSeeder.Seed(repo.Path, stack.Path, onlyMissing: false);
+
+        var karazhanJson = File.ReadAllText(Path.Combine(
+            stack.Path, "migrations", "patch 2.0 Karazhan, Gruul's Lair, Magtheridon's Lair", "progression.json"));
+        var karazhan = JsonSerializer.Deserialize<PatchProgressionMetadataDto>(
+            karazhanJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        karazhan.Should().NotBeNull();
+        karazhan!.Slug.Should().NotBe("PRE_TBC");
+        karazhan.State.Should().NotBe(8);
+
+        var prePatchJson = File.ReadAllText(Path.Combine(
+            stack.Path, "migrations", "patch 1.9 Pre Patch", "progression.json"));
+        var prePatch = JsonSerializer.Deserialize<PatchProgressionMetadataDto>(
+            prePatchJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        prePatch.Should().NotBeNull();
+        prePatch!.Slug.Should().Be("PRE_PATCH");
     }
 
     [Fact]

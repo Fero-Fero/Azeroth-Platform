@@ -77,8 +77,48 @@ internal static class ProgressionRepoPatchSeeder
         out string patchKey,
         out ProgressionPatchDefinition? definition)
     {
-        definition = ProgressionPatchFolderResolver.MatchDefinition(expansion, patchFolderName, catalog);
+        definition = CatalogDefinitionForMetadata(expansion, patchFolderName, catalog);
         return ProgressionPatchNaming.TryFormatPatchKey(patchFolderName, out patchKey);
+    }
+
+    private static ProgressionPatchDefinition? CatalogDefinitionForMetadata(
+        string expansion,
+        string patchFolderName,
+        IReadOnlyList<ProgressionPatchDefinition> catalog)
+    {
+        var definition = ProgressionPatchFolderResolver.MatchDefinition(expansion, patchFolderName, catalog);
+        if (definition is null)
+        {
+            return null;
+        }
+
+        var (_, label) = ProgressionPatchNaming.SplitPatchSegment(patchFolderName);
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return definition;
+        }
+
+        // Index-only matches (2.0 Karazhan vs catalog 2.0 PRE_TBC) must not inherit Express metadata.
+        if (LabelsAgree(definition.Title, label) || LabelsAgree(definition.Slug.Replace('_', ' '), label))
+        {
+            return definition;
+        }
+
+        return null;
+    }
+
+    private static bool LabelsAgree(string catalog, string repo)
+    {
+        var a = catalog.Trim();
+        var b = repo.Trim();
+        if (a.Length == 0 || b.Length == 0)
+        {
+            return false;
+        }
+
+        return a.Equals(b, StringComparison.OrdinalIgnoreCase)
+            || b.Contains(a, StringComparison.OrdinalIgnoreCase)
+            || a.Contains(b, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void CopyDescription(string referencePatchDir, string stackPatchDir)

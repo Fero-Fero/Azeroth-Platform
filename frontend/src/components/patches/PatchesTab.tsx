@@ -26,7 +26,7 @@ import {
 } from '@/hooks/usePatches'
 import { stackKeys, useStackDetail } from '@/hooks/useStacks'
 import { ServerType } from '@/types/stack.types'
-import type { PatchStatus, PatchFileDto, Expansion, ImportPatchCollectionMode, PatchKind, PatchSummaryDto } from '@/types/patch.types'
+import type { PatchStatus, PatchFileDto, Expansion, ImportPatchCollectionMode, PatchKind, PatchSummaryDto, PatchConfigOverrideDto } from '@/types/patch.types'
 import PatchFileCategory from './PatchFileCategory'
 import PatchConfigOverridesPreview, {
   PatchConfigOverridesPreviewButton,
@@ -42,7 +42,7 @@ import PatchesFolderBrowser from './PatchesFolderBrowser'
 import ProgressionSyncPanel from './ProgressionSyncPanel'
 import FirstPatchSetupBanner from './FirstPatchSetupBanner'
 import DbcBaselinePanel from './DbcBaselinePanel'
-import type { ServerWideProgressionValidationResult } from '@/types/server-wide-progression.types'
+import type { ServerWideProgressionValidationResult, PatchProgressionMetadata } from '@/types/server-wide-progression.types'
 import { SyncWithIndividualProgressionLabel, WipBadge } from '@/components/common/WipBadge'
 import { useLauncherConfig, useLauncherTemplates } from '@/hooks/useLauncher'
 
@@ -145,6 +145,40 @@ function hasExpansionEntryPoint(index: string): boolean {
 function isExpansionBaselineIndex(index: string): boolean {
   const parts = parsePatchIndex(index)
   return (parts.length === 1 || parts.length === 2) && (parts[1] ?? 0) === 0
+}
+
+function isExpressCatalogOpenerLabel(label: string): boolean {
+  const rest = label.replace(/^\d+(?:\.\d+)*\s*/, '').trim()
+  if (!rest) return true
+  const normalized = rest.replace(/[-\s]/g, '_').toUpperCase()
+  return normalized === 'PRE_TBC' || normalized === 'WOTLK_TIER_1'
+}
+
+function resolveExpansionOnApply(
+  meta: PatchProgressionMetadata,
+  index: string,
+  patchKey: string | undefined,
+  configOverrides: PatchConfigOverrideDto[] | undefined
+): string | null {
+  const fromConfig = configOverrides?.find((entry) => entry.key.toLowerCase() === 'expansion')?.value
+  if (fromConfig) return fromConfig
+
+  const label = (patchKey ?? '').replace(/^patch\s+/i, '')
+  const isPrePatch = index === '1.9' || index === '2.9' || /pre[-\s]patch/i.test(label)
+  if (isPrePatch) {
+    if (index === '1.9' || index.startsWith('1.')) return '1'
+    if (index === '2.9' || index.startsWith('2.')) return '2'
+  }
+
+  const root = parsePatchIndex(index)[0]
+  if (isExpansionBaselineIndex(index) && (root === 2 || root === 3) && !isExpressCatalogOpenerLabel(label)) {
+    return null
+  }
+
+  if (meta.expansion === 'classic' && meta.state === 0) return '0'
+  if (meta.expansion === 'tbc' && meta.state === 8) return '1'
+  if (meta.expansion === 'wotlk' && meta.state === 14) return '2'
+  return null
 }
 
 function nextPatchIndex(
@@ -949,10 +983,10 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const applyProgressionPreview = (() => {
     const meta = detail?.progression
     if (!meta) return null
-    let nextExpansion: string | null = null
-    if (meta.expansion === 'tbc' && meta.state === 8) nextExpansion = '1'
-    if (meta.expansion === 'wotlk' && meta.state === 14) nextExpansion = '2'
-    return { meta, nextExpansion }
+    return {
+      meta,
+      nextExpansion: resolveExpansionOnApply(meta, detail.index, detail.key, detail.configOverrides),
+    }
   })()
 
   return (
