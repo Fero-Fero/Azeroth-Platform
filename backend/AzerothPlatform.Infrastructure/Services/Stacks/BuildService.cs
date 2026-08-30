@@ -1157,6 +1157,8 @@ public sealed class BuildService : IBuildService
                 var revisions = snapshotScope.ServiceProvider.GetRequiredService<IRevisionService>();
                 var snapshot = await revisions.CreateAsync(stackId, "pre-update", cancellationToken);
                 preUpdateRevisionId = snapshot.Id;
+                await UpdateBuildStatusAsync(stackId, BuildPhase.Cloning, 5, "Tagging current server images as the restore checkpoint...", null);
+                await revisions.PreserveCheckpointImagesAsync(stackId, snapshot.Id, cancellationToken);
                 _logger.LogInformation(
                     "Pre-update snapshot {RevisionId} created for stack {StackId}", preUpdateRevisionId, stackId);
             }
@@ -2274,22 +2276,9 @@ public sealed class BuildService : IBuildService
             await AddLogAsync(stackId, $"Restoring pre-update snapshot {revisionId}...");
 
             using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AzerothCoreDbContext>();
             var revisions = scope.ServiceProvider.GetRequiredService<IRevisionService>();
 
             await revisions.RestoreAsync(stackId, revisionId, CancellationToken.None);
-
-            var revision = await dbContext.StackRevisions
-                .SingleOrDefaultAsync(r => r.Id == revisionId && r.StackId == stackId);
-            var stack = await dbContext.ManagedStacks.SingleOrDefaultAsync(s => s.Id == stackId);
-            if (revision is not null && stack is not null)
-            {
-                stack.CoreCommitSha = revision.CoreCommitSha;
-                stack.ModuleVersionsJson = revision.ModuleVersionsJson;
-                stack.AppliedPatchLevel = revision.AppliedPatchLevel;
-                stack.AppliedPatchesJson = revision.AppliedPatchesJson;
-                await dbContext.SaveChangesAsync(CancellationToken.None);
-            }
 
             _logger.LogInformation(
                 "Automatic rollback to pre-update snapshot {RevisionId} completed for stack {StackId}",

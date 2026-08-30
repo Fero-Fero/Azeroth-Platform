@@ -15,10 +15,9 @@ using Microsoft.Extensions.Options;
 namespace AzerothPlatform.Infrastructure.Services;
 
 /// <summary>
-/// Creates and restores point-in-time snapshots of a stack's databases + server config. Dumps are
-/// captured with <c>mysqldump</c> in the stack's database container and written straight to disk
-/// under <c>{stackRoot}/revisions/{id}/</c>; restore drops/recreates the databases and pipes each
-/// dump back through the <c>mysql</c> client, then restores the snapshotted .conf files.
+/// Creates and restores point-in-time snapshots of a stack's databases, server config, and
+/// (for pre-update checkpoints) Docker images. Dumps are captured with <c>mysqldump</c> in the
+/// stack's database container and written under <c>{stackRoot}/revisions/{id}/</c>.
 /// </summary>
 public sealed class RevisionService : IRevisionService
 {
@@ -34,15 +33,21 @@ public sealed class RevisionService : IRevisionService
 
     private readonly AzerothCoreDbContext _dbContext;
     private readonly DockerOptions _dockerOptions;
+    private readonly IStackVersionService _versionService;
+    private readonly IStackImageShippingService _imageShipping;
     private readonly ILogger<RevisionService> _logger;
 
     public RevisionService(
         AzerothCoreDbContext dbContext,
         IOptions<DockerOptions> dockerOptions,
+        IStackVersionService versionService,
+        IStackImageShippingService imageShipping,
         ILogger<RevisionService> logger)
     {
         _dbContext = dbContext;
         _dockerOptions = dockerOptions.Value;
+        _versionService = versionService;
+        _imageShipping = imageShipping;
         _logger = logger;
     }
 
@@ -137,6 +142,59 @@ public sealed class RevisionService : IRevisionService
         }
     }
 
+    public async Task PreserveCheckpointImagesAsync(
+        string stackId, string revisionId, CancellationToken cancellationToken = default)
+    {
+        await GetStackAsync(stackId, cancellationToken);
+
+        var previous = await _dbContext.StackRevisions
+            .Where(r => r.StackId == stackId
+                        && r.Id != revisionId
+                        && r.Reason == "pre-update"
+                        && r.Status == "ready")
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var oldId in previous)
+        {
+            await UntagCheckpointImagesAsync(stackId, oldId, cancellationToken);
+        }
+
+        var tagged = 0;
+        foreach (var canonical in RevisionCheckpointImages.CanonicalTags(stackId))
+        {
+            if (!await ImageExistsAsync(canonical, cancellationToken))
+            {
+                continue;
+            }
+
+            var checkpoint = RevisionCheckpointImages.CheckpointTag(canonical, revisionId);
+            var taggedOk = await TryDockerAsync($"tag {canonical} {checkpoint}", cancellationToken);
+            if (taggedOk)
+            {
+                tagged++;
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Could not tag {Canonical} as checkpoint {Checkpoint} for stack {StackId}",
+                    canonical, checkpoint, stackId);
+            }
+        }
+
+        if (tagged == 0)
+        {
+            _logger.LogWarning(
+                "No stack images found to checkpoint for revision {RevisionId} on stack {StackId}",
+                revisionId, stackId);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Preserved {Count} image tag(s) for revision {RevisionId} on stack {StackId}",
+            tagged, revisionId, stackId);
+    }
+
     public async Task RestoreAsync(string stackId, string revisionId, CancellationToken cancellationToken = default)
     {
         var stack = await GetStackAsync(stackId, cancellationToken);
@@ -159,6 +217,7 @@ public sealed class RevisionService : IRevisionService
 
         _logger.LogInformation("Restoring revision {RevisionId} into stack {StackId}", revisionId, stackId);
 
+        await StopWorldAndAuthAsync(stackId, cancellationToken);
         await EnsureDatabaseUpAsync(stackId, stack.StackName, stack.DatabaseRootPassword, cancellationToken);
         var container = DbContainer(stackId, stack.StackName);
 
@@ -206,6 +265,44 @@ public sealed class RevisionService : IRevisionService
             }
         }
 
+        var restoredImages = await RestoreCheckpointImagesAsync(stackId, revisionId, cancellationToken);
+        if (!restoredImages)
+        {
+            _logger.LogWarning(
+                "Revision {RevisionId} has no checkpoint images; databases and config were restored without reverting server binaries.",
+                revisionId);
+        }
+
+        RevisionVersionRestore.ApplySnapshotMetadata(stack, revision);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _versionService.CheckAndCacheStatusAsync(stackId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Update check after restoring revision {RevisionId} failed for stack {StackId}", revisionId, stackId);
+            RevisionVersionRestore.MarkOutdatedWhenCheckFails(stack);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (stack.DeploymentTarget == DeploymentTarget.External)
+        {
+            try
+            {
+                await _imageShipping.ShipStackImagesAsync(
+                    stack, includeArmory: stack.IncludeArmory, includeClient: true, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to ship restored images to the remote engine for stack {StackId}",
+                    stackId);
+            }
+        }
+
         _logger.LogInformation("Restored revision {RevisionId} into stack {StackId}", revisionId, stackId);
     }
 
@@ -220,6 +317,7 @@ public sealed class RevisionService : IRevisionService
 
         TryDeleteDirectory(MigrationLayout.RevisionDir(GetStackRoot(stackId), revisionId));
         _dbContext.StackRevisions.Remove(revision);
+        await UntagCheckpointImagesAsync(stackId, revisionId, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Deleted revision {RevisionId} for stack {StackId}", revisionId, stackId);
     }
@@ -243,6 +341,92 @@ public sealed class RevisionService : IRevisionService
     {
         var stack = await _dbContext.ManagedStacks.SingleOrDefaultAsync(s => s.Id == stackId, cancellationToken);
         return stack ?? throw new KeyNotFoundException($"Stack not found: {stackId}");
+    }
+
+    private async Task StopWorldAndAuthAsync(string stackId, CancellationToken cancellationToken)
+    {
+        var repoPath = RepoPath(stackId);
+        if (!Directory.Exists(repoPath))
+        {
+            return;
+        }
+
+        try
+        {
+            await RunComposeAsync(stackId, "stop ac-worldserver ac-authserver", repoPath, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not stop world/auth before restoring stack {StackId}", stackId);
+        }
+    }
+
+    private async Task<bool> RestoreCheckpointImagesAsync(
+        string stackId, string revisionId, CancellationToken cancellationToken)
+    {
+        var restored = 0;
+        foreach (var canonical in RevisionCheckpointImages.CanonicalTags(stackId))
+        {
+            var checkpoint = RevisionCheckpointImages.CheckpointTag(canonical, revisionId);
+            if (!await ImageExistsAsync(checkpoint, cancellationToken))
+            {
+                continue;
+            }
+
+            if (await TryDockerAsync($"tag {checkpoint} {canonical}", cancellationToken))
+            {
+                restored++;
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Could not restore checkpoint image {Checkpoint} onto {Canonical} for stack {StackId}",
+                    checkpoint, canonical, stackId);
+            }
+        }
+
+        if (restored > 0)
+        {
+            _logger.LogInformation(
+                "Restored {Count} checkpoint image(s) for revision {RevisionId} on stack {StackId}",
+                restored, revisionId, stackId);
+        }
+
+        return restored > 0;
+    }
+
+    private async Task UntagCheckpointImagesAsync(
+        string stackId, string revisionId, CancellationToken cancellationToken)
+    {
+        foreach (var canonical in RevisionCheckpointImages.CanonicalTags(stackId))
+        {
+            var checkpoint = RevisionCheckpointImages.CheckpointTag(canonical, revisionId);
+            if (!await ImageExistsAsync(checkpoint, cancellationToken))
+            {
+                continue;
+            }
+
+            if (!await TryDockerAsync($"rmi {checkpoint}", cancellationToken))
+            {
+                _logger.LogWarning(
+                    "Could not untag checkpoint image {Checkpoint} for stack {StackId}",
+                    checkpoint, stackId);
+            }
+        }
+    }
+
+    private static string DockerCli => File.Exists("/usr/bin/podman") ? "podman" : "docker";
+
+    private async Task<bool> ImageExistsAsync(string tag, CancellationToken cancellationToken)
+    {
+        var run = await RunProcessAsync(DockerCli, $"images -q {tag}", stdin: null, cancellationToken);
+        return run.ExitCode == 0 && !string.IsNullOrWhiteSpace(run.StdOut);
+    }
+
+    private async Task<bool> TryDockerAsync(string arguments, CancellationToken cancellationToken)
+    {
+        var run = await RunProcessAsync(DockerCli, arguments, stdin: null, cancellationToken);
+        return run.ExitCode == 0;
     }
 
     private static string DbContainer(string stackId, string? stackName) =>

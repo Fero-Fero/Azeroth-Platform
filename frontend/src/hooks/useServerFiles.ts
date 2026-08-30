@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { luaApi, revisionApi, serverConfigApi } from '@/services/api'
+import { stackKeys } from '@/hooks/useStacks'
 
 // ===== Lua scripts =====
 
@@ -105,7 +106,8 @@ export function useRestoreRevision(stackId: string) {
     mutationFn: async (revisionId: string) => (await revisionApi.restore(stackId, revisionId)).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['revisions', stackId] })
-      qc.invalidateQueries({ queryKey: ['stacks'] })
+      qc.invalidateQueries({ queryKey: stackKeys.all })
+      qc.invalidateQueries({ queryKey: stackKeys.detail(stackId) })
     },
   })
 }

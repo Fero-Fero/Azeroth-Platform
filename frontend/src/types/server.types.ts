@@ -37,7 +37,7 @@ export interface ServerConfigContentDto {
   content: string
 }
 
-// Point-in-time snapshot of a stack's databases + server config
+// Point-in-time snapshot of a stack's databases, server config, and optional checkpoint images
 export interface RevisionDto {
   id: string
   stackId: string

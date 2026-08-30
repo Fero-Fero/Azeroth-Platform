@@ -20,6 +20,7 @@ export default function UpdateStackDialog({
   isUpdating,
 }: UpdateStackDialogProps) {
   const [configMigrationMode, setConfigMigrationMode] = useState<ConfigMigrationMode>('Merge')
+  const [acknowledged, setAcknowledged] = useState(false)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -35,13 +36,14 @@ export default function UpdateStackDialog({
 
         <div className="px-6 py-4 space-y-4">
           <p className="text-gray-700">
-            You are about to update <strong>{stackName}</strong> to the latest version.
+            You are about to update <strong>{stackName}</strong> to the latest version. AzerothCore
+            and compiled modules are rebuilt from source. The stack is stopped first, so players
+            are disconnected. This typically takes 10–30 minutes.
           </p>
 
-          {/* CI Build Status */}
           {updateStatus.latestCoreBuildStatus && (
-            <CiBuildStatusBadge 
-              status={updateStatus.latestCoreBuildStatus} 
+            <CiBuildStatusBadge
+              status={updateStatus.latestCoreBuildStatus}
               showDetails={true}
             />
           )}
@@ -50,8 +52,8 @@ export default function UpdateStackDialog({
             <h3 className="font-medium text-amber-900 mb-2">What will happen:</h3>
             <ul className="text-sm text-amber-800 space-y-1 list-disc list-inside">
               <li>The stack will be stopped if running</li>
-              <li>A snapshot of your databases and config will be taken first</li>
-              <li>If the build fails, the stack will automatically roll back to that snapshot</li>
+              <li>A restore checkpoint of databases, config, and current server images is taken first</li>
+              <li>If the build fails, the stack will automatically roll back to that checkpoint</li>
               <li>Latest code will be pulled from GitHub</li>
               {updateStatus.isCoreOutdated && (
                 <li>AzerothCore will be updated to latest commit</li>
@@ -61,8 +63,10 @@ export default function UpdateStackDialog({
                   {updateStatus.outdatedModuleCount} module{updateStatus.outdatedModuleCount > 1 ? 's' : ''} will be updated
                 </li>
               )}
-              <li>The stack will be rebuilt (this may take 10-30 minutes)</li>
-              <li>You can restart the stack after the build completes</li>
+              <li>The stack will be rebuilt from source (this may take 10–30 minutes)</li>
+              <li>
+                You can restore the checkpoint from Overview or Revisions if the live realm breaks
+              </li>
             </ul>
           </div>
 
@@ -72,10 +76,21 @@ export default function UpdateStackDialog({
             disabled={isUpdating}
           />
 
-          <div className="rounded-md bg-red-50 border border-red-200 p-4">
+          <div className="rounded-md bg-red-50 border border-red-200 p-4 space-y-2">
             <p className="text-sm text-red-800 font-medium">
-              ⚠️ Warning: This will restart your server. Active players will be disconnected.
+              A successful update can still break the realm (SQL, modules, DBC, or config). Active
+              players will be disconnected.
             </p>
+            <label className="flex items-start gap-2 text-sm text-red-900">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-red-300 text-amber-600 focus:ring-amber-500"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                disabled={isUpdating}
+              />
+              <span>I understand this rebuilds the server and may break it</span>
+            </label>
           </div>
         </div>
 
@@ -89,7 +104,7 @@ export default function UpdateStackDialog({
           </button>
           <button
             onClick={() => onConfirm(configMigrationMode)}
-            disabled={isUpdating}
+            disabled={isUpdating || !acknowledged}
             className="flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
           >
             {isUpdating ? (

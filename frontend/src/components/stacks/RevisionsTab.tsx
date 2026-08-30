@@ -68,7 +68,7 @@ export default function RevisionsTab({ stackId }: { stackId: string }) {
     setNotice(null)
     try {
       await restoreRevision.mutateAsync(target.id)
-      setNotice('Revision restored. Restart the stack to apply.')
+      setNotice('Revision restored. Restart the stack to apply. Update stack will prompt again if newer versions exist.')
     } catch (err: unknown) {
       setNotice(errorMessage(err, 'Failed to restore revision.'))
     }
@@ -89,10 +89,11 @@ export default function RevisionsTab({ stackId }: { stackId: string }) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm text-gray-600 max-w-2xl">
-          Revisions are point-in-time snapshots of the world/auth/characters databases and the
-          server <code className="font-mono">.conf</code> files. One is captured automatically before
-          every <strong>Update</strong>. Restoring rolls the databases and config back; restart the
-          stack afterwards for changes to take effect.
+          Revisions are point-in-time snapshots of the world/auth/characters databases, the
+          server <code className="font-mono">.conf</code> files, and (for Update checkpoints)
+          the previous server images. One is captured automatically before every{' '}
+          <strong>Update</strong>. Restoring rolls databases, config, and those images back;
+          restart the stack afterwards. DBC, maps, and client MPQ overlays are not rolled back.
         </p>
         <button
           onClick={handleCreate}
@@ -201,8 +202,11 @@ export default function RevisionsTab({ stackId }: { stackId: string }) {
                 <p className="text-sm text-gray-600">
                   This drops and recreates the <strong>world</strong>, <strong>auth</strong>, and{' '}
                   <strong>characters</strong> databases from the snapshot taken on{' '}
-                  <strong>{formatTimestamp(confirmRestore.createdAt)}</strong>, and restores the
-                  server config files. Current data will be lost. Restart the stack afterwards.
+                  <strong>{formatTimestamp(confirmRestore.createdAt)}</strong>, restores the server
+                  config files, and puts back checkpoint server images when they were kept. Current
+                  data since that snapshot is lost. DBC, maps, and client MPQ overlays are not
+                  rolled back. Restart the stack afterwards. If this was an Update checkpoint, Update
+                  stack will be offered again when newer versions exist.
                 </p>
               </div>
             </div>

@@ -1,9 +1,10 @@
 namespace AzerothPlatform.Infrastructure.Data.Entities;
 
 /// <summary>
-/// A point-in-time snapshot of a stack's databases + configuration, taken before an update (or
-/// manually) so the operator can roll back if an update breaks something. The dump files live on
-/// disk under <c>{stackRoot}/revisions/{Id}/</c>; this row is the index/metadata.
+/// A point-in-time snapshot of a stack's databases, configuration, and (for pre-update) Docker
+/// image tags, taken before an update (or manually) so the operator can roll back if an update
+/// breaks something. The dump files live on disk under <c>{stackRoot}/revisions/{Id}/</c>; this
+/// row is the index/metadata.
 /// </summary>
 public class StackRevisionEntity
 {

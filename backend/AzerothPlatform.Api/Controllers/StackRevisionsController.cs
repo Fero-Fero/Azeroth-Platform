@@ -6,7 +6,7 @@ namespace AzerothPlatform.Api.Controllers;
 
 /// <summary>
 /// Manages a stack's point-in-time revisions (snapshots) under <c>api/stacks/{stackId}/revisions</c>:
-/// list, create manually, restore (rollback the databases + config), and delete.
+/// list, create manually, restore (rollback databases, config, and checkpoint images), and delete.
 /// </summary>
 [Authorize]
 [ApiController]
@@ -30,7 +30,7 @@ public class StackRevisionsController : ControllerBase
     public Task<IActionResult> Create(string stackId, CancellationToken cancellationToken)
         => StackFileApi.Execute(() => _revisions.CreateAsync(stackId, "manual", cancellationToken));
 
-    /// <summary>Restores the databases + config from a revision. Restart the stack afterwards.</summary>
+    /// <summary>Restores databases, config, and checkpoint images from a revision. Restart the stack afterwards.</summary>
     [HttpPost("{revisionId}/restore")]
     public Task<IActionResult> Restore(string stackId, string revisionId, CancellationToken cancellationToken)
         => StackFileApi.Execute(async () =>

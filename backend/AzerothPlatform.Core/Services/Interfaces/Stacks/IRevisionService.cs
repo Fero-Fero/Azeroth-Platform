@@ -4,7 +4,8 @@ namespace AzerothPlatform.Core.Services.Interfaces;
 
 /// <summary>
 /// Creates, lists, restores, and deletes point-in-time snapshots ("revisions") of a stack's
-/// databases and server configuration, so an update that breaks something can be rolled back.
+/// databases, server configuration, and (for pre-update checkpoints) Docker images, so an
+/// update that breaks something can be rolled back.
 /// </summary>
 public interface IRevisionService
 {
@@ -19,8 +20,16 @@ public interface IRevisionService
     Task<RevisionDto> CreateAsync(string stackId, string reason, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Restores a revision: drops and recreates the three AzerothCore databases from the dump and
-    /// restores the snapshotted .conf files. The caller should restart the stack afterwards.
+    /// Tags the stack's current Docker images as this revision's checkpoint so a later rebuild of
+    /// <c>:{stackId}</c> does not lose the previous binaries. Untags checkpoint images from older
+    /// pre-update revisions (SQL dumps for those revisions stay).
+    /// </summary>
+    Task PreserveCheckpointImagesAsync(string stackId, string revisionId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restores a revision: stops world/auth if they are up, drops and recreates the three
+    /// AzerothCore databases from the dump, restores snapshotted .conf files, retags checkpoint
+    /// images when present, writes version metadata back, and refreshes update-check flags.
     /// </summary>
     Task RestoreAsync(string stackId, string revisionId, CancellationToken cancellationToken = default);
 

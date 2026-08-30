@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Loader2, Wand2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, Wand2, XCircle } from 'lucide-react'
 import { CiBuildStatusBadge } from '@/components/stacks/CiBuildStatusBadge'
 import StackStatusItemRow from '@/components/stacks/StackStatusItemRow'
 import StackSetupOverview from '@/setup/StackSetupOverview'
@@ -10,6 +10,7 @@ import { formatBytes } from '@/components/docker/DockerDiskUsage'
 import { useArmoryJobContext } from '@/contexts/ArmoryJobContext'
 import { useLauncherBuildStatus } from '@/hooks/useLauncher'
 import { stackKeys } from '@/hooks/useStacks'
+import { useRevisions, useRestoreRevision } from '@/hooks/useServerFiles'
 import { apiErrorMessage, isSshConnectivityError, isStaleVpcProbeCache, isVpcProbeSlow } from '@/lib/utils'
 import { stackApi } from '@/services/api'
 import type { DockerDiskUsageDto } from '@/types/docker.types'
@@ -147,6 +148,18 @@ export default function StackOverviewStatusPanel({
     },
   })
 
+  const { data: revisions } = useRevisions(stack.stackId)
+  const restoreRevision = useRestoreRevision(stack.stackId)
+  const [confirmRestore, setConfirmRestore] = useState(false)
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null)
+
+  const latestCheckpoint = revisions
+    ?.filter((rev) => rev.reason === 'pre-update' && rev.status === 'ready')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+
+  const showCheckpoint =
+    !!latestCheckpoint && stack.status !== StackStatus.Building
+
   const emailNeedsSetup =
     stack.configuration.includeArmory !== false &&
     stack.configuration.armoryAccounts?.useEmailConfirmation &&
@@ -189,6 +202,7 @@ export default function StackOverviewStatusPanel({
     !launcherNotBuilt &&
     !emailNeedsSetup &&
     !showUpdates &&
+    !showCheckpoint &&
     !showArmoryRebuild &&
     !hasSetupSteps
   ) {
@@ -515,7 +529,94 @@ export default function StackOverviewStatusPanel({
             )}
           />
         )}
+
+        {showCheckpoint && latestCheckpoint && (
+          <StackStatusItemRow
+            id="update-checkpoint"
+            level="info"
+            title="Restore last update checkpoint"
+            summary={`Checkpoint from ${new Date(latestCheckpoint.createdAt).toLocaleString()}${
+              latestCheckpoint.coreCommitSha
+                ? ` (core ${formatSha(latestCheckpoint.coreCommitSha)})`
+                : ''
+            }.`}
+            details={
+              <div className="space-y-2">
+                <p>
+                  Restores databases, server config, and previous server images from before the last
+                  update. Live data since that checkpoint is discarded. DBC, maps, and client MPQ
+                  overlays are not rolled back.
+                </p>
+                {restoreNotice && <p className="text-blue-800">{restoreNotice}</p>}
+              </div>
+            }
+            action={
+              <button
+                type="button"
+                onClick={() => setConfirmRestore(true)}
+                disabled={restoreRevision.isPending}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {restoreRevision.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                Restore checkpoint
+              </button>
+            }
+          />
+        )}
       </div>
+
+      {confirmRestore && latestCheckpoint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-amber-500" />
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Restore update checkpoint?</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  This restores the world, auth, and characters databases, server config, and previous
+                  server images from{' '}
+                  <strong>{new Date(latestCheckpoint.createdAt).toLocaleString()}</strong>. Current
+                  live data since that checkpoint is lost. DBC, maps, and client MPQ overlays are
+                  not rolled back. After restore, Update stack will be offered again if newer
+                  versions exist.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmRestore(false)}
+                disabled={restoreRevision.isPending}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={restoreRevision.isPending}
+                onClick={async () => {
+                  setConfirmRestore(false)
+                  setRestoreNotice(null)
+                  try {
+                    await restoreRevision.mutateAsync(latestCheckpoint.id)
+                    setRestoreNotice('Checkpoint restored. Restart the stack to apply. Update stack will prompt again if newer versions exist.')
+                  } catch (err) {
+                    setRestoreNotice(apiErrorMessage(err, 'Failed to restore checkpoint.'))
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {restoreRevision.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Restore
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
