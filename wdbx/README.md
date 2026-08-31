@@ -30,11 +30,11 @@ For each `dbc/*.txt` file in a patch, the manager:
 
    ```bash
    docker run --rm -v <workdir>:/work azerothcore-wdbx:latest \
-     -import -f "<Name>.dbc" -b 12340 -c "<Name>.txt" -h true -u Update -i FixIds
+     -import -f "<Name>.dbc" -b 12340 -c "<Name>.txt" -h true -u Update -i TakeNewest
    ```
 
    - `-u Update` = "Update Existing"
-   - `-i FixIds` = "Fix Ids"
+   - `-i TakeNewest` = colliding IDs keep the CSV row
    - `-b 12340` = WotLK 3.3.5a build
 
    `-import` overwrites `<Name>.dbc` in place.

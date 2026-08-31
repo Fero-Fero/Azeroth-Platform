@@ -318,9 +318,9 @@ public sealed partial class MigrationService
                 }, cancellationToken);
             }
 
-            // 4) DBC pipeline. Direct .dbc files are staged into server_dbc first. A same-named CSV
-            //    (Spell.dbc + Spell.csv) is then imported onto that file (Update + TakeNewest). Other
-            //    CSVs compile onto a fresh export of the live worldserver DBCs (Update + FixIds). The
+            // 4) DBC pipeline. Direct .dbc files are staged into server_dbc first. CSVs then import
+            //    onto that baseline (Update + TakeNewest): a same-named pair (Spell.dbc + Spell.csv)
+            //    overlays the uploaded file; other CSVs overlay a fresh live worldserver export. The
             //    result is packaged into patch-D.MPQ and pushed to the server volume below.
             var updatedDbc = new List<string>();
             if (csvNeedsLiveBaseline)
@@ -1031,8 +1031,7 @@ public sealed partial class MigrationService
 
     /// <summary>
     /// Stages this patch's <c>.dbc</c> files into <c>server_dbc/</c>, then imports CSVs onto that
-    /// baseline. A same-named CSV uses Update + TakeNewest; others use Update + FixIds onto the live
-    /// export. Results are not pushed to the data volume here.
+    /// baseline with Update + TakeNewest. Results are not pushed to the data volume here.
     /// </summary>
     private async Task StagePatchDbcAsync(
         Data.Entities.ManagedStackEntity stack,
@@ -1068,12 +1067,11 @@ public sealed partial class MigrationService
             return;
         }
 
-        var overlayTables = DbcTableNames(dbcBinaryFiles);
         await RunStageAsync(compileStage, result, async () =>
         {
             AddLog(result, $"Compiling {dbcCsvFiles.Count} DBC CSV(s) for {patchKey}...");
             var compiled = await ApplyDbcAsync(
-                stack, stackRoot, patchKey, dbcCsvFiles, overlayTables, result, cancellationToken);
+                stack, stackRoot, patchKey, dbcCsvFiles, result, cancellationToken);
             foreach (var name in compiled)
             {
                 if (!updatedDbc.Exists(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase)))
@@ -1085,17 +1083,15 @@ public sealed partial class MigrationService
     }
 
     /// <summary>
-    /// Compiles the patch's CSVs onto the current <c>server_dbc/</c> files (promoting each result
-    /// back) and returns the names of the DBCs that were updated. Overlay tables (a matching .dbc in
-    /// this patch) use TakeNewest; others use FixIds. The updated DBCs are not pushed to the live
-    /// data volume here - that override runs after the SQL stage.
+    /// Compiles the patch's CSVs onto the current <c>server_dbc/</c> files with Update + TakeNewest
+    /// (promoting each result back) and returns the names of the DBCs that were updated. The updated
+    /// DBCs are not pushed to the live data volume here - that override runs after the SQL stage.
     /// </summary>
     private async Task<List<string>> ApplyDbcAsync(
         Data.Entities.ManagedStackEntity stack,
         string stackRoot,
         string patchKey,
         List<string> dbcTxtFiles,
-        IReadOnlySet<string> overlayTables,
         ApplyPatchResultDto result,
         CancellationToken cancellationToken)
     {
@@ -1140,12 +1136,10 @@ public sealed partial class MigrationService
                 File.Copy(baselineDbc, workDbc, overwrite: true);
                 await NormalizeToCrlfAsync(txtPath, workCsv, cancellationToken);
 
-                var table = DbcTableName(txtPath);
-                var idMode = overlayTables.Contains(table) ? "TakeNewest" : "FixIds";
-                AddLog(result, $"Importing {csvName} into {dbcName} (Update + {idMode})...");
+                AddLog(result, $"Importing {csvName} into {dbcName} (Update + TakeNewest)...");
 
                 var toolArgs =
-                    $"-import -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -c \"{csvName}\" -h true -u Update -i {idMode}";
+                    $"-import -f \"{dbcName}\" -b {_migrationOptions.WoWBuild} -c \"{csvName}\" -h true -u Update -i TakeNewest";
 
                 var run = await _remoteEngine.RunToolWithWorkVolumeAsync(
                     stack, workDir, _migrationOptions.WdbxImage, toolArgs, cancellationToken);
