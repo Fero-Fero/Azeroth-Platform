@@ -235,24 +235,6 @@ public sealed partial class MigrationService
         var hasDbcCsv = dbcCsvFiles.Count > 0;
         var hasDbcDirect = dbcBinaryFiles.Count > 0;
         var hasDbc = hasDbcCsv || hasDbcDirect;
-        if (hasDbc)
-        {
-            var swpMeta = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
-            if (swpMeta is not null && !patch.Index.IsExpansionBaseline)
-            {
-                var allowCsv = SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType);
-                if (hasDbcDirect || (hasDbcCsv && !allowCsv))
-                {
-                    result.Success = false;
-                    result.Error = hasDbcDirect
-                        ? $"{SwpDbcPolicy.BinaryLaterMessage} Patch '{patch.Key}' still has binary .dbc files."
-                        : $"{SwpDbcRestrictedException.DefaultMessage} Patch '{patch.Key}' still has files under dbc/.";
-                    activity?.SetStatus(ActivityStatusCode.Error, result.Error);
-                    _logger.LogWarning("Rejected apply of patch {PatchKey} on stack {StackId}: {Reason}", patch.Key, stackId, result.Error);
-                    return result;
-                }
-            }
-        }
 
         var hasSql = PatchHasSql(stackRoot, patch.Key);
         var hasMap = PatchHasMap(stackRoot, patch.Key);
@@ -767,22 +749,6 @@ public sealed partial class MigrationService
             {
                 var patch = plan.Patch;
                 var patchUpdated = new List<string>();
-
-                if (plan.DbcCsv.Count > 0 || plan.DbcBinary.Count > 0)
-                {
-                    var swpMeta = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patch.Key);
-                    if (swpMeta is not null && !patch.Index.IsExpansionBaseline)
-                    {
-                        var allowCsv = SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType);
-                        if (plan.DbcBinary.Count > 0 || (plan.DbcCsv.Count > 0 && !allowCsv))
-                        {
-                            throw new SwpDbcRestrictedException(
-                                plan.DbcBinary.Count > 0
-                                    ? $"{SwpDbcPolicy.BinaryLaterMessage} Patch '{patch.Key}' still has binary .dbc files."
-                                    : $"{SwpDbcRestrictedException.DefaultMessage} Patch '{patch.Key}' still has files under dbc/.");
-                        }
-                    }
-                }
 
                 await StagePatchDbcAsync(
                     stack, stackRoot, patch.Key, plan.DbcCsv, plan.DbcBinary, patchUpdated, result,

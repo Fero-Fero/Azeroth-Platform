@@ -152,7 +152,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                 initialSync: true,
                 new ProgressionSyncProgressStore(stackRoot),
                 cancellationToken,
-                allowCsvOnLaterTiers: SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType),
                 limitToPatchKeys: createdPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase));
         }
 
@@ -898,7 +897,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                     initialSync: false,
                     progressStore,
                     cancellationToken,
-                    allowCsvOnLaterTiers: SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType),
                     limitToPatchKeys: createdPatchKeys.ToHashSet(StringComparer.OrdinalIgnoreCase));
             }
 
@@ -908,8 +906,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                 result,
                 initialSync,
                 progressStore,
-                cancellationToken,
-                allowCsvOnLaterTiers: SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType));
+                cancellationToken);
 
             if (createdPatchKeys.Count > 0)
             {
@@ -937,8 +934,7 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
                     stackRoot,
                     log,
                     result,
-                    initialSync,
-                    SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType));
+                    initialSync);
                 var percent = 70 + (int)(20.0 * (i + 1) / mappingCount);
                 await progressStore.ReportAsync(
                     "Applying module mappings",
@@ -991,9 +987,8 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         ResolveOptionalFilesRequest request,
         CancellationToken cancellationToken = default)
     {
-        var stack = await EnsureModuleInstalledAsync(stackId, cancellationToken);
+        await EnsureModuleInstalledAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
-        var allowCsvOnLaterTiers = SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType);
         var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
         var result = new ProgressionSyncResultDto();
         var moduleRoot = Path.Combine(stackRoot, "azerothcore-wotlk", "modules", "mod-individual-progression");
@@ -1021,16 +1016,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
                 if (resolvedDir is not null && File.Exists(sourceFile))
                 {
-                    if (ShouldSkipNonBaselineDbc(
-                            stackRoot,
-                            resolvedDir,
-                            entry.FileName,
-                            allowCsvOnLaterTiers,
-                            result.Log))
-                    {
-                        continue;
-                    }
-
                     Directory.CreateDirectory(resolvedDir);
                     File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
                     result.CopiedFiles++;
@@ -1077,9 +1062,8 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         string source,
         CancellationToken cancellationToken = default)
     {
-        var stack = await EnsureModuleInstalledAsync(stackId, cancellationToken);
+        await EnsureModuleInstalledAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
-        var allowCsvOnLaterTiers = SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType);
         var log = await LoadSyncLogAsync(stackRoot, cancellationToken);
         var result = new ProgressionSyncResultDto();
 
@@ -1103,18 +1087,10 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
         if (resolvedDir is not null && File.Exists(sourceFile))
         {
-            if (!ShouldSkipNonBaselineDbc(
-                    stackRoot,
-                    resolvedDir,
-                    entry.FileName,
-                    allowCsvOnLaterTiers,
-                    result.Log))
-            {
-                Directory.CreateDirectory(resolvedDir);
-                File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
-                result.CopiedFiles = 1;
-                result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
-            }
+            Directory.CreateDirectory(resolvedDir);
+            File.Copy(sourceFile, Path.Combine(resolvedDir, entry.FileName), overwrite: true);
+            result.CopiedFiles = 1;
+            result.Log.Add($"Copied {entry.FileName} to {entry.Destination}.");
         }
         else
         {
@@ -1353,35 +1329,13 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         return (process.ExitCode, await outputTask, await errorTask);
     }
 
-    private static bool ShouldSkipNonBaselineDbc(
-        string stackRoot,
-        string destDir,
-        string fileName,
-        bool allowCsvOnLaterTiers,
-        ICollection<string> log)
-    {
-        if (!IsNonBaselineSwpDbcDestination(stackRoot, destDir))
-        {
-            return false;
-        }
-
-        if (SwpDbcPolicy.IsAllowedLaterTierFile(fileName, allowCsvOnLaterTiers))
-        {
-            return false;
-        }
-
-        log.Add(SwpDbcPolicy.SkipLog(fileName));
-        return true;
-    }
-
     private static void ProcessMappingEntry(
         ProgressionSyncMappingEntryDto entry,
         string moduleRoot,
         string stackRoot,
         ProgressionOptionalFilesLogDto log,
         ProgressionSyncResultDto result,
-        bool initialSync,
-        bool allowCsvOnLaterTiers)
+        bool initialSync)
     {
         var resolvedDestDir = ProgressionPatchFolderResolver.Resolve(stackRoot, entry.Destination);
         if (resolvedDestDir is null)
@@ -1409,11 +1363,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             foreach (var file in Directory.EnumerateFiles(sourceDir))
             {
                 var fileName = Path.GetFileName(file);
-                if (ShouldSkipNonBaselineDbc(stackRoot, resolvedDestDir, fileName, allowCsvOnLaterTiers, result.Log))
-                {
-                    continue;
-                }
-
                 var dirPart = Path.GetDirectoryName(sourcePath)?.Replace(Path.DirectorySeparatorChar, '/') ?? "";
                 var fileSourcePath = string.IsNullOrEmpty(dirPart) ? fileName : $"{dirPart}/{fileName}";
                 var destFile = Path.Combine(resolvedDestDir, fileName);
@@ -1429,11 +1378,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             }
 
             var fileName = Path.GetFileName(sourceFile);
-            if (ShouldSkipNonBaselineDbc(stackRoot, resolvedDestDir, fileName, allowCsvOnLaterTiers, result.Log))
-            {
-                return;
-            }
-
             var destFile = Path.Combine(resolvedDestDir, fileName);
             CopySyncFile(sourceFile, destFile, sourcePath, entry.Destination, fileName, entry.Optional, log, result);
         }
@@ -1505,7 +1449,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         bool initialSync,
         ProgressionSyncProgressStore progressStore,
         CancellationToken cancellationToken,
-        bool allowCsvOnLaterTiers,
         IReadOnlySet<string>? limitToPatchKeys = null)
     {
         var filesToCopy = new List<(string SourcePath, string DestDir, string FileName, string RelativePath)>();
@@ -1543,16 +1486,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
 
                     if (limitToPatchKeys is not null
                         && !PatchKeyMatchesLimit(stackRoot, resolvedDir, limitToPatchKeys))
-                    {
-                        continue;
-                    }
-
-                    if (ShouldSkipNonBaselineDbc(
-                            stackRoot,
-                            resolvedDir,
-                            Path.GetFileName(file),
-                            allowCsvOnLaterTiers,
-                            result.Log))
                     {
                         continue;
                     }
@@ -1609,30 +1542,5 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         var relative = Path.GetRelativePath(migrationsRoot, resolvedPath);
         var patchKey = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
         return limitToPatchKeys.Contains(patchKey);
-    }
-
-    internal static bool IsNonBaselineSwpDbcDestination(string stackRoot, string destDir)
-    {
-        var migrationsRoot = MigrationLayout.MigrationsRoot(stackRoot);
-        var relative = Path.GetRelativePath(migrationsRoot, destDir);
-        if (relative.StartsWith("..", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var patchKey = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
-        if (!PatchFolderNames.TryParse(patchKey, out var index, out _))
-        {
-            return false;
-        }
-
-        if (index.IsExpansionBaseline)
-        {
-            return false;
-        }
-
-        var normalized = destDir.Replace('\\', '/');
-        return normalized.Contains("/dbc/", StringComparison.OrdinalIgnoreCase)
-               || normalized.EndsWith("/dbc", StringComparison.OrdinalIgnoreCase);
     }
 }

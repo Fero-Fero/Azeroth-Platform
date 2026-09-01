@@ -1300,10 +1300,9 @@ public sealed partial class MigrationService : IMigrationService
     public async Task<PatchFileDto> UploadFileAsync(
         string stackId, string patchKey, string category, string fileName, Stream content, string? description = null, CancellationToken cancellationToken = default)
     {
-        var stack = await GetStackAsync(stackId, cancellationToken);
+        await GetStackAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         RequirePatch(stackRoot, patchKey);
-        await EnsureSwpAllowsDbcUploadAsync(stack, stackRoot, patchKey, category, fileName);
 
         // The "file name" may include a single container sub-folder for container categories,
         // e.g. "gems/Item.csv" (dbc) or "kalimdor/1234.map" (map).
@@ -1403,49 +1402,6 @@ public sealed partial class MigrationService : IMigrationService
         return string.IsNullOrEmpty(text) ? null : text;
     }
 
-    private async Task EnsureSwpAllowsDbcUploadAsync(
-        ManagedStackEntity stack,
-        string stackRoot,
-        string patchKey,
-        string category,
-        string fileName)
-    {
-        if (!IsDbcCategory(category))
-        {
-            return;
-        }
-
-        var metadata = await _serverWideProgression.ReadPatchMetadataAsync(stackRoot, patchKey);
-        if (metadata is null)
-        {
-            return;
-        }
-
-        if (!PatchFolderNames.TryParse(patchKey, out var index, out _))
-        {
-            return;
-        }
-
-        if (index.IsExpansionBaseline)
-        {
-            return;
-        }
-
-        if (SwpDbcPolicy.IsAllowedLaterTierFile(fileName, SwpDbcPolicy.AllowCsvOnLaterTiers(stack.ServerType)))
-        {
-            return;
-        }
-
-        throw new SwpDbcRestrictedException(
-            SwpDbcPolicy.IsBinary(fileName)
-                ? SwpDbcPolicy.BinaryLaterMessage
-                : SwpDbcRestrictedException.DefaultMessage);
-    }
-
-    internal static bool IsDbcCategory(string category) =>
-        string.Equals(category, "dbc", StringComparison.OrdinalIgnoreCase)
-        || category.StartsWith("dbc/", StringComparison.OrdinalIgnoreCase);
-
     public async Task<string> ReadDbcFileAsync(string stackId, string patchKey, string fileName, CancellationToken cancellationToken = default)
     {
         await GetStackAsync(stackId, cancellationToken);
@@ -1463,10 +1419,9 @@ public sealed partial class MigrationService : IMigrationService
 
     public async Task SaveDbcFileAsync(string stackId, string patchKey, string fileName, string content, CancellationToken cancellationToken = default)
     {
-        var stack = await GetStackAsync(stackId, cancellationToken);
+        await GetStackAsync(stackId, cancellationToken);
         var stackRoot = GetStackRoot(stackId);
         RequirePatch(stackRoot, patchKey);
-        await EnsureSwpAllowsDbcUploadAsync(stack, stackRoot, patchKey, "dbc", fileName);
 
         var (path, _, _) = ResolveCategoryFile(stackRoot, patchKey, "dbc", fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

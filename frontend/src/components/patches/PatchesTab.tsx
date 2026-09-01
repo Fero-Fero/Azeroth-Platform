@@ -475,11 +475,6 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
     newKind !== 'expansion' || !expansionPatchExists
   const hasAppliedPatches =
     (overview?.currentLevel ?? 0) > 0 || (overview?.patches ?? []).some((patch) => patch.status === 'Applied')
-  const isLaterSwpTier = Boolean(
-    detail?.progression && selectedSummary && !isExpansionBaselineIndex(selectedSummary.index)
-  )
-  const hideLaterTierDbc = isLaterSwpTier && hideValidatePatches
-  const laterTierTextDbcOnly = isLaterSwpTier && !hideValidatePatches
   const selectedPatchApplied = selectedSummary?.status === 'Applied'
   const canDeleteSelectedPatch = !!selectedKey && !selectedPatchApplied && !isApplying
   const effectiveImportMode: ImportPatchCollectionMode =
@@ -1949,40 +1944,25 @@ Flat layout also works:
                 onUploadItems={(items) => handleContainerUpload('sql/characters', items)}
                 onDelete={(fileName) => handleDelete('sql/characters', fileName)}
               />
-              {hideLaterTierDbc ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  DBC belongs on expansion baselines (1.0 / 2.0 / 3.0). Later Express progression
-                  tiers are SQL / map / MPQ / conf only.
-                </div>
-              ) : (
-                <ContainerFileCategory
-                  title={laterTierTextDbcOnly ? 'DBC (CSV / .txt)' : 'DBC (CSV / .txt / .dbc)'}
-                  accept={laterTierTextDbcOnly ? '.txt,.csv' : '.txt,.csv,.dbc'}
-                  collapseStorageKey={sectionCollapseKey('dbc')}
-                  files={filesByCategory['dbc'] ?? []}
-                  uploading={uploadingCategory === 'dbc'}
-                  error={errorFor('dbc')}
-                  notice={
-                    laterTierTextDbcOnly ? (
-                      <span>
-                        Later patches merge CSV and .txt onto the expansion-baseline DBC. Binary{' '}
-                        <span className="font-mono">.dbc</span> files belong on 1.0 / 2.0 / 3.0
-                        only.
-                      </span>
-                    ) : (
-                      <span>
-                        A matching CSV (for example{' '}
-                        <span className="font-mono">Spell.dbc</span> +{' '}
-                        <span className="font-mono">Spell.csv</span>) is imported onto that DBC
-                        (Update + Take newest), then published to client and server.
-                      </span>
-                    )
-                  }
-                  onUploadItems={(items) => handleContainerUpload('dbc', items)}
-                  onDelete={(fileName) => handleDelete('dbc', fileName)}
-                  onEdit={(fileName) => setEditFile(fileName)}
-                />
-              )}
+              <ContainerFileCategory
+                title="DBC (CSV / .txt / .dbc)"
+                accept=".txt,.csv,.dbc"
+                collapseStorageKey={sectionCollapseKey('dbc')}
+                files={filesByCategory['dbc'] ?? []}
+                uploading={uploadingCategory === 'dbc'}
+                error={errorFor('dbc')}
+                notice={
+                  <span>
+                    A matching CSV (for example{' '}
+                    <span className="font-mono">Spell.dbc</span> +{' '}
+                    <span className="font-mono">Spell.csv</span>) is imported onto that DBC
+                    (Update + Take newest), then published to client and server.
+                  </span>
+                }
+                onUploadItems={(items) => handleContainerUpload('dbc', items)}
+                onDelete={(fileName) => handleDelete('dbc', fileName)}
+                onEdit={(fileName) => setEditFile(fileName)}
+              />
               <ContainerFileCategory
                 title="Maps"
                 collapseStorageKey={sectionCollapseKey('map')}

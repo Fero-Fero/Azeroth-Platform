@@ -416,10 +416,6 @@ public class MigrationsController : ControllerBase
         {
             return new BadRequestObjectResult(new { error = ex.Message });
         }
-        catch (SwpDbcRestrictedException ex)
-        {
-            return new ConflictObjectResult(new { error = ex.Message });
-        }
         catch (InvalidOperationException ex)
         {
             return new BadRequestObjectResult(new { error = ex.Message });

@@ -3,7 +3,6 @@ using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Services.Patches;
 using AzerothPlatform.Infrastructure.Services.Modules.Install;
 using AzerothPlatform.Infrastructure.Services.Modules.Install.Hooks;
-using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using AzerothPlatform.Tests.TestSupport;
 using FluentAssertions;
 using Xunit;
@@ -263,7 +262,7 @@ public sealed class PatchIndexExpansionBaselineTests
     [InlineData("1.0")]
     [InlineData("2.0")]
     [InlineData("3.0")]
-    public void Expansion_baselines_are_allowed_for_swp_dbc(string raw)
+    public void Expansion_baselines_parse_as_baseline(string raw)
     {
         PatchIndex.Parse(raw).IsExpansionBaseline.Should().BeTrue();
     }
@@ -302,36 +301,6 @@ public sealed class InstalledModulesLayoutTests
         finally
         {
             Directory.Delete(root, recursive: true);
-        }
-    }
-}
-
-public sealed class SwpDbcDestinationTests
-{
-    [Fact]
-    public void Dbc_on_1_1_is_restricted_and_1_0_is_not()
-    {
-        var stackRoot = Path.Combine(Path.GetTempPath(), "azp-swpdbc-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var later = Path.Combine(
-                MigrationLayout.MigrationsRoot(stackRoot),
-                PatchFolderNames.Format(PatchIndex.Parse("1.1"), "naxx"),
-                "dbc");
-            ServerWideProgressionService.IsNonBaselineSwpDbcDestination(stackRoot, later).Should().BeTrue();
-
-            var baseline = Path.Combine(
-                MigrationLayout.MigrationsRoot(stackRoot),
-                PatchFolderNames.Format(new PatchIndex(1, 0, explicitSub1: true), "start"),
-                "dbc");
-            ServerWideProgressionService.IsNonBaselineSwpDbcDestination(stackRoot, baseline).Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(stackRoot))
-            {
-                Directory.Delete(stackRoot, recursive: true);
-            }
         }
     }
 }
