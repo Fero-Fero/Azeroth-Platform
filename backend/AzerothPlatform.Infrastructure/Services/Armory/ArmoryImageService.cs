@@ -362,7 +362,7 @@ public sealed class ArmoryImageService : IArmoryImageService
         // path (workPath); host translation applies only to bind mounts, which the daemon resolves.
         // Passing a host path here yields "path not found".
         _logger.LogInformation("Building armory image {Image} from {Context}...", imageName, workPath);
-        var (exitCode, _, stderr) = await RunAsync("docker", $"build -t {imageName} \"{workPath}\"", cancellationToken);
+        var (exitCode, _, stderr) = await RunAsync("docker", $"build --force-rm -t {imageName} \"{workPath}\"", cancellationToken);
         if (exitCode != 0)
         {
             throw new InvalidOperationException($"Armory image build failed (exit {exitCode}): {stderr}");

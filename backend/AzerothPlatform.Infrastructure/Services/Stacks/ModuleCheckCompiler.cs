@@ -77,6 +77,7 @@ internal sealed class ModuleCheckCompiler
             var (exit, _, err) = await RunDockerAsync(
                 [
                     "build",
+                    "--force-rm",
                     "-t", ImageName,
                     "--label", ImageLabel,
                     "--label", $"{DockerfileShaLabel}={dockerfileSha}",

@@ -1898,9 +1898,11 @@ public sealed class BuildService : IBuildService
 
             // Get the appropriate docker compose command
             var (command, argPrefix) = DockerComposeHelper.GetDockerCompose(_dockerOptions.ComposeCommand);
+            // Classic-builder RUN containers stay behind after a failed or cancelled compile unless
+            // --force-rm is set. buildx_buildkit_default is a BuildKit builder and is not created here.
             var composeArgs = string.IsNullOrEmpty(argPrefix)
-                ? $"build --build-arg CTOOLS_BUILD={ModuleCompileEnvironment.StackToolsBuild}"
-                : $"{argPrefix} build --build-arg CTOOLS_BUILD={ModuleCompileEnvironment.StackToolsBuild}";
+                ? $"build --force-rm --build-arg CTOOLS_BUILD={ModuleCompileEnvironment.StackToolsBuild}"
+                : $"{argPrefix} build --force-rm --build-arg CTOOLS_BUILD={ModuleCompileEnvironment.StackToolsBuild}";
 
             // Build the default (non-profiled) services: db-import, worldserver, authserver, and
             // client-data. `ac-client-data-init` (target client-data) IS required - it populates the
@@ -1938,6 +1940,10 @@ public sealed class BuildService : IBuildService
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Failed to build Docker images: {ex.Message}", ex);
+        }
+        finally
+        {
+            await RemoveClassicBuilderLeftoversAsync(stackId, CancellationToken.None);
         }
 
         await AddLogAsync(stackId, "All Docker images are ready");
@@ -1980,11 +1986,78 @@ public sealed class BuildService : IBuildService
         await RunProcessArgsAsync(
             stackId,
             engine,
-            ["build", "-t", image, "-f", dockerfile, context],
+            ["build", "--force-rm", "-t", image, "-f", dockerfile, context],
             buildPath,
             cancellationToken);
 
         await AddLogAsync(stackId, "LLM Chatter bridge image built.");
+    }
+
+    /// <summary>
+    /// Removes exited classic-builder compile leftovers (<c>cmake /azerothcore</c> RUN containers).
+    /// Running compile containers are left alone so a concurrent stack build is not killed.
+    /// <c>buildx_buildkit_default</c> is never matched.
+    /// </summary>
+    private async Task RemoveClassicBuilderLeftoversAsync(string stackId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var engine = File.Exists("/usr/bin/podman") ? "podman" : "docker";
+            var list = new ProcessStartInfo
+            {
+                FileName = engine,
+                Arguments = $"ps -a --filter status=exited --no-trunc --format \"{ClassicBuilderLeftovers.DockerPsFormat}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var listProcess = Process.Start(list);
+            if (listProcess is null)
+            {
+                return;
+            }
+
+            var stdout = await listProcess.StandardOutput.ReadToEndAsync(cancellationToken);
+            await listProcess.WaitForExitAsync(cancellationToken);
+            if (listProcess.ExitCode != 0)
+            {
+                return;
+            }
+
+            var ids = ClassicBuilderLeftovers.IdsToRemove(stdout);
+            if (ids.Count == 0)
+            {
+                return;
+            }
+
+            var rm = new ProcessStartInfo
+            {
+                FileName = engine,
+                Arguments = "rm " + string.Join(' ', ids),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var rmProcess = Process.Start(rm);
+            if (rmProcess is null)
+            {
+                return;
+            }
+
+            await rmProcess.WaitForExitAsync(cancellationToken);
+            if (rmProcess.ExitCode == 0)
+            {
+                await AddLogAsync(stackId, $"Removed {ids.Count} leftover compile container(s) from the image build.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to remove classic-builder leftover containers after stack {StackId} image build.", stackId);
+        }
     }
 
     private async Task<bool> VerifyImagesExistAsync(string stackId, string repoPath, CancellationToken cancellationToken)
@@ -2498,6 +2571,7 @@ public sealed class BuildService : IBuildService
         if (buildingStacks.Count > 0)
         {
             await dbContext.SaveChangesAsync(cancellationToken);
+            await RemoveClassicBuilderLeftoversAsync(buildingStacks[0].Id, CancellationToken.None);
         }
     }
 

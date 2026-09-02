@@ -20,7 +20,26 @@ internal static class GitExecutable
         startInfo.UseShellExecute = false;
         startInfo.CreateNoWindow = true;
         startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        // GitHub HTTP/2 git-upload-pack from the manager returns 401; git then asks for a username.
+        ApplyCliOverrides(startInfo);
         PrependMinGitDirectories(startInfo);
+    }
+
+    private static readonly string[] CliOverrides =
+        ["-c", "protocol.version=1", "-c", "http.version=HTTP/1.1"];
+
+    private static void ApplyCliOverrides(ProcessStartInfo startInfo)
+    {
+        if (!string.IsNullOrEmpty(startInfo.Arguments))
+        {
+            startInfo.Arguments = string.Join(' ', CliOverrides) + " " + startInfo.Arguments;
+            return;
+        }
+
+        foreach (var arg in CliOverrides)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
     }
 
     private static string Resolve()

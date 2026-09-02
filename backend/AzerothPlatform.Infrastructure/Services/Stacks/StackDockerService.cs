@@ -9,6 +9,7 @@ using AzerothPlatform.Infrastructure.Configuration;
 using AzerothPlatform.Infrastructure.Data;
 using AzerothPlatform.Infrastructure.Data.Entities;
 using AzerothPlatform.Infrastructure.Services.Patches;
+using AzerothPlatform.Infrastructure.Services.Stacks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -414,6 +415,7 @@ public sealed class StackDockerService : IStackDockerService
                 cancellationToken);
             result.RemovedImages += engineResult.RemovedImages;
             result.FreedBytes += engineResult.FreedBytes;
+            await RemoveClassicBuilderLeftoversAsync(contextArg, cancellationToken);
         }
 
         if (Directory.Exists(_buildsPath))
@@ -2833,6 +2835,50 @@ public sealed class StackDockerService : IStackDockerService
         return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
             ? parsed.ToUniversalTime()
             : null;
+    }
+
+    /// <summary>
+    /// Drops exited classic-builder compile leftovers. Does not touch running builds or
+    /// <c>buildx_buildkit_default</c>.
+    /// </summary>
+    private async Task RemoveClassicBuilderLeftoversAsync(string contextArg, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (exit, output, _) = await RunDockerAsync(
+                $"{contextArg}ps -a --filter status=exited --no-trunc --format \"{ClassicBuilderLeftovers.DockerPsFormat}\"",
+                cancellationToken);
+            if (exit != 0)
+            {
+                return;
+            }
+
+            var ids = ClassicBuilderLeftovers.IdsToRemove(output);
+            if (ids.Count == 0)
+            {
+                return;
+            }
+
+            var (rmExit, _, rmErr) = await RunDockerAsync($"{contextArg}rm {string.Join(' ', ids)}", cancellationToken);
+            if (rmExit == 0)
+            {
+                _logger.LogInformation(
+                    "Removed {Count} leftover classic-builder compile container(s){Context}.",
+                    ids.Count,
+                    DescribeDockerContextArg(contextArg));
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Failed to remove classic-builder leftover containers{Context}: {Err}",
+                    DescribeDockerContextArg(contextArg),
+                    rmErr);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to remove classic-builder leftover containers{Context}.", DescribeDockerContextArg(contextArg));
+        }
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunHostAsync(

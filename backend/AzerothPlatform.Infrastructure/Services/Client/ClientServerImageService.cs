@@ -105,7 +105,7 @@ public sealed class ClientServerImageService : IClientServerImageService
         _logger.LogInformation("Building client-server image {Image} from {Context}...", _options.ImageName, _options.WorkPath);
         var (exitCode, _, stderr) = await RunAsync(
             "docker",
-            $"{ContextArg(dockerContext)}build -t {_options.ImageName} -f \"{dockerfile}\" \"{_options.WorkPath}\"",
+            $"{ContextArg(dockerContext)}build --force-rm -t {_options.ImageName} -f \"{dockerfile}\" \"{_options.WorkPath}\"",
             cancellationToken);
         if (exitCode != 0)
         {

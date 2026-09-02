@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
@@ -20,6 +19,10 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
     private const string SyncLogFileName = "progression_sync_log.json";
     private const string ReferenceManifestFileName = "progression_reference_manifest.json";
     private const string ProgressionRepoUrl = "https://github.com/Fero-Fero/Azeroth-Platform-Progression";
+    private const string ProgressionRepoDefaultBranch = "master";
+    private const string ProgressionRepoExpressBranch = "express-server";
+    private const string IndividualProgressionRepoUrl = "https://github.com/Grimfeather/mod-individual-progression";
+    private const string IndividualProgressionBranch = "master";
     private const string MappingFileName = "mapping.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -1107,9 +1110,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
     private static string ResolveProgressionRepoDirectory(string stackRoot) =>
         ProgressionRepoPathResolver.Resolve(stackRoot);
 
-    private static bool IsGitRepository(string directory) =>
-        Directory.Exists(Path.Combine(directory, ".git"));
-
     private async Task<string?> EnsureIndividualProgressionModuleAsync(
         string moduleRoot,
         ProgressionSyncProgressStore progressStore,
@@ -1121,25 +1121,25 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
             return "mod-individual-progression is not present in the stack build. Rebuild the stack first.";
         }
 
-        if (!IsGitRepository(moduleRoot))
-        {
-            result.Log.Add("mod-individual-progression checkout is not a git repository; using existing module files.");
-            return null;
-        }
-
         await progressStore.ReportAsync(
             "Updating module",
             5,
             "Pulling latest mod-individual-progression changes…",
             cancellationToken);
 
-        var (exitCode, _, gitError) = await RunGitAsync("pull", moduleRoot, cancellationToken);
-        if (exitCode != 0)
+        var (changed, error) = await GitRepoSync.EnsureLatestAsync(
+            moduleRoot,
+            IndividualProgressionRepoUrl,
+            IndividualProgressionBranch,
+            cancellationToken);
+        if (error is not null)
         {
-            return $"Failed to update mod-individual-progression: {gitError}";
+            return $"Failed to update mod-individual-progression: {error}";
         }
 
-        result.Log.Add("Updated mod-individual-progression (git pull).");
+        result.Log.Add(changed
+            ? "Updated mod-individual-progression from GitHub."
+            : "mod-individual-progression already up to date.");
         return null;
     }
 
@@ -1151,65 +1151,31 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
     {
         var repoDir = ResolveProgressionRepoDirectory(stackRoot);
         var expressBranch = await IsExpressStackRootAsync(stackRoot, cancellationToken);
-
-        if (IsGitRepository(repoDir))
-        {
-            await progressStore.ReportAsync(
-                "Updating repository",
-                15,
-                "Pulling latest Azeroth-Platform-Progression changes…",
-                cancellationToken);
-
-            if (expressBranch)
-            {
-                var (checkoutExit, _, checkoutError) = await RunGitAsync(
-                    "checkout express-server",
-                    repoDir,
-                    cancellationToken);
-                if (checkoutExit != 0)
-                {
-                    return (repoDir, $"Failed to checkout express-server: {checkoutError}");
-                }
-            }
-
-            var (exitCode, _, gitError) = await RunGitAsync("pull", repoDir, cancellationToken);
-            if (exitCode != 0)
-            {
-                return (repoDir, $"Failed to update progression repo: {gitError}");
-            }
-
-            result.Log.Add("Updated Azeroth-Platform-Progression repository (git pull).");
-            await progressStore.ReportAsync(
-                "Loading mapping",
-                30,
-                "Updated Azeroth-Platform-Progression repository.",
-                cancellationToken);
-            return (repoDir, null);
-        }
+        var branch = expressBranch ? ProgressionRepoExpressBranch : ProgressionRepoDefaultBranch;
 
         await progressStore.ReportAsync(
-            "Cloning repository",
+            "Updating repository",
             15,
-            "Cloning Azeroth-Platform-Progression repository…",
+            "Pulling latest Azeroth-Platform-Progression changes…",
             cancellationToken);
 
-        Directory.CreateDirectory(repoDir);
-
-        var cloneArgs = expressBranch
-            ? $"clone --branch express-server --single-branch {ProgressionRepoUrl} ."
-            : $"clone {ProgressionRepoUrl} .";
-        var (cloneExit, _, cloneError) = await RunGitAsync(cloneArgs, repoDir, cancellationToken);
-
-        if (cloneExit != 0)
+        var (changed, error) = await GitRepoSync.EnsureLatestAsync(
+            repoDir,
+            ProgressionRepoUrl,
+            branch,
+            cancellationToken);
+        if (error is not null)
         {
-            return (repoDir, $"Failed to clone progression repo: {cloneError}");
+            return (repoDir, $"Failed to update progression repo: {error}");
         }
 
-        result.Log.Add("Cloned Azeroth-Platform-Progression repository.");
+        result.Log.Add(changed
+            ? "Updated Azeroth-Platform-Progression repository from GitHub."
+            : "Azeroth-Platform-Progression already up to date.");
         await progressStore.ReportAsync(
             "Loading mapping",
             30,
-            "Cloned Azeroth-Platform-Progression repository.",
+            "Updated Azeroth-Platform-Progression repository.",
             cancellationToken);
         return (repoDir, null);
     }
@@ -1303,30 +1269,6 @@ public sealed class ServerWideProgressionService : IServerWideProgressionService
         var path = SyncLogPath(stackRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return File.WriteAllTextAsync(path, JsonSerializer.Serialize(log, JsonOptions), cancellationToken);
-    }
-
-    private static async Task<(int ExitCode, string Output, string Error)> RunGitAsync(
-        string arguments,
-        string workingDirectory,
-        CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                Arguments = arguments,
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            }
-        };
-        GitExecutable.ApplyTo(process.StartInfo);
-
-        process.Start();
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return (process.ExitCode, await outputTask, await errorTask);
     }
 
     private static void ProcessMappingEntry(
