@@ -846,7 +846,7 @@ export default function PatchesTab({ stackId }: PatchesTabProps) {
   const reapplyStateFor = (key: string, status: PatchStatus): ReapplyState => {
     if (!reapplyingAll || status !== 'Applied') return null
     if (key === activePatchKey) return 'reapplying'
-    // No specific patch in the current phase (a global stage like extract-dbc/restart) → generic spinner.
+    // No specific patch in the current phase (a global stage like extract-dbc) → generic spinner.
     if (activeIndex === -1) return 'reapplying'
     return appliedOrder.indexOf(key) < activeIndex ? 'done' : 'queued'
   }
@@ -2146,8 +2146,9 @@ Flat layout also works:
                 <h3 className="text-lg font-semibold">Reapply all patches?</h3>
                 <p className="text-sm text-gray-600 mt-1">
                   This re-applies every applied patch (SQL, DBC, maps and MPQ) on top of the standard
-                  AzerothCore updates. It stops the world and auth servers, rebuilds the client DBC and
-                  MPQ content, then restarts the stack.
+                  AzerothCore updates. It starts the database if needed, stops the world and auth
+                  servers, rebuilds the client DBC and MPQ content, then shuts the database down. It
+                  does not start the stack.
                 </p>
                 <p className="text-sm font-medium text-gray-800 mt-2">
                   It runs in the background and cannot be cancelled once started.

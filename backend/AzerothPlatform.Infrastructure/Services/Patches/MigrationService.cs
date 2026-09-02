@@ -55,8 +55,6 @@ public sealed partial class MigrationService : IMigrationService
     private readonly IServerConfigService _serverConfig;
     private readonly IStackRegistryService _stackRegistry;
     private readonly ILauncherPortalService _launcherPortal;
-    private readonly IClientServerImageService _clientServerImage;
-    private readonly IStackImageShippingService _stackImageShipping;
     private readonly ClientServerOptions _clientServerOptions;
     private readonly ILogger<MigrationService> _logger;
 
@@ -71,8 +69,6 @@ public sealed partial class MigrationService : IMigrationService
         IServerConfigService serverConfig,
         IStackRegistryService stackRegistry,
         ILauncherPortalService launcherPortal,
-        IClientServerImageService clientServerImage,
-        IStackImageShippingService stackImageShipping,
         IOptions<ClientServerOptions> clientServerOptions,
         ILogger<MigrationService> logger)
     {
@@ -86,8 +82,6 @@ public sealed partial class MigrationService : IMigrationService
         _serverConfig = serverConfig;
         _stackRegistry = stackRegistry;
         _launcherPortal = launcherPortal;
-        _clientServerImage = clientServerImage;
-        _stackImageShipping = stackImageShipping;
         _clientServerOptions = clientServerOptions.Value;
         _logger = logger;
     }

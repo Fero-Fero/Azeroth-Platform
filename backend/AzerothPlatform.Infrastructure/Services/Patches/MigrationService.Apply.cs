@@ -6,7 +6,6 @@ using AzerothPlatform.ClientContent;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Data.Entities;
-using AzerothPlatform.Infrastructure.Services.Modules.Install;
 using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using Microsoft.Extensions.Logging;
 
@@ -256,6 +255,7 @@ public sealed partial class MigrationService
         activity?.SetTag("patch.has_mpq", hasMpq);
 
         var overallStopwatch = Stopwatch.StartNew();
+        var databaseBroughtUp = false;
         _logger.LogInformation(
             "Applying patch {PatchKey} (level {Level}) to stack {StackId}: {DbcCsv} DBC CSV, {DbcDirect} DBC direct, hasSql={HasSql}, hasMap={HasMap}, hasMpq={HasMpq} [trace {TraceId}]",
             patch.Key, patch.Level, stackId, dbcCsvFiles.Count, dbcBinaryFiles.Count, hasSql, hasMap, hasMpq, result.CorrelationId);
@@ -279,6 +279,7 @@ public sealed partial class MigrationService
                     AddLog(result, "Starting database...");
                     await RunComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
                     await WaitForDatabaseAsync(stackId, stack.StackName, stack.DatabaseRootPassword, result, cancellationToken);
+                    databaseBroughtUp = true;
                 }, cancellationToken);
             }
 
@@ -397,26 +398,14 @@ public sealed partial class MigrationService
             }
 
             // Apply config overrides from the patch's config/ directory (worldserver.json, etc.).
-            var configApplied = await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
-            var launcherApplied = await ApplyPatchLauncherThemeAsync(stackId, stack, stackRoot, patch.Key, result, cancellationToken);
+            await ApplyPatchConfigOverridesAsync(stackRoot, patch.Key, result, cancellationToken);
+            await ApplyPatchLauncherThemeAsync(stackId, stack, stackRoot, patch.Key, result, cancellationToken);
             await ApplyPatchNewsAsync(stackId, stackRoot, patch.Key, result, cancellationToken);
 
             // Deploy Lua scripts from the patch's lua/ directory to the stack lua_scripts root.
-            var luaApplied = await ApplyPatchLuaScriptsAsync(stackRoot, patch.Key, result, cancellationToken);
+            await ApplyPatchLuaScriptsAsync(stackRoot, patch.Key, result, cancellationToken);
 
-            // Restart the stack (bring world/auth back up, and the client-server if this patch
-            // changed client content) so a later rescan has a running container to exec into.
             var needsClientRescan = hasDbc || hasMpq || hasMpqRemovals;
-            if (needsServerStop || configApplied || launcherApplied || luaApplied || needsClientRescan)
-            {
-                await RunStageAsync("restart", result, async () =>
-                {
-                    await BringStackBackAfterPatchAsync(stackId, stack, repoPath, result, cancellationToken);
-                }, cancellationToken);
-            }
-
-            // Rescan after restart. Express stops the stack before applying patch 1.0, so exec
-            // into the client-server container cannot run until compose is up again.
             if (needsClientRescan)
             {
                 await RunStageAsync("rescan", result,
@@ -460,92 +449,45 @@ public sealed partial class MigrationService
             result.Success = false;
             result.Error = ex.Message;
             AddLog(result, $"ERROR: {ex.Message}");
-
-            // Best-effort: bring the stack back up so a failed apply does not leave it stopped.
-            await RestartAfterFailureAsync(stackId, stack, repoPath, result);
+        }
+        finally
+        {
+            if (databaseBroughtUp)
+            {
+                await StopApplySupportContainersAsync(stackId, repoPath, result);
+            }
         }
 
         return result;
     }
 
-    private static bool ExpressSetupStillInProgress(ManagedStackEntity stack) =>
-        stack.ServerType == ServerType.Express
-        && stack.ExpressProvisionStatus is ExpressProvisionStatus.Running
-            or ExpressProvisionStatus.WaitingForClient;
-
     /// <summary>
-    /// After a patch mutates SQL/DBC/client files, bring services back. During Express Setup the
-    /// operator is told to press Start later — a full <c>compose up -d</c> would boot worldserver
-    /// (and keep restarting it against Ollama/init depends_on) before that.
+    /// Stops world/auth (so they are not left running without a database) and the database started
+    /// for SQL. Apply never brings the rest of the stack up.
     /// </summary>
-    private async Task BringStackBackAfterPatchAsync(
+    private async Task StopApplySupportContainersAsync(
         string stackId,
-        ManagedStackEntity stack,
-        string repoPath,
-        ApplyPatchResultDto result,
-        CancellationToken cancellationToken)
-    {
-        await EnsureClientImageBeforeComposeAsync(stack, result, cancellationToken);
-
-        if (ExpressSetupStillInProgress(stack))
-        {
-            AddLog(result, "Express Setup is still running; leaving world/auth stopped and starting only the client files service.");
-            await RunComposeAsync(stackId, "up -d --no-deps client", repoPath, cancellationToken);
-            return;
-        }
-
-        AddLog(result, "Restarting stack...");
-        await RunComposeAsync(stackId, "up -d", repoPath, cancellationToken);
-    }
-
-    /// <summary>
-    /// Builds the shared client-server image if the stack's engine is missing it. The image carries no
-    /// registry, so <c>compose up</c> would try to pull it and fail the whole restart, not just the
-    /// client service. Best-effort: a build failure is logged and compose still runs, so the operator
-    /// sees the build error instead of a misleading "pull access denied".
-    /// </summary>
-    private async Task EnsureClientImageBeforeComposeAsync(
-        ManagedStackEntity stack,
-        ApplyPatchResultDto result,
-        CancellationToken cancellationToken)
-    {
-        if (!stack.ClientEnabled)
-        {
-            return;
-        }
-
-        try
-        {
-            await _clientServerImage.EnsureImageAsync(dockerContext: null, cancellationToken);
-            await _stackImageShipping.ShipStackImagesAsync(
-                stack, includeArmory: false, includeClient: true, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not ensure the client-server image for stack {StackId}", stack.Id);
-            AddLog(result, $"WARNING: could not build the client file server image: {ex.Message}");
-        }
-    }
-
-    /// <summary>Best-effort stack restart after a failed apply/reapply, in its own trace span.</summary>
-    private async Task RestartAfterFailureAsync(
-        string stackId,
-        ManagedStackEntity stack,
         string repoPath,
         ApplyPatchResultDto result)
     {
-        using var activity = MigrationTelemetry.ActivitySource.StartActivity("migration.restart-after-failure", ActivityKind.Internal);
-        activity?.SetTag("stack.id", stackId);
+        using var activity = MigrationTelemetry.ActivitySource.StartActivity("migration.stage.database-down", ActivityKind.Internal);
+        _applyProgress?.Stage("database-down");
+        AddLog(result, "Stopping database...");
         try
         {
-            await BringStackBackAfterPatchAsync(stackId, stack, repoPath, result, CancellationToken.None);
-            AddLog(result, "Stack restarted after failure.");
-            _logger.LogInformation("Restarted stack {StackId} after patch failure", stackId);
+            await RunComposeAsync(
+                stackId,
+                "stop ac-worldserver ac-authserver ac-database",
+                repoPath,
+                CancellationToken.None);
+            AddLog(result, "Database stopped.");
+            activity?.SetStatus(ActivityStatusCode.Ok);
         }
-        catch (Exception restartEx)
+        catch (Exception ex)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, restartEx.Message);
-            _logger.LogError(restartEx, "Failed to restart stack {StackId} after patch failure", stackId);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            _logger.LogWarning(ex, "Failed to stop apply support containers for stack {StackId}", stackId);
+            AddLog(result, $"WARNING: could not stop the database: {ex.Message}");
         }
     }
 
@@ -595,6 +537,7 @@ public sealed partial class MigrationService
             return result;
         }
 
+        var databaseBroughtUp = false;
         try
         {
             await RunStageAsync("database-up", result, async () =>
@@ -602,6 +545,7 @@ public sealed partial class MigrationService
                 AddLog(result, "Starting database...");
                 await RunComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
                 await WaitForDatabaseAsync(stackId, stack.StackName, stack.DatabaseRootPassword, result, cancellationToken);
+                databaseBroughtUp = true;
             }, cancellationToken);
 
             await RunStageAsync("standard-updates", result,
@@ -615,6 +559,13 @@ public sealed partial class MigrationService
             result.Success = false;
             result.Error = ex.Message;
             AddLog(result, $"ERROR: {ex.Message}");
+        }
+        finally
+        {
+            if (databaseBroughtUp)
+            {
+                await StopApplySupportContainersAsync(stackId, repoPath, result);
+            }
         }
 
         return result;
@@ -703,6 +654,7 @@ public sealed partial class MigrationService
         }
 
         var overallStopwatch = Stopwatch.StartNew();
+        var databaseBroughtUp = false;
         _logger.LogInformation(
             "Reapplying {Count} patch(es) to stack {StackId} [trace {TraceId}]",
             appliedPatches.Count, stackId, result.CorrelationId);
@@ -718,6 +670,7 @@ public sealed partial class MigrationService
                 AddLog(result, "Starting database...");
                 await RunComposeAsync(stackId, "up -d ac-database", repoPath, cancellationToken);
                 await WaitForDatabaseAsync(stackId, stack.StackName, stack.DatabaseRootPassword, result, cancellationToken);
+                databaseBroughtUp = true;
             }, cancellationToken);
 
             // Apply standard AzerothCore updates first, so custom SQL is layered on top.
@@ -834,11 +787,10 @@ public sealed partial class MigrationService
             }
 
             // 5c) Apply config overrides from each patch's config/ directory in order.
-            var launcherApplied = false;
             foreach (var plan in plans)
             {
                 await ApplyPatchConfigOverridesAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
-                launcherApplied |= await ApplyPatchLauncherThemeAsync(
+                await ApplyPatchLauncherThemeAsync(
                     stackId, stack, stackRoot, plan.Patch.Key, result, cancellationToken);
             }
 
@@ -848,14 +800,8 @@ public sealed partial class MigrationService
                 await ApplyPatchLuaScriptsAsync(stackRoot, plan.Patch.Key, result, cancellationToken);
             }
 
-            // 6) Restart the stack so the worldserver reloads the pushed DBCs and the client-server is up.
-            await RunStageAsync("restart", result, async () =>
-            {
-                await BringStackBackAfterPatchAsync(stackId, stack, repoPath, result, cancellationToken);
-            }, cancellationToken);
-
-            // 7) Rescan the client-server manifest LAST (once the container is up) so clients are pinged
-            //    to pull the rebuilt patch-D and republished MPQ overlay.
+            // Overlay is already on the volume. Rescan only if the client container is already running;
+            // next start rebuilds the manifest from disk.
             if (anyClientContent)
             {
                 await RunStageAsync("rescan", result,
@@ -880,8 +826,13 @@ public sealed partial class MigrationService
             result.Success = false;
             result.Error = ex.Message;
             AddLog(result, $"ERROR: {ex.Message}");
-
-            await RestartAfterFailureAsync(stackId, stack, repoPath, result);
+        }
+        finally
+        {
+            if (databaseBroughtUp)
+            {
+                await StopApplySupportContainersAsync(stackId, repoPath, result);
+            }
         }
 
         return result;
@@ -1845,9 +1796,14 @@ public sealed partial class MigrationService
             return;
         }
 
-        AddLog(result, "Rescanning client-server manifest...");
-
         var container = $"{ContainerPrefix(stack.Id, stack.StackName)}-client";
+        if (!await IsContainerRunningAsync(container, cancellationToken))
+        {
+            AddLog(result, "Client-server is not running; skipping manifest rescan (it rebuilds on next start).");
+            return;
+        }
+
+        AddLog(result, "Rescanning client-server manifest...");
         var port = _clientServerOptions.ContainerPort;
 
         // Exec curl inside the container against its own loopback. Auth uses the container's
@@ -1984,6 +1940,18 @@ public sealed partial class MigrationService
             throw new InvalidOperationException(
                 $"{command} {fullArgs} failed: {(string.IsNullOrWhiteSpace(run.StdErr) ? run.StdOut : run.StdErr)}");
         }
+    }
+
+    private async Task<bool> IsContainerRunningAsync(string container, CancellationToken cancellationToken)
+    {
+        var inspect = await RunProcessAsync(
+            "docker",
+            $"{_engineContextArg}inspect -f \"{{{{.State.Running}}}}\" {container}",
+            workingDirectory: null,
+            stdin: null,
+            cancellationToken);
+        return inspect.ExitCode == 0
+            && inspect.StdOut.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task WaitForDatabaseAsync(

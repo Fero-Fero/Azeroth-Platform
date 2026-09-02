@@ -179,8 +179,6 @@ public sealed class PatchDeleteTests
             serverConfig.Object,
             stackRegistry.Object,
             new Mock<ILauncherPortalService>().Object,
-            new Mock<IClientServerImageService>().Object,
-            new Mock<IStackImageShippingService>().Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

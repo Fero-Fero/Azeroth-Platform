@@ -346,8 +346,6 @@ public sealed class PatchCollectionMergeImportTests
             serverConfig.Object,
             stackRegistry.Object,
             new Mock<ILauncherPortalService>().Object,
-            new Mock<IClientServerImageService>().Object,
-            new Mock<IStackImageShippingService>().Object,
             clientServer,
             NullLogger<MigrationService>.Instance);
     }

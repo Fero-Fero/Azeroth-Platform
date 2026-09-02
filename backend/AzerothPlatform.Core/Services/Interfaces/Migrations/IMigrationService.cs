@@ -99,15 +99,18 @@ public interface IMigrationService
     /// </summary>
     void SetApplyProgress(IApplyProgressSink? sink);
 
-    /// <summary>Applies a patch. Must be the next incremental patch after the current level.</summary>
+    /// <summary>
+    /// Applies a patch. Must be the next incremental patch after the current level. Starts the
+    /// database when SQL runs, then stops it (and world/auth) afterwards. Does not start the stack.
+    /// </summary>
     Task<ApplyPatchResultDto> ApplyPatchAsync(string stackId, string patchKey, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Re-applies the full content of every already-applied patch (level 1..current), in order, on top
     /// of the standard AzerothCore updates: the DBC set is fetched once from the server, each patch's
     /// DBC CSVs and SQL and maps are (re)applied cumulatively, then patch-D.MPQ is rebuilt and all DBCs
-    /// and MPQ overlay files are re-published to clients. Use after a core update/rebuild may have
-    /// overwritten custom SQL/DBC/MPQ content.
+    /// and MPQ overlay files are re-published to clients. Does not start the stack. Use after a core
+    /// update/rebuild may have overwritten custom SQL/DBC/MPQ content.
     /// </summary>
     Task<ApplyPatchResultDto> ReapplyAllAsync(string stackId, CancellationToken cancellationToken = default);
 
