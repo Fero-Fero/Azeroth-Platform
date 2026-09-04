@@ -6,6 +6,7 @@ using AzerothPlatform.ClientContent;
 using AzerothPlatform.Core.Contracts;
 using AzerothPlatform.Core.Services.Interfaces;
 using AzerothPlatform.Infrastructure.Data.Entities;
+using AzerothPlatform.Infrastructure.Services.Modules.Install;
 using AzerothPlatform.Infrastructure.Services.ServerWideProgression;
 using Microsoft.Extensions.Logging;
 
