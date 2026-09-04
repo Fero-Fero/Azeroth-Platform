@@ -104,7 +104,7 @@ body:
     id: platform_version
     attributes:
       label: Platform version
-      description: Image tag, git commit, or how you installed (e.g. `install-platform.bat` from main, a release tag, a local build).
+      description: Image tag, git commit, or how you installed (e.g. `setup and commands/1_install-platform.bat` from main, a release tag, a local build).
       placeholder: main @ abc1234 / azeroth-platform:latest / vX.Y
 
   - type: dropdown

@@ -5,17 +5,18 @@
 
 .DESCRIPTION
   Runs `docker compose up -d --build` from the repository root. Docker Desktop must already be
-  installed and running (use install-platform.bat if it is not).
+  installed and running (use 1_install-platform.bat if it is not).
 #>
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ScriptDir)) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
+$RepoRoot = Split-Path -Parent $ScriptDir
 Set-Location -LiteralPath $RepoRoot
 
 function Get-DockerCli {
@@ -56,7 +57,7 @@ if (-not (Test-Path -LiteralPath $composeFile)) {
 Add-DockerToPath
 $docker = Get-DockerCli
 if (-not $docker) {
-    throw "docker.exe was not found. Install Docker Desktop with install-platform.bat, then try again."
+    throw "docker.exe was not found. Install Docker Desktop with 0_setup-docker.bat or 1_install-platform.bat, then try again."
 }
 
 & $docker info --format '{{.ServerVersion}}' 1>$null 2>$null

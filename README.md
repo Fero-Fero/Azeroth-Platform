@@ -44,12 +44,12 @@ secrets at rest.
 ## Get started
 
 **New to this, Windows only, Express Setup:** follow **[README.simple.md](./README.simple.md)**
-(download the folder, double-click `install-platform.bat`, then Create Stack → Express Setup).
+(download the folder, double-click `setup and commands/1_install-platform.bat`, then Create Stack → Express Setup).
 
-**Windows (Express / local):** clone this repo, then double-click `install-platform.bat`. It installs
+**Windows (Express / local):** clone this repo, then double-click `setup and commands/1_install-platform.bat`. It installs
 the latest Docker Desktop if needed, copies `.env`, and runs `docker compose up -d --build`. When it
-finishes, double-click `open-manager.bat` (or open **https://localhost/admin**), log in, and create a stack with **Express Setup**. Later,
-`update-platform.bat` pulls GitHub `main` (Git for Windows is optional), and `restart-platform.bat` rebuilds with
+finishes, double-click `setup and commands/open-manager.bat` (or open **https://localhost/admin**), log in, and create a stack with **Express Setup**. Later,
+`setup and commands/update-platform.bat` pulls GitHub `main` (Git for Windows is optional), and `setup and commands/restart-platform.bat` rebuilds with
 `docker compose up -d --build`.
 
 **Linux / macOS:**

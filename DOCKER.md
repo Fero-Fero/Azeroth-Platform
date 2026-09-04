@@ -20,9 +20,10 @@ host `data/` directory to create.
 
 ### 2. Build and run with Docker Compose
 
-On Windows you can skip the manual Docker install: double-click `install-platform.bat` in the repo
-root. It installs Docker Desktop if needed, then runs the compose build below. After that,
-`update-platform.bat` pulls GitHub `main` (downloads portable Git if needed), and `restart-platform.bat` runs
+On Windows you can skip the manual Docker install: double-click `setup and commands/1_install-platform.bat`.
+It installs Docker Desktop if needed, then runs the compose build below. After that,
+`setup and commands/update-platform.bat` pulls GitHub `main` (downloads portable Git if needed), and
+`setup and commands/restart-platform.bat` runs
 `docker compose up -d --build`.
 
 ```bash

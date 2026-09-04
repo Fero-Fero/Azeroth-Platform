@@ -25,10 +25,11 @@ param(
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RepoRoot = $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ScriptDir)) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
+$RepoRoot = Split-Path -Parent $ScriptDir
 Set-Location -LiteralPath $RepoRoot
 
 function Write-Step {
@@ -160,7 +161,7 @@ function Enable-WslFeatures {
     if ($restartNeeded) {
         Write-Host ""
         Write-Host "Windows needs a restart to finish enabling WSL 2." -ForegroundColor Yellow
-        Write-Host "Restart this PC, then run install-platform.bat again." -ForegroundColor Yellow
+        Write-Host "Restart this PC, then run 1_install-platform.bat again." -ForegroundColor Yellow
         exit 2
     }
 }
@@ -222,7 +223,7 @@ function Start-DockerEngine {
 
     throw @"
 Docker Desktop is installed but the engine did not become ready in time.
-Open Docker Desktop from the Start menu, wait until the whale icon is idle, then run install-platform.bat again.
+Open Docker Desktop from the Start menu, wait until the whale icon is idle, then run 1_install-platform.bat again.
 If this is the first install, Windows may also ask you to log off once so your account can use Docker.
 "@
 }
@@ -303,7 +304,7 @@ Write-Host "Repo: $RepoRoot"
 
 $composeFile = Join-Path $RepoRoot 'docker-compose.yml'
 if (-not (Test-Path -LiteralPath $composeFile)) {
-    throw "docker-compose.yml not found. Run this script from the Azeroth Platform repo (or double-click install-platform.bat there)."
+    throw "docker-compose.yml not found. Run this script from the Azeroth Platform repo (or double-click 1_install-platform.bat in setup and commands)."
 }
 
 Add-DockerToPath

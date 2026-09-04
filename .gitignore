@@ -3,7 +3,7 @@
 .env.local
 .env.*.local
 
-# Portable MinGit used by update-platform.ps1 when Git for Windows is not installed
+# Portable MinGit used by setup and commands/update-platform.ps1 when Git for Windows is not installed
 /.tools/
 
 # Runtime data directory (stacks/builds/client), created at the repo root.

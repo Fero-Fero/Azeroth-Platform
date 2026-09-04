@@ -212,12 +212,12 @@ See [DOCKER.md](./DOCKER.md) for the full container/volume reference and endpoin
 Run the dashboard **and** your servers on the same computer. Ideal for a home server, a spare PC, or
 just trying things out.
 
-**Windows:** after cloning, double-click `install-platform.bat` (or run
-`powershell -ExecutionPolicy Bypass -File .\install-platform.ps1`). That installs Docker Desktop if
+**Windows:** after cloning, double-click `setup and commands/1_install-platform.bat` (or run
+`powershell -ExecutionPolicy Bypass -File ".\setup and commands\1_install-platform.ps1"`). That installs Docker Desktop if
 it is missing, waits until the engine is ready, creates `.env`, and builds the platform. Re-run the
-same script after a reboot if Windows asked you to restart for WSL 2. Later, `update-platform.bat`
+same script after a reboot if Windows asked you to restart for WSL 2. Later, `setup and commands/update-platform.bat`
 pulls GitHub `main` (Git for Windows is optional; a ZIP folder is attached to the repo on first
-update), and `restart-platform.bat` rebuilds with `docker compose up -d --build`. Then
+update), and `setup and commands/restart-platform.bat` rebuilds with `docker compose up -d --build`. Then
 skip to logging in below.
 
 ```bash

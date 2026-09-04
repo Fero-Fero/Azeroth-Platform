@@ -20,10 +20,11 @@ $ErrorActionPreference = 'Stop'
 $OriginUrl = 'https://github.com/Fero-Fero/AzerothPlatform.git'
 $GitHubApiHeaders = @{ 'User-Agent' = 'AzerothPlatform-update' }
 
-$RepoRoot = $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ScriptDir)) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
+$RepoRoot = Split-Path -Parent $ScriptDir
 Set-Location -LiteralPath $RepoRoot
 
 function Write-Step {

@@ -12,10 +12,11 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ScriptDir)) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
+$RepoRoot = Split-Path -Parent $ScriptDir
 
 function Get-SiteAddress {
     $envFile = Join-Path $RepoRoot '.env'

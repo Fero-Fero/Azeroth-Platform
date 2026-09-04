@@ -7,7 +7,7 @@ echo Azeroth Platform Windows installer
 echo This installs Docker Desktop if needed, then builds the platform.
 echo.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-platform.ps1" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp01_install-platform.ps1" %*
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

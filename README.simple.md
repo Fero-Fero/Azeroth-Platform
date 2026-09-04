@@ -48,7 +48,7 @@ You do **not** need to install Visual Studio, .NET, or Node yourself.
 2. Click the green **Code** button.
 3. Click **Download ZIP**.
 4. Unzip it somewhere easy to find, for example your Desktop.
-5. Open the unzipped folder until you see `install-platform.bat`.
+5. Open the unzipped folder, then open **setup and commands**, until you see `1_install-platform.bat`.
 
 A ZIP download is enough. The later **update** script can attach this folder to GitHub even if Git
 for Windows is not installed.
@@ -57,9 +57,11 @@ for Windows is not installed.
 
 ## 2. Install and start the platform (Windows)
 
+Helpers live in the **setup and commands** folder.
+
 1. Make sure Docker Desktop is **not** already half-installed and stuck. If you have never used
    Docker, you can ignore this.
-2. Double-click **`install-platform.bat`**.
+2. Double-click **`1_install-platform.bat`**.
 3. If Windows asks “Do you want to allow this app…?”, click **Yes**.
 4. The first run may:
    - turn on **WSL 2** (a Windows feature Docker needs)
@@ -68,22 +70,22 @@ for Windows is not installed.
    - need **virtualization** turned on (Docker cannot do this for you if it is off in the BIOS)
 5. If virtualization is off: open Task Manager (`Ctrl`+`Shift`+`Esc`) → **Performance** → **CPU**. If
    **Virtualization** says Disabled, turn it on in the BIOS/UEFI, then reboot and run
-   `install-platform.bat` again. Microsoft’s walkthrough (with per-brand BIOS steps):
+   `1_install-platform.bat` again. Microsoft’s walkthrough (with per-brand BIOS steps):
    [Enable virtualization on Windows](https://support.microsoft.com/windows/enable-virtualization-on-windows-c5578302-6e43-4b4b-a449-8ced115f58e1)
 6. If it asked you to restart: reboot, open the same folder, and double-click
-   `install-platform.bat` again.
+   `1_install-platform.bat` again.
 7. The first build often takes **10–20 minutes**. Let the black window finish.
 
 When it says the platform is up, you are ready to open the dashboard.
 
 **If Docker was already installed:** the installer will not rebuild for you. Open Docker Desktop,
-wait until the whale icon is idle, then double-click **`restart-platform.bat`**.
+wait until the whale icon is idle, then double-click **`restart-platform.bat`** in **setup and commands**.
 
 ---
 
 ## 3. Open the dashboard and sign in
 
-1. Double-click **`open-manager.bat`**, or in your browser go to **https://localhost/admin**
+1. Double-click **`open-manager.bat`** in **setup and commands**, or in your browser go to **https://localhost/admin**
 2. You will almost certainly see a scary page: **Your connection is not private** (Chrome) or
    similar. That is expected. The site uses a homemade certificate.
    - Chrome: **Advanced** → **Proceed to localhost**
@@ -147,9 +149,9 @@ Play on **this same PC**. Express is bound to this machine only (`127.0.0.1`).
 
 | You want to… | Do this |
 | --- | --- |
-| Play again tomorrow | Open **Docker Desktop**, wait until it is idle, double-click **`open-manager.bat`**, open your stack, click **Start** if it is stopped |
-| Update the platform | Double-click **`update-platform.bat`**, then **`restart-platform.bat`** |
-| Rebuild after a change | Double-click **`restart-platform.bat`** |
+| Play again tomorrow | Open **Docker Desktop**, wait until it is idle, double-click **`setup and commands/open-manager.bat`**, open your stack, click **Start** if it is stopped |
+| Update the platform | Double-click **`setup and commands/update-platform.bat`**, then **`setup and commands/restart-platform.bat`** |
+| Rebuild after a change | Double-click **`setup and commands/restart-platform.bat`** |
 | Stop using the PC’s extra CPU | In the dashboard, **Stop** the stack. You can quit Docker Desktop after that |
 
 Keep **Docker Desktop running** while you play. If Docker is closed, the server is closed.
@@ -159,7 +161,7 @@ Keep **Docker Desktop running** while you play. If Docker is closed, the server 
 ## If something goes wrong
 
 **The installer asked for a reboot.**  
-That is normal for first-time WSL / Docker. Reboot, then run `install-platform.bat` again.
+That is normal for first-time WSL / Docker. Reboot, then run `1_install-platform.bat` again.
 
 **Docker says virtualization is not enabled / “virtualization support not detected”.**  
 A script cannot turn this on. Check Task Manager (`Ctrl`+`Shift`+`Esc`) → **Performance** → **CPU**.
